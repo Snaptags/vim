@@ -447,7 +447,13 @@ static struct
     {VK_NUMPAD9,	'K', 'L'},
 
     /* Keys that we want to be able to use any modifier with: */
-    {VK_SPACE,		' ', NUL},
+    /* these mappings have been introduced to fix dead key handling https://github.com/vim/vim/issues/250 */
+    /* Unfortunately the SPACE-mapping conflicts with Neo2's MOD4+SPACE mapping, preventing the 0 to be printed.
+     * I don't have a smart idea on how to fix this for all users, so I just closed my issue https://github.com/vim/vim/issues/423
+     */
+    /* neo 2 hotfix begin */
+    // {VK_SPACE,		' ', NUL},
+    /* neo 2 hotfix end */
     {VK_TAB,		TAB, NUL},
     {VK_ESCAPE,		ESC, NUL},
     {NL,		NL, NUL},
