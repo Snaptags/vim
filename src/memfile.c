@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved	by Bram Moolenaar
  *
@@ -602,16 +602,7 @@ mf_sync(memfile_T *mfp, int flags)
 # ifdef HAVE_FSYNC
 	/*
 	 * most Unixes have the very useful fsync() function, just what we need.
-	 * However, with OS/2 and EMX it is also available, but there are
-	 * reports of bad problems with it (a bug in HPFS.IFS).
-	 * So we disable use of it here in case someone tries to be smart
-	 * and changes os_os2_cfg.h... (even though there is no __EMX__ test
-	 * in the #if, as __EMX__ does not have sync(); we hope for a timely
-	 * sync from the system itself).
 	 */
-#  if defined(__EMX__)
-   error "Don't use fsync with EMX! Read emxdoc.doc or emxfix01.doc for info."
-#  endif
 	if (STRCMP(p_sws, "fsync") == 0)
 	{
 	    if (fsync(mfp->mf_fd))
@@ -805,7 +796,7 @@ mf_release(memfile_T *mfp, int page_count)
     if (mfp->mf_fd < 0 && need_release && p_uc)
     {
 	/* find for which buffer this memfile is */
-	for (buf = firstbuf; buf != NULL; buf = buf->b_next)
+	FOR_ALL_BUFFERS(buf)
 	    if (buf->b_ml.ml_mfp == mfp)
 		break;
 	if (buf != NULL && buf->b_may_swap)
@@ -870,7 +861,7 @@ mf_release_all(void)
     bhdr_T	*hp;
     int		retval = FALSE;
 
-    for (buf = firstbuf; buf != NULL; buf = buf->b_next)
+    FOR_ALL_BUFFERS(buf)
     {
 	mfp = buf->b_ml.ml_mfp;
 	if (mfp != NULL)

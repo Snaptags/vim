@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved	by Bram Moolenaar
  *
@@ -4741,6 +4741,7 @@ fex_format(
     int		use_sandbox = was_set_insecurely((char_u *)"formatexpr",
 								   OPT_LOCAL);
     int		r;
+    char_u	*fex;
 
     /*
      * Set v:lnum to the first line number and v:count to the number of lines.
@@ -4750,16 +4751,22 @@ fex_format(
     set_vim_var_nr(VV_COUNT, count);
     set_vim_var_char(c);
 
+    /* Make a copy, the option could be changed while calling it. */
+    fex = vim_strsave(curbuf->b_p_fex);
+    if (fex == NULL)
+	return 0;
+
     /*
      * Evaluate the function.
      */
     if (use_sandbox)
 	++sandbox;
-    r = (int)eval_to_number(curbuf->b_p_fex);
+    r = (int)eval_to_number(fex);
     if (use_sandbox)
 	--sandbox;
 
     set_vim_var_string(VV_CHAR, NULL, -1);
+    vim_free(fex);
 
     return r;
 }
@@ -6283,7 +6290,7 @@ write_viminfo_registers(FILE *fp)
  * 'permanent' of the two), otherwise the PRIMARY one.
  * For now, use a hard-coded sanity limit of 1Mb of data.
  */
-#if defined(FEAT_X11) && defined(FEAT_CLIPBOARD)
+#if (defined(FEAT_X11) && defined(FEAT_CLIPBOARD)) || defined(PROTO)
     void
 x11_export_final_selection(void)
 {

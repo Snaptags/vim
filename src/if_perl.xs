@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved	by Bram Moolenaar
  *
@@ -1534,14 +1534,14 @@ Buffers(...)
 	if (GIMME == G_SCALAR)
 	{
 	    i = 0;
-	    for (vimbuf = firstbuf; vimbuf; vimbuf = vimbuf->b_next)
+	    FOR_ALL_BUFFERS(vimbuf)
 		++i;
 
 	    XPUSHs(sv_2mortal(newSViv(i)));
 	}
 	else
 	{
-	    for (vimbuf = firstbuf; vimbuf; vimbuf = vimbuf->b_next)
+	    FOR_ALL_BUFFERS(vimbuf)
 		XPUSHs(newBUFrv(newSV(0), vimbuf));
 	}
     }
@@ -1586,7 +1586,7 @@ Windows(...)
 	    XPUSHs(sv_2mortal(newSViv(win_count())));
 	else
 	{
-	    for (vimwin = firstwin; vimwin != NULL; vimwin = W_NEXT(vimwin))
+	    FOR_ALL_WINDOWS(vimwin)
 		XPUSHs(newWINrv(newSV(0), vimwin));
 	}
     }

@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved	by Bram Moolenaar
  *
@@ -505,6 +505,28 @@ get_cursor_rel_lnum(
 }
 
 /*
+ * Make sure "pos.lnum" and "pos.col" are valid in "buf".
+ * This allows for the col to be on the NUL byte.
+ */
+    void
+check_pos(buf_T *buf, pos_T *pos)
+{
+    char_u *line;
+    colnr_T len;
+
+    if (pos->lnum > buf->b_ml.ml_line_count)
+	pos->lnum = buf->b_ml.ml_line_count;
+
+    if (pos->col > 0)
+    {
+	line = ml_get_buf(buf, pos->lnum, FALSE);
+	len = (colnr_T)STRLEN(line);
+	if (pos->col > len)
+	    pos->col = len;
+    }
+}
+
+/*
  * Make sure curwin->w_cursor.lnum is valid.
  */
     void
@@ -851,7 +873,7 @@ alloc_clear(unsigned size)
     char_u *
 alloc_check(unsigned size)
 {
-#if !defined(UNIX) && !defined(__EMX__)
+#if !defined(UNIX)
     if (sizeof(int) == 2 && size > 0x7fff)
     {
 	/* Don't hide this message */
@@ -1217,11 +1239,18 @@ free_all_mem(void)
 	if (delete_first_msg() == FAIL)
 	    break;
 
+# ifdef FEAT_JOB_CHANNEL
+    channel_free_all();
+# endif
+#ifdef FEAT_TIMERS
+    timer_free_all();
+#endif
 # ifdef FEAT_EVAL
+    /* must be after channel_free_all() with unrefs partials */
     eval_clear();
 # endif
 # ifdef FEAT_JOB_CHANNEL
-    channel_free_all();
+    /* must be after eval_clear() with unrefs jobs */
     job_free_all();
 # endif
 
@@ -2667,13 +2696,14 @@ get_special_key_name(int c, int modifiers)
 trans_special(
     char_u	**srcp,
     char_u	*dst,
-    int		keycode) /* prefer key code, e.g. K_DEL instead of DEL */
+    int		keycode, /* prefer key code, e.g. K_DEL instead of DEL */
+    int		in_string) /* TRUE when inside a double quoted string */
 {
     int		modifiers = 0;
     int		key;
     int		dlen = 0;
 
-    key = find_special_key(srcp, &modifiers, keycode, FALSE);
+    key = find_special_key(srcp, &modifiers, keycode, FALSE, in_string);
     if (key == 0)
 	return 0;
 
@@ -2713,7 +2743,8 @@ find_special_key(
     char_u	**srcp,
     int		*modp,
     int		keycode,     /* prefer key code, e.g. K_DEL instead of DEL */
-    int		keep_x_key)  /* don't translate xHome to Home key */
+    int		keep_x_key,  /* don't translate xHome to Home key */
+    int		in_string)   /* TRUE in string, double quote is escaped */
 {
     char_u	*last_dash;
     char_u	*end_of_name;
@@ -2744,10 +2775,14 @@ find_special_key(
 		else
 #endif
 		    l = 1;
-		/* Anything accepted, like <C-?>, except <C-">, because the "
-		 * ends the string. */
-		if (bp[l] != '"' && bp[l + 1] == '>')
+		/* Anything accepted, like <C-?>.
+		 * <C-"> or <M-"> are not special in strings as " is
+		 * the string delimiter. With a backslash it works: <M-\"> */
+		if (!(in_string && bp[1] == '"') && bp[2] == '>')
 		    bp += l;
+		else if (in_string && bp[1] == '\\' && bp[2] == '"'
+							       && bp[3] == '>')
+		    bp += 2;
 	    }
 	}
 	if (bp[0] == 't' && bp[1] == '_' && bp[2] && bp[3])
@@ -2791,20 +2826,22 @@ find_special_key(
 	    }
 	    else
 	    {
-		/*
-		 * Modifier with single letter, or special key name.
-		 */
+		int off = 1;
+
+		/* Modifier with single letter, or special key name.  */
+		if (in_string && last_dash[1] == '\\' && last_dash[2] == '"')
+		    off = 2;
 #ifdef FEAT_MBYTE
 		if (has_mbyte)
-		    l = mb_ptr2len(last_dash + 1);
+		    l = mb_ptr2len(last_dash + off);
 		else
 #endif
 		    l = 1;
-		if (modifiers != 0 && last_dash[l + 1] == '>')
-		    key = PTR2CHAR(last_dash + 1);
+		if (modifiers != 0 && last_dash[l + off] == '>')
+		    key = PTR2CHAR(last_dash + off);
 		else
 		{
-		    key = get_special_key_code(last_dash + 1);
+		    key = get_special_key_code(last_dash + off);
 		    if (!keep_x_key)
 			key = handle_x_keys(key);
 		}

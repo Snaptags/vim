@@ -2863,7 +2863,6 @@ FunctionNew(PyTypeObject *subtype, char_u *name, int argc, typval_T *argv,
 	    return NULL;
 	}
 	self->name = vim_strsave(name);
-	func_ref(self->name);
     }
     else
 	if ((self->name = get_expanded_name(name,
@@ -2875,6 +2874,7 @@ FunctionNew(PyTypeObject *subtype, char_u *name, int argc, typval_T *argv,
 	    return NULL;
 	}
 
+    func_ref(self->name);
     self->argc = argc;
     self->argv = argv;
     self->self = selfdict;
@@ -3009,9 +3009,9 @@ FunctionAttr(FunctionObject *self, char *name)
 	return PyString_FromString((char *)(self->name));
     else if (strcmp(name, "args") == 0)
     {
-	if (self->argv == NULL)
+	if (self->argv == NULL || (list = list_alloc()) == NULL)
 	    return AlwaysNone(NULL);
-	list = list_alloc();
+
 	for (i = 0; i < self->argc; ++i)
 	    list_append_tv(list, &self->argv[i]);
 	return NEW_LIST(list);
@@ -6310,7 +6310,7 @@ ConvertToPyObject(typval_T *tv)
 	    if (tv->vval.v_partial->pt_dict != NULL)
 		tv->vval.v_partial->pt_dict->dv_refcount++;
 	    return NEW_FUNCTION(tv->vval.v_partial == NULL
-				? (char_u *)"" : tv->vval.v_partial->pt_name,
+			     ? (char_u *)"" : partial_name(tv->vval.v_partial),
 				tv->vval.v_partial->pt_argc, argv,
 				tv->vval.v_partial->pt_dict,
 				tv->vval.v_partial->pt_auto);

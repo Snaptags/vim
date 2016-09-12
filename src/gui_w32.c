@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved		by Bram Moolenaar
  *				GUI support by Robert Webb
@@ -247,6 +247,7 @@ gui_mch_set_rendering_options(char_u *s)
 # define CONST
 # define FAR
 # define NEAR
+# undef _cdecl
 # define _cdecl
 typedef int BOOL;
 typedef int BYTE;
@@ -288,6 +289,7 @@ typedef void VOID;
 typedef int LPNMHDR;
 typedef int LONG;
 typedef int WNDPROC;
+typedef int UINT_PTR;
 #endif
 
 #ifndef GET_X_LPARAM
@@ -2267,11 +2269,11 @@ SaveInst(HINSTANCE hInst)
 /*
  * Return the RGB value of a pixel as a long.
  */
-    long_u
+    guicolor_T
 gui_mch_get_rgb(guicolor_T pixel)
 {
-    return (GetRValue(pixel) << 16) + (GetGValue(pixel) << 8)
-							   + GetBValue(pixel);
+    return (guicolor_T)((GetRValue(pixel) << 16) + (GetGValue(pixel) << 8)
+							   + GetBValue(pixel));
 }
 
 #if defined(FEAT_GUI_DIALOG) || defined(PROTO)
@@ -3457,7 +3459,7 @@ gui_mch_settitle(
     set_window_title(s_hwnd, (title == NULL ? "VIM" : (char *)title));
 }
 
-#ifdef FEAT_MOUSESHAPE
+#if defined(FEAT_MOUSESHAPE) || defined(PROTO)
 /* Table for shape IDCs.  Keep in sync with the mshape_names[] table in
  * misc2.c! */
 static LPCSTR mshape_idcs[] =
@@ -3520,7 +3522,7 @@ mch_set_mouse_shape(int shape)
 }
 #endif
 
-#ifdef FEAT_BROWSE
+#if defined(FEAT_BROWSE) || defined(PROTO)
 /*
  * The file browser exists in two versions: with "W" uses wide characters,
  * without "W" the current codepage.  When FEAT_MBYTE is defined and on
@@ -4535,15 +4537,6 @@ is_winnt_3(void)
     return ((os_version.dwPlatformId == VER_PLATFORM_WIN32_NT
 		&& os_version.dwMajorVersion == 3)
 	    || (os_version.dwPlatformId == VER_PLATFORM_WIN32s));
-}
-
-/*
- * Return TRUE when running under Win32s.
- */
-    int
-gui_is_win32s(void)
-{
-    return (os_version.dwPlatformId == VER_PLATFORM_WIN32s);
 }
 
 #ifdef FEAT_MENU

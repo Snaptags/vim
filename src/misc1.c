@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved	by Bram Moolenaar
  *
@@ -2814,7 +2814,7 @@ changed_bytes(linenr_T lnum, colnr_T col)
 	win_T	    *wp;
 	linenr_T    wlnum;
 
-	for (wp = firstwin; wp != NULL; wp = wp->w_next)
+	FOR_ALL_WINDOWS(wp)
 	    if (wp->w_p_diff && wp != curwin)
 	    {
 		redraw_win_later(wp, VALID);
@@ -2924,7 +2924,7 @@ changed_lines(
 	win_T	    *wp;
 	linenr_T    wlnum;
 
-	for (wp = firstwin; wp != NULL; wp = wp->w_next)
+	FOR_ALL_WINDOWS(wp)
 	    if (wp->w_p_diff && wp != curwin)
 	    {
 		redraw_win_later(wp, VALID);
@@ -3213,7 +3213,7 @@ check_status(buf_T *buf)
 {
     win_T	*wp;
 
-    for (wp = firstwin; wp != NULL; wp = wp->w_next)
+    FOR_ALL_WINDOWS(wp)
 	if (wp->w_buffer == buf && wp->w_status_height)
 	{
 	    wp->w_redr_status = TRUE;
@@ -3416,7 +3416,7 @@ get_keystroke(void)
 	if (n > 0)
 	{
 	    /* Replace zero and CSI by a special key code. */
-	    n = fix_input_buffer(buf + len, n, FALSE);
+	    n = fix_input_buffer(buf + len, n);
 	    len += n;
 	    waited = 0;
 	}
@@ -6097,7 +6097,7 @@ cin_isterminated(
  * When a line ends in a comma we continue looking in the next line.
  * "sp" points to a string with the line.  When looking at other lines it must
  * be restored to the line.  When it's NULL fetch lines here.
- * "lnum" is where we start looking.
+ * "first_lnum" is where we start looking.
  * "min_lnum" is the line before which we will not be looking.
  */
     static int
@@ -6108,6 +6108,7 @@ cin_isfuncdecl(
 {
     char_u	*s;
     linenr_T	lnum = first_lnum;
+    linenr_T	save_lnum = curwin->w_cursor.lnum;
     int		retval = FALSE;
     pos_T	*trypos;
     int		just_started = TRUE;
@@ -6117,15 +6118,20 @@ cin_isfuncdecl(
     else
 	s = *sp;
 
+    curwin->w_cursor.lnum = lnum;
     if (find_last_paren(s, '(', ')')
 	&& (trypos = find_match_paren(curbuf->b_ind_maxparen)) != NULL)
     {
 	lnum = trypos->lnum;
 	if (lnum < min_lnum)
+	{
+	    curwin->w_cursor.lnum = save_lnum;
 	    return FALSE;
+	}
 
 	s = ml_get(lnum);
     }
+    curwin->w_cursor.lnum = save_lnum;
 
     /* Ignore line starting with #. */
     if (cin_ispreproc(s))
@@ -6681,7 +6687,7 @@ find_start_brace(void)	    /* XXX */
     static pos_T *
 find_match_paren(int ind_maxparen)	/* XXX */
 {
- return find_match_char('(', ind_maxparen);
+    return find_match_char('(', ind_maxparen);
 }
 
     static pos_T *
@@ -9475,7 +9481,7 @@ preserve_exit(void)
 
     ml_close_notmod();		    /* close all not-modified buffers */
 
-    for (buf = firstbuf; buf != NULL; buf = buf->b_next)
+    FOR_ALL_BUFFERS(buf)
     {
 	if (buf->b_ml.ml_mfp != NULL && buf->b_ml.ml_mfp->mf_fname != NULL)
 	{
@@ -10514,18 +10520,34 @@ uniquefy_paths(garray_T *gap, char_u *pattern)
 	/* Shorten the filename while maintaining its uniqueness */
 	path_cutoff = get_path_cutoff(path, &path_ga);
 
-	/* we start at the end of the path */
-	pathsep_p = path + len - 1;
+	/* Don't assume all files can be reached without path when search
+	 * pattern starts with star star slash, so only remove path_cutoff
+	 * when possible. */
+	if (pattern[0] == '*' && pattern[1] == '*'
+		&& vim_ispathsep_nocolon(pattern[2])
+		&& path_cutoff != NULL
+		&& vim_regexec(&regmatch, path_cutoff, (colnr_T)0)
+		&& is_unique(path_cutoff, gap, i))
+	{
+	    sort_again = TRUE;
+	    mch_memmove(path, path_cutoff, STRLEN(path_cutoff) + 1);
+	}
+	else
+	{
+	    /* Here all files can be reached without path, so get shortest
+	     * unique path.  We start at the end of the path. */
+	    pathsep_p = path + len - 1;
 
-	while (find_previous_pathsep(path, &pathsep_p))
-	    if (vim_regexec(&regmatch, pathsep_p + 1, (colnr_T)0)
-		    && is_unique(pathsep_p + 1, gap, i)
-		    && path_cutoff != NULL && pathsep_p + 1 >= path_cutoff)
-	    {
-		sort_again = TRUE;
-		mch_memmove(path, pathsep_p + 1, STRLEN(pathsep_p));
-		break;
-	    }
+	    while (find_previous_pathsep(path, &pathsep_p))
+		if (vim_regexec(&regmatch, pathsep_p + 1, (colnr_T)0)
+			&& is_unique(pathsep_p + 1, gap, i)
+			&& path_cutoff != NULL && pathsep_p + 1 >= path_cutoff)
+		{
+		    sort_again = TRUE;
+		    mch_memmove(path, pathsep_p + 1, STRLEN(pathsep_p));
+		    break;
+		}
+	}
 
 	if (mch_isFullName(path))
 	{
@@ -11135,17 +11157,9 @@ FreeWild(int count, char_u **files)
 {
     if (count <= 0 || files == NULL)
 	return;
-#if defined(__EMX__) && defined(__ALWAYS_HAS_TRAILING_NULL_POINTER) /* XXX */
-    /*
-     * Is this still OK for when other functions than expand_wildcards() have
-     * been used???
-     */
-    _fnexplodefree((char **)files);
-#else
     while (count--)
 	vim_free(files[count]);
     vim_free(files);
-#endif
 }
 
 /*
