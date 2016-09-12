@@ -4,6 +4,12 @@
 [![Appveyor Build status](https://ci.appveyor.com/api/projects/status/o2qht2kjm02sgghk?svg=true)](https://ci.appveyor.com/project/chrisbra/vim)
 [![Coverity Scan](https://scan.coverity.com/projects/241/badge.svg)](https://scan.coverity.com/projects/vim)
 
+## About this fork ##
+
+A very long time ago a fix has been made to change dead key handling: https://github.com/vim/vim/issues/250
+Unfortunately the SPACE-mapping conflicts with Neo2's MOD4+SPACE mapping, preventing the 0 to be printed in gVim.
+I have no idea on how to fix this for all users, so I decided to just hot-fix it in this fork.
+So if anyone has issues with the Neo2 keyboard layout: feel free to use the hotfix.
 
 ## What is Vim? ##
 
