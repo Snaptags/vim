@@ -22,7 +22,7 @@
  * - If it's a list of flags, add some code in do_set(), search for WW_ALL.
  * - When adding an option with expansion (P_EXPAND), but with a different
  *   default for Vi and Vim (no P_VI_DEF), add some code at VIMEXP.
- * - Add documentation!  One line in doc/help.txt, full description in
+ * - Add documentation!  One line in doc/quickref.txt, full description in
  *   options.txt, and any other related places.
  * - Add an entry in runtime/optwin.vim.
  * When making changes:
@@ -5615,7 +5615,7 @@ was_set_insecurely(char_u *opt, int opt_flags)
 	flagp = insecure_flag(idx, opt_flags);
 	return (*flagp & P_INSECURE) != 0;
     }
-    EMSG2(_(e_intern2), "was_set_insecurely()");
+    internal_error("was_set_insecurely()");
     return -1;
 }
 
@@ -5696,7 +5696,7 @@ set_string_option_direct(
 	if (idx < 0)	/* not found (should not happen) */
 	{
 	    EMSG2(_(e_intern2), "set_string_option_direct()");
-	    EMSG2(_("For option %s"), name);
+	    IEMSG2(_("For option %s"), name);
 	    return;
 	}
     }
@@ -5821,6 +5821,23 @@ set_string_option(
     }
     return r;
 }
+
+#if defined(FEAT_KEYMAP) || defined(FEAT_AUTOCMD) || defined(FEAT_SYN_HL)
+/*
+ * Return TRUE if "val" is a valid 'filetype' name.
+ * Also used for 'syntax' and 'keymap'.
+ */
+    static int
+valid_filetype(char_u *val)
+{
+    char_u *s;
+
+    for (s = val; *s != NUL; ++s)
+	if (!ASCII_ISALNUM(*s) && vim_strchr((char_u *)".-_", *s) == NULL)
+	    return FALSE;
+    return TRUE;
+}
+#endif
 
 /*
  * Handle string options that need some action to perform when changed.
@@ -6235,8 +6252,11 @@ did_set_string_option(
 #ifdef FEAT_KEYMAP
     else if (varp == &curbuf->b_p_keymap)
     {
-	/* load or unload key mapping tables */
-	errmsg = keymap_init();
+	if (!valid_filetype(*varp))
+	    errmsg = e_invarg;
+	else
+	    /* load or unload key mapping tables */
+	    errmsg = keymap_init();
 
 	if (errmsg == NULL)
 	{
@@ -7218,6 +7238,22 @@ did_set_string_option(
     else if (varp == &p_rop && gui.in_use)
     {
 	if (!gui_mch_set_rendering_options(p_rop))
+	    errmsg = e_invarg;
+    }
+#endif
+
+#ifdef FEAT_AUTOCMD
+    else if (gvarp == &p_ft)
+    {
+	if (!valid_filetype(*varp))
+	    errmsg = e_invarg;
+    }
+#endif
+
+#ifdef FEAT_SYN_HL
+    else if (gvarp == &p_syn)
+    {
+	if (!valid_filetype(*varp))
 	    errmsg = e_invarg;
     }
 #endif
@@ -8515,7 +8551,7 @@ set_num_option(
 	}
 
 	/* Change window height NOW */
-	if (lastwin != firstwin)
+	if (!ONE_WINDOW)
 	{
 	    if (pp == &p_wh && curwin->w_height < p_wh)
 		win_setheight((int)p_wh);
@@ -8555,7 +8591,7 @@ set_num_option(
 	}
 
 	/* Change window width NOW */
-	if (lastwin != firstwin && curwin->w_width < p_wiw)
+	if (!ONE_WINDOW && curwin->w_width < p_wiw)
 	    win_setwidth((int)p_wiw);
     }
 
@@ -9339,7 +9375,7 @@ option_iter_next(void **option, int opt_type)
 		    ret = NULL;
 		break;
 	    default:
-		EMSG2(_(e_intern2), "option_iter_next()");
+		internal_error("option_iter_next()");
 		return NULL;
 	}
     }
@@ -9944,13 +9980,7 @@ clear_termoptions(void)
     if (gui.starting)
 	clear_xterm_clip();
 #endif
-#ifdef WIN3264
-    /*
-     * Check if this is allowed now.
-     */
-    if (can_end_termcap_mode(FALSE) == TRUE)
-#endif
-	stoptermcap();			/* stop termcap mode */
+    stoptermcap();			/* stop termcap mode */
 
     free_termoptions();
 }
@@ -10045,7 +10075,7 @@ istermoption(struct vimoption *p)
 comp_col(void)
 {
 #if defined(FEAT_CMDL_INFO) && defined(FEAT_WINDOWS)
-    int last_has_status = (p_ls == 2 || (p_ls == 1 && firstwin != lastwin));
+    int last_has_status = (p_ls == 2 || (p_ls == 1 && !ONE_WINDOW));
 
     sc_col = 0;
     ru_col = 0;
@@ -10466,7 +10496,7 @@ get_varp(struct vimoption *p)
 #ifdef FEAT_SIGNS
 	case PV_SCL:	return (char_u *)&(curwin->w_p_scl);
 #endif
-	default:	EMSG(_("E356: get_varp ERROR"));
+	default:	IEMSG(_("E356: get_varp ERROR"));
     }
     /* always return a valid pointer to avoid a crash! */
     return (char_u *)&(curbuf->b_p_wm);
@@ -10735,7 +10765,19 @@ buf_copy_options(buf_T *buf, int flags)
 #ifdef FEAT_MBYTE
 		buf->b_p_fenc = vim_strsave(p_fenc);
 #endif
-		buf->b_p_ff = vim_strsave(p_ff);
+		switch (*p_ffs)
+		{
+		    case 'm':
+			buf->b_p_ff = vim_strsave((char_u *)FF_MAC); break;
+		    case 'd':
+			buf->b_p_ff = vim_strsave((char_u *)FF_DOS); break;
+		    case 'u':
+			buf->b_p_ff = vim_strsave((char_u *)FF_UNIX); break;
+		    default:
+			buf->b_p_ff = vim_strsave(p_ff);
+		}
+		if (buf->b_p_ff != NULL)
+		    buf->b_start_ffc = *buf->b_p_ff;
 #if defined(FEAT_QUICKFIX)
 		buf->b_p_bh = empty_option;
 		buf->b_p_bt = empty_option;
@@ -12363,8 +12405,10 @@ get_winbuf_options(int bufopt)
 	    {
 		if (opt->flags & P_STRING)
 		    dict_add_nr_str(d, opt->fullname, 0L, *(char_u **)varp);
+		else if (opt->flags & P_NUM)
+		    dict_add_nr_str(d, opt->fullname, *(long *)varp, NULL);
 		else
-		    dict_add_nr_str(d, opt->fullname, *varp, NULL);
+		    dict_add_nr_str(d, opt->fullname, *(int *)varp, NULL);
 	    }
 	}
     }

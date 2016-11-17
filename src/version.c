@@ -17,8 +17,9 @@
  * Vim originated from Stevie version 3.6 (Fish disk 217) by GRWalter (Fred)
  * It has been changed beyond recognition since then.
  *
- * Differences between version 6.x and 7.x can be found with ":help version7".
- * Differences between version 5.x and 6.x can be found with ":help version6".
+ * Differences between version 7.4 and 8.x can be found with ":help version8".
+ * Differences between version 6.4 and 7.x can be found with ":help version7".
+ * Differences between version 5.8 and 6.x can be found with ":help version6".
  * Differences between version 4.x and 5.x can be found with ":help version5".
  * Differences between version 3.0 and 4.x can be found with ":help version4".
  * All the remarks about older versions have been removed, they are not very
@@ -764,6 +765,178 @@ static char *(features[]) =
 static int included_patches[] =
 {   /* Add new patch number below this line */
 /**/
+    86,
+/**/
+    85,
+/**/
+    84,
+/**/
+    83,
+/**/
+    82,
+/**/
+    81,
+/**/
+    80,
+/**/
+    79,
+/**/
+    78,
+/**/
+    77,
+/**/
+    76,
+/**/
+    75,
+/**/
+    74,
+/**/
+    73,
+/**/
+    72,
+/**/
+    71,
+/**/
+    70,
+/**/
+    69,
+/**/
+    68,
+/**/
+    67,
+/**/
+    66,
+/**/
+    65,
+/**/
+    64,
+/**/
+    63,
+/**/
+    62,
+/**/
+    61,
+/**/
+    60,
+/**/
+    59,
+/**/
+    58,
+/**/
+    57,
+/**/
+    56,
+/**/
+    55,
+/**/
+    54,
+/**/
+    53,
+/**/
+    52,
+/**/
+    51,
+/**/
+    50,
+/**/
+    49,
+/**/
+    48,
+/**/
+    47,
+/**/
+    46,
+/**/
+    45,
+/**/
+    44,
+/**/
+    43,
+/**/
+    42,
+/**/
+    41,
+/**/
+    40,
+/**/
+    39,
+/**/
+    38,
+/**/
+    37,
+/**/
+    36,
+/**/
+    35,
+/**/
+    34,
+/**/
+    33,
+/**/
+    32,
+/**/
+    31,
+/**/
+    30,
+/**/
+    29,
+/**/
+    28,
+/**/
+    27,
+/**/
+    26,
+/**/
+    25,
+/**/
+    24,
+/**/
+    23,
+/**/
+    22,
+/**/
+    21,
+/**/
+    20,
+/**/
+    19,
+/**/
+    18,
+/**/
+    17,
+/**/
+    16,
+/**/
+    15,
+/**/
+    14,
+/**/
+    13,
+/**/
+    12,
+/**/
+    11,
+/**/
+    10,
+/**/
+    9,
+/**/
+    8,
+/**/
+    7,
+/**/
+    6,
+/**/
+    5,
+/**/
+    4,
+/**/
+    3,
+/**/
+    2,
+/**/
+    1,
+/**/
     0
 };
 
@@ -905,15 +1078,10 @@ list_version(void)
     MSG(longVersion);
 #ifdef WIN3264
 # ifdef FEAT_GUI_W32
-#  if defined(_MSC_VER) && (_MSC_VER <= 1010)
-    /* Only MS VC 4.1 and earlier can do Win32s */
-    MSG_PUTS(_("\nMS-Windows 16/32-bit GUI version"));
-#  else
-#   ifdef _WIN64
+#  ifdef _WIN64
     MSG_PUTS(_("\nMS-Windows 64-bit GUI version"));
-#   else
+#  else
     MSG_PUTS(_("\nMS-Windows 32-bit GUI version"));
-#   endif
 #  endif
 # ifdef FEAT_OLE
     MSG_PUTS(_(" with OLE support"));
@@ -1238,7 +1406,7 @@ intro_message(
 	"",
 	N_("type  :q<Enter>               to exit         "),
 	N_("type  :help<Enter>  or  <F1>  for on-line help"),
-	N_("type  :help version7<Enter>   for version info"),
+	N_("type  :help version8<Enter>   for version info"),
 	NULL,
 	"",
 	N_("Running in Vi compatible mode"),
@@ -1275,10 +1443,6 @@ intro_message(
     blanklines = (int)Rows - ((sizeof(lines) / sizeof(char *)) - 1);
     if (!p_cp)
 	blanklines += 4;  /* add 4 for not showing "Vi compatible" message */
-#if defined(WIN3264) && !defined(FEAT_GUI_W32)
-    if (mch_windows95())
-	blanklines -= 3;  /* subtract 3 for showing "Windows 95" message */
-#endif
 
 #ifdef FEAT_WINDOWS
     /* Don't overwrite a statusline.  Depends on 'cmdheight'. */
@@ -1327,17 +1491,6 @@ intro_message(
 		do_intro_line(row, (char_u *)_(p), i == 2, 0);
 	    ++row;
 	}
-#if defined(WIN3264) && !defined(FEAT_GUI_W32)
-	if (mch_windows95())
-	{
-	    do_intro_line(++row,
-		    (char_u *)_("WARNING: Windows 95/98/ME detected"),
-							FALSE, hl_attr(HLF_E));
-	    do_intro_line(++row,
-		(char_u *)_("type  :help windows95<Enter>  for info on this"),
-								    FALSE, 0);
-	}
-#endif
     }
 
     /* Make the wait-return message appear just below the text. */

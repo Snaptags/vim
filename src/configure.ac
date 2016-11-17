@@ -1,4 +1,4 @@
-dnl configure.in: autoconf script for Vim
+dnl configure.ac: autoconf script for Vim
 
 dnl Process this file with autoconf 2.12 or 2.13 to produce "configure".
 dnl Should also work with autoconf 2.54 and later.
@@ -3598,7 +3598,7 @@ AC_CHECK_FUNCS(bcmp fchdir fchown fsync getcwd getpseudotty \
 	getpwent getpwnam getpwuid getrlimit gettimeofday getwd lstat memcmp \
 	memset mkdtemp nanosleep opendir putenv qsort readlink select setenv \
 	setpgid setsid sigaltstack sigstack sigset sigsetjmp sigaction \
-	sigvec strcasecmp strerror strftime stricmp strncasecmp \
+	sigprocmask sigvec strcasecmp strerror strftime stricmp strncasecmp \
 	strnicmp strpbrk strtol tgetent towlower towupper iswupper \
 	usleep utime utimes)
 AC_FUNC_FSEEKO

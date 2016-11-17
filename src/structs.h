@@ -815,26 +815,29 @@ struct msglist
 };
 
 /*
+ * The exception types.
+ */
+typedef enum
+{
+    ET_USER,		/* exception caused by ":throw" command */
+    ET_ERROR,		/* error exception */
+    ET_INTERRUPT	/* interrupt exception triggered by Ctrl-C */
+} except_type_T;
+
+/*
  * Structure describing an exception.
  * (don't use "struct exception", it's used by the math library).
  */
 typedef struct vim_exception except_T;
 struct vim_exception
 {
-    int			type;		/* exception type */
+    except_type_T	type;		/* exception type */
     char_u		*value;		/* exception value */
     struct msglist	*messages;	/* message(s) causing error exception */
     char_u		*throw_name;	/* name of the throw point */
     linenr_T		throw_lnum;	/* line number of the throw point */
     except_T		*caught;	/* next exception on the caught stack */
 };
-
-/*
- * The exception types.
- */
-#define ET_USER		0	/* exception caused by ":throw" command */
-#define ET_ERROR	1	/* error exception */
-#define ET_INTERRUPT	2	/* interrupt exception triggered by Ctrl-C */
 
 /*
  * Structure to save the error/interrupt/exception state between calls to
@@ -1499,19 +1502,21 @@ typedef enum {
 
 /* Ordering matters, it is used in for loops: IN is last, only SOCK/OUT/ERR
  * are polled. */
-#define PART_SOCK   0
+typedef enum {
+    PART_SOCK = 0,
 #define CH_SOCK_FD	ch_part[PART_SOCK].ch_fd
-
 #ifdef FEAT_JOB_CHANNEL
-# define INVALID_FD  (-1)
-
-# define PART_OUT   1
-# define PART_ERR   2
-# define PART_IN    3
+    PART_OUT,
 # define CH_OUT_FD	ch_part[PART_OUT].ch_fd
+    PART_ERR,
 # define CH_ERR_FD	ch_part[PART_ERR].ch_fd
+    PART_IN,
 # define CH_IN_FD	ch_part[PART_IN].ch_fd
 #endif
+    PART_COUNT
+} ch_part_T;
+
+#define INVALID_FD	(-1)
 
 /* The per-fd info for a channel. */
 typedef struct {
@@ -1566,14 +1571,14 @@ struct channel_S {
     int		ch_id;		/* ID of the channel */
     int		ch_last_msg_id;	/* ID of the last message */
 
-    chanpart_T	ch_part[4];	/* info for socket, out, err and in */
+    chanpart_T	ch_part[PART_COUNT]; /* info for socket, out, err and in */
 
     char	*ch_hostname;	/* only for socket, allocated */
     int		ch_port;	/* only for socket */
 
-    int		ch_to_be_closed; /* When TRUE reading or writing failed and
-				  * the channel must be closed when it's safe
-				  * to invoke callbacks. */
+    int		ch_to_be_closed; /* bitset of readable fds to be closed.
+				  * When all readable fds have been closed,
+				  * set to (1 << PART_COUNT). */
     int		ch_to_be_freed; /* When TRUE channel must be freed when it's
 				 * safe to invoke callbacks. */
     int		ch_error;	/* When TRUE an error was reported.  Avoids

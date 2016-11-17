@@ -243,9 +243,9 @@ static void	ex_popup(exarg_T *eap);
 # define ex_helpfind		ex_ni
 #endif
 #ifndef FEAT_CSCOPE
-# define do_cscope		ex_ni
-# define do_scscope		ex_ni
-# define do_cstag		ex_ni
+# define ex_cscope		ex_ni
+# define ex_scscope		ex_ni
+# define ex_cstag		ex_ni
 #endif
 #ifndef FEAT_SYN_HL
 # define ex_syntax		ex_ni
@@ -1388,8 +1388,6 @@ do_cmdline(
 		    break;
 		case ET_INTERRUPT:
 		    break;
-		default:
-		    p = vim_strsave((char_u *)_(e_internal));
 	    }
 
 	    saved_sourcing_name = sourcing_name;
@@ -4281,6 +4279,11 @@ set_one_cmd_context(
 	    xp->xp_pattern = arg;
 	    break;
 
+	case CMD_messages:
+	    xp->xp_context = EXPAND_MESSAGES;
+	    xp->xp_pattern = arg;
+	    break;
+
 #if defined(FEAT_CMDHIST)
 	case CMD_history:
 	    xp->xp_context = EXPAND_HISTORY;
@@ -5629,15 +5632,16 @@ find_nextcmd(char_u *p)
 #endif
 
 /*
- * Check if *p is a separator between Ex commands.
- * Return NULL if it isn't, (p + 1) if it is.
+ * Check if *p is a separator between Ex commands, skipping over white space.
+ * Return NULL if it isn't, the following character if it is.
  */
     char_u *
 check_nextcmd(char_u *p)
 {
-    p = skipwhite(p);
-    if (*p == '|' || *p == '\n')
-	return (p + 1);
+    char_u *s = skipwhite(p);
+
+    if (*s == '|' || *s == '\n')
+	return (s + 1);
     else
 	return NULL;
 }
@@ -5893,6 +5897,7 @@ static struct
 #endif
     {EXPAND_MAPPINGS, "mapping"},
     {EXPAND_MENUS, "menu"},
+    {EXPAND_MESSAGES, "messages"},
     {EXPAND_OWNSYNTAX, "syntax"},
 #if defined(FEAT_PROFILE)
     {EXPAND_SYNTIME, "syntime"},
@@ -7233,7 +7238,7 @@ ex_quit(exarg_T *eap)
 	 * :h|wincmd w|1q     - don't quit
 	 * :h|wincmd w|q      - quit
 	 */
-	if (only_one_window() && (firstwin == lastwin || eap->addr_count == 0))
+	if (only_one_window() && (ONE_WINDOW || eap->addr_count == 0))
 #endif
 	    getout(0);
 #ifdef FEAT_WINDOWS
@@ -7482,9 +7487,9 @@ tabpage_close(int forceit)
 {
     /* First close all the windows but the current one.  If that worked then
      * close the last window in this tab, that will close it. */
-    if (lastwin != firstwin)
+    if (!ONE_WINDOW)
 	close_others(TRUE, forceit);
-    if (lastwin == firstwin)
+    if (ONE_WINDOW)
 	ex_win_close(forceit, curwin, NULL);
 # ifdef FEAT_GUI
     need_mouse_correct = TRUE;
@@ -7568,38 +7573,32 @@ ex_all(exarg_T *eap)
     static void
 ex_hide(exarg_T *eap)
 {
-    if (*eap->arg != NUL && check_nextcmd(eap->arg) == NULL)
-	eap->errmsg = e_invarg;
-    else
-    {
-	/* ":hide" or ":hide | cmd": hide current window */
-	eap->nextcmd = check_nextcmd(eap->arg);
+    /* ":hide" or ":hide | cmd": hide current window */
 #ifdef FEAT_WINDOWS
-	if (!eap->skip)
-	{
+    if (!eap->skip)
+    {
 # ifdef FEAT_GUI
-	    need_mouse_correct = TRUE;
+	need_mouse_correct = TRUE;
 # endif
-	    if (eap->addr_count == 0)
-		win_close(curwin, FALSE);	/* don't free buffer */
-	    else
-	    {
-		int	winnr = 0;
-		win_T	*win;
+	if (eap->addr_count == 0)
+	    win_close(curwin, FALSE);	/* don't free buffer */
+	else
+	{
+	    int	winnr = 0;
+	    win_T	*win;
 
-		FOR_ALL_WINDOWS(win)
-		{
-		    winnr++;
-		    if (winnr == eap->line2)
-			break;
-		}
-		if (win == NULL)
-		    win = lastwin;
-		win_close(win, FALSE);
+	    FOR_ALL_WINDOWS(win)
+	    {
+		winnr++;
+		if (winnr == eap->line2)
+		    break;
 	    }
+	    if (win == NULL)
+		win = lastwin;
+	    win_close(win, FALSE);
 	}
-#endif
     }
+#endif
 }
 
 /*
@@ -7611,14 +7610,7 @@ ex_stop(exarg_T *eap)
     /*
      * Disallow suspending for "rvim".
      */
-    if (!check_restricted()
-#ifdef WIN3264
-	/*
-	 * Check if external commands are allowed now.
-	 */
-	&& can_end_termcap_mode(TRUE)
-#endif
-					)
+    if (!check_restricted())
     {
 	if (!eap->forceit)
 	    autowrite_all();
@@ -9065,8 +9057,17 @@ do_sleep(long msec)
 		wait_now = due_time;
 	}
 #endif
+#ifdef FEAT_JOB_CHANNEL
+	if (has_any_channel() && wait_now > 100L)
+	    wait_now = 100L;
+#endif
 	ui_delay(wait_now, TRUE);
-	ui_breakcheck();
+#ifdef FEAT_JOB_CHANNEL
+	if (has_any_channel())
+	    ui_breakcheck_force(TRUE);
+	else
+#endif
+	    ui_breakcheck();
 #ifdef MESSAGE_QUEUE
 	/* Process the netbeans and clientserver messages that may have been
 	 * received in the call to ui_breakcheck() when the GUI is in use. This
@@ -10421,7 +10422,7 @@ ex_tag_cmd(exarg_T *eap, char_u *name)
 #ifdef FEAT_CSCOPE
 		  if (p_cst && *eap->arg != NUL)
 		  {
-		      do_cstag(eap);
+		      ex_cstag(eap);
 		      return;
 		  }
 #endif
@@ -11897,6 +11898,18 @@ get_behave_arg(expand_T *xp UNUSED, int idx)
 	return (char_u *)"mswin";
     if (idx == 1)
 	return (char_u *)"xterm";
+    return NULL;
+}
+
+/*
+ * Function given to ExpandGeneric() to obtain the possible arguments of the
+ * ":messages {clear}" command.
+ */
+    char_u *
+get_messages_arg(expand_T *xp UNUSED, int idx)
+{
+    if (idx == 0)
+	return (char_u *)"clear";
     return NULL;
 }
 #endif
