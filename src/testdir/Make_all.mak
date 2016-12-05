@@ -63,8 +63,6 @@ SCRIPTS_ALL = \
 	test88.out \
 	test90.out \
 	test91.out \
-	test92.out \
-	test93.out \
 	test94.out \
 	test95.out \
 	test98.out \
@@ -75,7 +73,6 @@ SCRIPTS_ALL = \
 	test108.out \
 	test_autocmd_option.out \
 	test_autoformat_join.out \
-	test_breakindent.out \
 	test_changelist.out \
 	test_close_count.out \
 	test_comparators.out \
@@ -141,6 +138,7 @@ NEW_TESTS = test_arglist.res \
 	    test_assert.res \
 	    test_autochdir.res \
 	    test_backspace_opt.res \
+	    test_breakindent.res \
 	    test_bufwintabinfo.res \
 	    test_cdo.res \
 	    test_channel.res \
@@ -167,6 +165,8 @@ NEW_TESTS = test_arglist.res \
 	    test_man.res \
 	    test_marks.res \
 	    test_matchadd_conceal.res \
+	    test_mksession.res \
+	    test_mksession_utf8.res \
 	    test_nested_function.res \
 	    test_netbeans.res \
 	    test_normal.res \
