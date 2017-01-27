@@ -2147,9 +2147,11 @@ test_arglist \
 	test_options \
 	test_packadd \
 	test_partial \
+	test_paste \
 	test_perl \
 	test_popup \
 	test_profile \
+	test_put \
 	test_quickfix \
 	test_regexp_latin \
 	test_regexp_utf8 \
@@ -2160,9 +2162,9 @@ test_arglist \
 	test_searchpos \
 	test_set \
 	test_signs \
+	test_smartindent \
 	test_sort \
 	test_source_utf8 \
-	test_smartindent \
 	test_startup \
 	test_startup_utf8 \
 	test_stat \
