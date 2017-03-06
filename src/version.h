@@ -13,15 +13,15 @@
  * This doesn't use string concatenation, some compilers don't support it.
  */
 
-#define VIM_VERSION_MAJOR		 8
+#define VIM_VERSION_MAJOR		8
 #define VIM_VERSION_MAJOR_STR		"8"
-#define VIM_VERSION_MINOR		 0
+#define VIM_VERSION_MINOR		0
 #define VIM_VERSION_MINOR_STR		"0"
 #define VIM_VERSION_100	    (VIM_VERSION_MAJOR * 100 + VIM_VERSION_MINOR)
 
-#define VIM_VERSION_BUILD		 243
+#define VIM_VERSION_BUILD		0425
 #define VIM_VERSION_BUILD_BCD		0x119
-#define VIM_VERSION_BUILD_STR		"243"
+#define VIM_VERSION_BUILD_STR		"0425"
 #define VIM_VERSION_PATCHLEVEL		 0
 #define VIM_VERSION_PATCHLEVEL_STR	"0"
 /* Used by MacOS port should be one of: development, alpha, beta, final */
@@ -34,7 +34,7 @@
  * VIM_VERSION_LONG is used for the ":version" command and "Vim -h".
  */
 #define VIM_VERSION_NODOT	"vim80"
-#define VIM_VERSION_SHORT	"8.0.0243"
-#define VIM_VERSION_MEDIUM	"8.0.0243"
-#define VIM_VERSION_LONG	"VIM - Vi IMproved 8.0.243 (2017 Jan 27)"
-#define VIM_VERSION_LONG_DATE	"VIM - Vi IMproved 8.0.243 (2017 Jan 27, compiled "
+#define VIM_VERSION_SHORT	"8.0.0425"
+#define VIM_VERSION_MEDIUM	"8.0.0425"
+#define VIM_VERSION_LONG	"VIM - Vi IMproved 8.0.0425 (2017 Mar 06)"
+#define VIM_VERSION_LONG_DATE	"VIM - Vi IMproved 8.0.0425 (2017 Mar 06, compiled "

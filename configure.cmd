@@ -42,5 +42,7 @@ set DYNAMIC_PERL=yes
 set PERL=c:\StrawberryPerl\perl
 set PERL_VER=524
 
+echo "Updating version numbers from git..."
+call .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
 call %VS_DIR%\VC\vcvarsall.bat %TOOLCHAIN%
