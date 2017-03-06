@@ -1628,6 +1628,22 @@ adjust_clip_reg(int *rp)
 #endif
 
 /*
+ * Shift the delete registers: "9 is cleared, "8 becomes "9, etc.
+ */
+    void
+shift_delete_registers()
+{
+    int		n;
+
+    y_current = &y_regs[9];
+    free_yank_all();			/* free register nine */
+    for (n = 9; n > 1; --n)
+	y_regs[n] = y_regs[n - 1];
+    y_previous = y_current = &y_regs[1];
+    y_regs[1].y_array = NULL;		/* set register one to empty */
+}
+
+/*
  * Handle a delete operation.
  *
  * Return FAIL if undo failed, OK otherwise.
@@ -1739,12 +1755,7 @@ op_delete(oparg_T *oap)
 	if (orig_regname != 0 || oap->motion_type == MLINE
 				   || oap->line_count > 1 || oap->use_reg_one)
 	{
-	    y_current = &y_regs[9];
-	    free_yank_all();			/* free register nine */
-	    for (n = 9; n > 1; --n)
-		y_regs[n] = y_regs[n - 1];
-	    y_previous = y_current = &y_regs[1];
-	    y_regs[1].y_array = NULL;		/* set register one to empty */
+	    shift_delete_registers();
 	    if (op_yank(oap, TRUE, FALSE) == OK)
 		did_yank = TRUE;
 	}
@@ -2571,7 +2582,7 @@ op_insert(oparg_T *oap, long count1)
     }
 
     t1 = oap->start;
-    edit(NUL, FALSE, (linenr_T)count1);
+    (void)edit(NUL, FALSE, (linenr_T)count1);
 
     /* When a tab was inserted, and the characters in front of the tab
      * have been converted to a tab as well, the column of the cursor
@@ -3916,9 +3927,13 @@ error:
 		    curbuf->b_op_start.lnum++;
 	    }
 	    /* Skip mark_adjust when adding lines after the last one, there
-	     * can't be marks there. */
+	     * can't be marks there. But still needed in diff mode. */
 	    if (curbuf->b_op_start.lnum + (y_type == MCHAR) - 1 + nr_lines
-						 < curbuf->b_ml.ml_line_count)
+						 < curbuf->b_ml.ml_line_count
+#ifdef FEAT_DIFF
+						 || curwin->w_p_diff
+#endif
+						 )
 		mark_adjust(curbuf->b_op_start.lnum + (y_type == MCHAR),
 					     (linenr_T)MAXLNUM, nr_lines, 0L);
 
@@ -6300,7 +6315,7 @@ write_viminfo_registers(FILE *fp)
 
 /*
  * Routine to export any final X selection we had to the environment
- * so that the text is still available after vim has exited. X selections
+ * so that the text is still available after Vim has exited. X selections
  * only exist while the owning application exists, so we write to the
  * permanent (while X runs) store CUT_BUFFER0.
  * Dump the CLIPBOARD selection if we own it (it's logically the more

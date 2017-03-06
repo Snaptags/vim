@@ -139,6 +139,23 @@ diff_buf_add(buf_T *buf)
 }
 
 /*
+ * Remove all buffers to make diffs for.
+ */
+    static void
+diff_buf_clear(void)
+{
+    int		i;
+
+    for (i = 0; i < DB_COUNT; ++i)
+	if (curtab->tp_diffbuf[i] != NULL)
+	{
+	    curtab->tp_diffbuf[i] = NULL;
+	    curtab->tp_diff_invalid = TRUE;
+	    diff_redraw(TRUE);
+	}
+}
+
+/*
  * Find buffer "buf" in the list of diff buffers for the current tab page.
  * Return its index or DB_COUNT if not found.
  */
@@ -1256,6 +1273,10 @@ ex_diffoff(exarg_T *eap)
 	diffwin |= wp->w_p_diff;
 #endif
     }
+
+    /* Also remove hidden buffers from the list. */
+    if (eap->forceit)
+	diff_buf_clear();
 
 #ifdef FEAT_SCROLLBIND
     /* Remove "hor" from from 'scrollopt' if there are no diff windows left. */
@@ -2595,7 +2616,6 @@ diff_get_corresponding_line(buf_T *buf1, linenr_T lnum1)
     return lnum;
 }
 
-#if defined(FEAT_FOLDING) || defined(PROTO)
 /*
  * For line "lnum" in the current window find the equivalent lnum in window
  * "wp", compensating for inserted/deleted lines.
@@ -2635,6 +2655,5 @@ diff_lnum_win(linenr_T lnum, win_T *wp)
 	n = dp->df_lnum[i] + dp->df_count[i];
     return n;
 }
-#endif
 
 #endif	/* FEAT_DIFF */

@@ -186,7 +186,7 @@ static int  ins_compl_pum_key(int c);
 static int  ins_compl_key2count(int c);
 static int  ins_compl_use_match(int c);
 static int  ins_complete(int c, int enable_pum);
-static void show_pum(int save_w_wrow);
+static void show_pum(int prev_w_wrow, int prev_w_leftcol);
 static unsigned  quote_meta(char_u *dest, char_u *str, int len);
 #endif /* FEAT_INS_EXPAND */
 
@@ -541,8 +541,8 @@ edit(
 
     /*
      * Handle restarting Insert mode.
-     * Don't do this for "CTRL-O ." (repeat an insert): we get here with
-     * restart_edit non-zero, and something in the stuff buffer.
+     * Don't do this for "CTRL-O ." (repeat an insert): In that case we get
+     * here with something in the stuff buffer.
      */
     if (restart_edit != 0 && stuff_empty())
     {
@@ -1038,8 +1038,10 @@ doESCkey:
 	    if (!p_im)
 		goto normalchar;	/* insert CTRL-Z as normal char */
 	    do_cmdline_cmd((char_u *)"stop");
-	    c = Ctrl_O;
-	    /*FALLTHROUGH*/
+#ifdef CURSOR_SHAPE
+	    ui_cursor_shape();		/* may need to update cursor shape */
+#endif
+	    continue;
 
 	case Ctrl_O:	/* execute one command */
 #ifdef FEAT_COMPL_FUNC
@@ -1451,10 +1453,14 @@ doESCkey:
 
 docomplete:
 	    compl_busy = TRUE;
+#ifdef FEAT_FOLDING
 	    disable_fold_update++;  /* don't redraw folds here */
+#endif
 	    if (ins_complete(c, TRUE) == FAIL)
 		compl_cont_status = 0;
+#ifdef FEAT_FOLDING
 	    disable_fold_update--;
+#endif
 	    compl_busy = FALSE;
 	    break;
 #endif /* FEAT_INS_EXPAND */
@@ -1668,7 +1674,7 @@ ins_redraw(
 #ifdef FEAT_AUTOCMD
     /* Trigger TextChangedI if b_changedtick differs. */
     if (ready && has_textchangedI()
-	    && last_changedtick != curbuf->b_changedtick
+	    && last_changedtick != CHANGEDTICK(curbuf)
 # ifdef FEAT_INS_EXPAND
 	    && !pum_visible()
 # endif
@@ -1677,7 +1683,7 @@ ins_redraw(
 	if (last_changedtick_buf == curbuf)
 	    apply_autocmds(EVENT_TEXTCHANGEDI, NULL, NULL, FALSE, curbuf);
 	last_changedtick_buf = curbuf;
-	last_changedtick = curbuf->b_changedtick;
+	last_changedtick = CHANGEDTICK(curbuf);
     }
 #endif
 
@@ -2816,11 +2822,13 @@ completeopt_was_set(void)
 set_completion(colnr_T startcol, list_T *list)
 {
     int save_w_wrow = curwin->w_wrow;
+    int save_w_leftcol = curwin->w_leftcol;
 
     /* If already doing completions stop it. */
     if (ctrl_x_mode != 0)
 	ins_compl_prep(' ');
     ins_compl_clear();
+    ins_compl_free();
 
     compl_direction = FORWARD;
     if (startcol > curwin->w_cursor.col)
@@ -2855,7 +2863,7 @@ set_completion(colnr_T startcol, list_T *list)
 
     /* Lazily show the popup menu, unless we got interrupted. */
     if (!compl_interrupted)
-	show_pum(save_w_wrow);
+	show_pum(save_w_wrow, save_w_leftcol);
     out_flush();
 }
 
@@ -3466,10 +3474,13 @@ ins_compl_bs(void)
     mb_ptr_back(line, p);
 
     /* Stop completion when the whole word was deleted.  For Omni completion
-     * allow the word to be deleted, we won't match everything. */
+     * allow the word to be deleted, we won't match everything.
+     * Respect the 'backspace' option. */
     if ((int)(p - line) - (int)compl_col < 0
 	    || ((int)(p - line) - (int)compl_col == 0
-		&& ctrl_x_mode != CTRL_X_OMNI) || ctrl_x_mode == CTRL_X_EVAL)
+		&& ctrl_x_mode != CTRL_X_OMNI) || ctrl_x_mode == CTRL_X_EVAL
+	    || (!can_bs(BS_START) && (int)(p - line) - (int)compl_col
+							- compl_length < 0))
 	return K_BS;
 
     /* Deleted more than what was used to find matches or didn't finish
@@ -3579,7 +3590,11 @@ ins_compl_addleader(int c)
 {
 #ifdef FEAT_MBYTE
     int		cc;
+#endif
 
+    if (stop_arrow() == FAIL)
+	return;
+#ifdef FEAT_MBYTE
     if (has_mbyte && (cc = (*mb_char2len)(c)) > 1)
     {
 	char_u	buf[MB_MAXBYTES + 1];
@@ -5086,7 +5101,9 @@ ins_complete(int c, int enable_pum)
     colnr_T	curs_col;	    /* cursor column */
     int		n;
     int		save_w_wrow;
+    int		save_w_leftcol;
     int		insert_match;
+    int		save_did_ai = did_ai;
 
     compl_direction = ins_compl_key2dir(c);
     insert_match = ins_compl_use_match(c);
@@ -5370,6 +5387,8 @@ ins_complete(int c, int enable_pum)
 	    {
 		EMSG2(_(e_notset), ctrl_x_mode == CTRL_X_FUNCTION
 					     ? "completefunc" : "omnifunc");
+		/* restore did_ai, so that adding comment leader works */
+		did_ai = save_did_ai;
 		return FAIL;
 	    }
 
@@ -5526,6 +5545,7 @@ ins_complete(int c, int enable_pum)
      * Find next match (and following matches).
      */
     save_w_wrow = curwin->w_wrow;
+    save_w_leftcol = curwin->w_leftcol;
     n = ins_compl_next(TRUE, ins_compl_key2count(c), insert_match, FALSE);
 
     /* may undisplay the popup menu */
@@ -5678,9 +5698,8 @@ ins_complete(int c, int enable_pum)
 
     /* Show the popup menu, unless we got interrupted. */
     if (enable_pum && !compl_interrupted)
-    {
-	show_pum(save_w_wrow);
-    }
+	show_pum(save_w_wrow, save_w_leftcol);
+
     compl_was_interrupted = compl_interrupted;
     compl_interrupted = FALSE;
 
@@ -5688,21 +5707,22 @@ ins_complete(int c, int enable_pum)
 }
 
     static void
-show_pum(int save_w_wrow)
+show_pum(int prev_w_wrow, int prev_w_leftcol)
 {
-  /* RedrawingDisabled may be set when invoked through complete(). */
-  int n = RedrawingDisabled;
+    /* RedrawingDisabled may be set when invoked through complete(). */
+    int n = RedrawingDisabled;
 
-  RedrawingDisabled = 0;
+    RedrawingDisabled = 0;
 
-  /* If the cursor moved we need to remove the pum first. */
-  setcursor();
-  if (save_w_wrow != curwin->w_wrow)
-      ins_compl_del_pum();
+    /* If the cursor moved or the display scrolled we need to remove the pum
+     * first. */
+    setcursor();
+    if (prev_w_wrow != curwin->w_wrow || prev_w_leftcol != curwin->w_leftcol)
+	ins_compl_del_pum();
 
-  ins_compl_show_pum();
-  setcursor();
-  RedrawingDisabled = n;
+    ins_compl_show_pum();
+    setcursor();
+    RedrawingDisabled = n;
 }
 
 /*
@@ -6165,6 +6185,9 @@ insertchar(
 		&& (!has_mbyte || MB_BYTE2LEN_CHECK(c) == 1)
 #endif
 		&& i < INPUT_BUFLEN
+# ifdef FEAT_FKMAP
+		&& !(p_fkmap && KeyTyped) /* Farsi mode mapping moves cursor */
+# endif
 		&& (textwidth == 0
 		    || (virtcol += byte2cells(buf[i - 1])) < (colnr_T)textwidth)
 		&& !(!no_abbr && !vim_iswordc(c) && vim_iswordc(buf[i - 1])))
@@ -6173,10 +6196,6 @@ insertchar(
 	    c = vgetc();
 	    if (p_hkmap && KeyTyped)
 		c = hkmap(c);		    /* Hebrew mode mapping */
-# ifdef FEAT_FKMAP
-	    if (p_fkmap && KeyTyped)
-		c = fkmap(c);		    /* Farsi mode mapping */
-# endif
 	    buf[i++] = c;
 #else
 	    buf[i++] = vgetc();
@@ -8171,7 +8190,8 @@ in_cinkeys(
 	{
 	    if (try_match && *look == keytyped)
 		return TRUE;
-	    ++look;
+	    if (*look != NUL)
+		++look;
 	}
 
 	/*

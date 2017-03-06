@@ -1719,7 +1719,7 @@ vim_strncpy(char_u *to, char_u *from, size_t len)
 
 /*
  * Like strcat(), but make sure the result fits in "tosize" bytes and is
- * always NUL terminated.
+ * always NUL terminated. "from" and "to" may overlap.
  */
     void
 vim_strcat(char_u *to, char_u *from, size_t tosize)
@@ -1733,7 +1733,7 @@ vim_strcat(char_u *to, char_u *from, size_t tosize)
 	to[tosize - 1] = NUL;
     }
     else
-	STRCPY(to + tolen, from);
+	mch_memmove(to + tolen, from, fromlen + 1);
 }
 
 /*
@@ -2099,7 +2099,7 @@ ga_concat_strings(garray_T *gap, char *sep)
     return s;
 }
 
-#if defined(FEAT_VIMINFO) || defined(PROTO)
+#if defined(FEAT_VIMINFO) || defined(FEAT_EVAL) || defined(PROTO)
 /*
  * Make a copy of string "p" and add it to "gap".
  * When out of memory nothing changes.
@@ -3472,11 +3472,12 @@ parse_shape_opt(int what)
 	while (*modep != NUL)
 	{
 	    colonp = vim_strchr(modep, ':');
-	    if (colonp == NULL)
+	    commap = vim_strchr(modep, ',');
+
+	    if (colonp == NULL || (commap != NULL && commap < colonp))
 		return (char_u *)N_("E545: Missing colon");
 	    if (colonp == modep)
 		return (char_u *)N_("E546: Illegal mode");
-	    commap = vim_strchr(modep, ',');
 
 	    /*
 	     * Repeat for all mode's before the colon.
