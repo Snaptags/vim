@@ -7118,7 +7118,7 @@ gui_mch_dialog(
 #else
 	    l = 1;
 #endif
-	    if (l == 1 && vim_iswhite(*pend)
+	    if (l == 1 && VIM_ISWHITE(*pend)
 					&& textWidth > maxDialogWidth * 3 / 4)
 		last_white = pend;
 	    textWidth += GetTextWidthEnc(hdc, pend, l);
@@ -8587,6 +8587,7 @@ gui_mch_enable_beval_area(BalloonEval *beval)
 gui_mch_post_balloon(BalloonEval *beval, char_u *mesg)
 {
     POINT   pt;
+
     // TRACE0("gui_mch_post_balloon {{{");
     if (beval->showState == ShS_SHOWING)
 	return;
@@ -8594,8 +8595,8 @@ gui_mch_post_balloon(BalloonEval *beval, char_u *mesg)
     ScreenToClient(s_textArea, &pt);
 
     if (abs(beval->x - pt.x) < 3 && abs(beval->y - pt.y) < 3)
-	/* cursor is still here */
     {
+	/* cursor is still here */
 	gui_mch_disable_beval_area(cur_beval);
 	beval->showState = ShS_SHOWING;
 	make_tooltip(beval, (char *)mesg, pt);

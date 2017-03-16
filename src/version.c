@@ -765,6 +765,74 @@ static char *(features[]) =
 static int included_patches[] =
 {   /* Add new patch number below this line */
 /**/
+    459,
+/**/
+    458,
+/**/
+    457,
+/**/
+    456,
+/**/
+    455,
+/**/
+    454,
+/**/
+    453,
+/**/
+    452,
+/**/
+    451,
+/**/
+    450,
+/**/
+    449,
+/**/
+    448,
+/**/
+    447,
+/**/
+    446,
+/**/
+    445,
+/**/
+    444,
+/**/
+    443,
+/**/
+    442,
+/**/
+    441,
+/**/
+    440,
+/**/
+    439,
+/**/
+    438,
+/**/
+    437,
+/**/
+    436,
+/**/
+    435,
+/**/
+    434,
+/**/
+    433,
+/**/
+    432,
+/**/
+    431,
+/**/
+    430,
+/**/
+    429,
+/**/
+    428,
+/**/
+    427,
+/**/
+    426,
+/**/
     425,
 /**/
     424,
@@ -2045,7 +2113,7 @@ static void do_intro_line(int row, char_u *mesg, int add_version, int attr);
     void
 maybe_intro_message(void)
 {
-    if (bufempty()
+    if (BUFEMPTY()
 	    && curbuf->b_fname == NULL
 #ifdef FEAT_WINDOWS
 	    && firstwin->w_next == NULL
