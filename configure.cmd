@@ -3,8 +3,8 @@
 :: Windows SDK Include directory. No quotation marks.
 set SDK_INCLUDE_DIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1\Include
 
-:: Visual Studio directory. Quotation marks.
-set VS_DIR="C:\Program Files (x86)\Microsoft Visual Studio 14.0"
+:: Visual Studio directory. Quotation marks, no trailing backslash.
+set VS_DIR="c:\Program Files (x86)\Microsoft Visual Studio\2017\Professional"
 
 :: Target architecture, AMD64 (64-bit) or I386 (32-bit)
 set CPU=AMD64
@@ -39,10 +39,11 @@ set PYTHON_VER=27
 
 :: Enable Perl scripting
 set DYNAMIC_PERL=yes
-set PERL=c:\StrawberryPerl\perl
+set PERL=c:\Strawberry\perl
 set PERL_VER=524
 
 echo "Updating version numbers from git..."
 call .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
-call %VS_DIR%\VC\vcvarsall.bat %TOOLCHAIN%
+call %VS_DIR%\VC\Auxiliary\Build\vcvarsall.bat %TOOLCHAIN%
+
