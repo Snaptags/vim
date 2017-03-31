@@ -717,7 +717,8 @@ qf_get_next_file_line(qfstate_T *state)
 
 #ifdef FEAT_MBYTE
     /* Convert a line if it contains a non-ASCII character. */
-    if (state->vc.vc_type != CONV_NONE && has_non_ascii(state->linebuf)) {
+    if (state->vc.vc_type != CONV_NONE && has_non_ascii(state->linebuf))
+    {
 	char_u	*line;
 
 	line = string_convert(&state->vc, state->linebuf, &state->linelen);
@@ -917,7 +918,8 @@ restofline:
 	    }
 	    if (fmt_ptr->flags == '+' && !qi->qf_multiscan)	/* %+ */
 	    {
-		if (linelen > fields->errmsglen) {
+		if (linelen > fields->errmsglen)
+		{
 		    /* linelen + null terminator */
 		    if ((fields->errmsg = vim_realloc(fields->errmsg,
 				    linelen + 1)) == NULL)
@@ -931,7 +933,8 @@ restofline:
 		if (regmatch.startp[i] == NULL || regmatch.endp[i] == NULL)
 		    continue;
 		len = (int)(regmatch.endp[i] - regmatch.startp[i]);
-		if (len > fields->errmsglen) {
+		if (len > fields->errmsglen)
+		{
 		    /* len + null terminator */
 		    if ((fields->errmsg = vim_realloc(fields->errmsg, len + 1))
 			    == NULL)
@@ -1013,7 +1016,8 @@ restofline:
 	fields->namebuf[0] = NUL;	/* no match found, remove file name */
 	fields->lnum = 0;			/* don't jump to this line */
 	fields->valid = FALSE;
-	if (linelen > fields->errmsglen) {
+	if (linelen > fields->errmsglen)
+	{
 	    /* linelen + null terminator */
 	    if ((fields->errmsg = vim_realloc(fields->errmsg,
 			    linelen + 1)) == NULL)
@@ -2555,7 +2559,7 @@ qf_list(exarg_T *eap)
 		vim_snprintf((char *)IObuff, IOSIZE, "%2d %s",
 							    i, (char *)fname);
 	    msg_outtrans_attr(IObuff, i == qi->qf_lists[qi->qf_curlist].qf_index
-					   ? hl_attr(HLF_L) : hl_attr(HLF_D));
+					   ? HL_ATTR(HLF_L) : HL_ATTR(HLF_D));
 	    if (qfp->qf_lnum == 0)
 		IObuff[0] = NUL;
 	    else if (qfp->qf_col == 0)
@@ -2565,7 +2569,7 @@ qf_list(exarg_T *eap)
 						   qfp->qf_lnum, qfp->qf_col);
 	    sprintf((char *)IObuff + STRLEN(IObuff), "%s:",
 				  (char *)qf_types(qfp->qf_type, qfp->qf_nr));
-	    msg_puts_attr(IObuff, hl_attr(HLF_N));
+	    msg_puts_attr(IObuff, HL_ATTR(HLF_N));
 	    if (qfp->qf_pattern != NULL)
 	    {
 		qf_fmt_text(qfp->qf_pattern, IObuff, IOSIZE);
@@ -4798,7 +4802,8 @@ qf_add_entries(
 	qi->qf_lists[qi->qf_curlist].qf_nonevalid = TRUE;
     else
 	qi->qf_lists[qi->qf_curlist].qf_nonevalid = FALSE;
-    if (action != 'a') {
+    if (action != 'a')
+    {
 	qi->qf_lists[qi->qf_curlist].qf_ptr =
 	    qi->qf_lists[qi->qf_curlist].qf_start;
 	if (qi->qf_lists[qi->qf_curlist].qf_count > 0)
@@ -4861,6 +4866,18 @@ qf_set_properties(qf_info_T *qi, dict_T *what, int action)
     return retval;
 }
 
+    static void
+qf_free_stack(win_T *wp, qf_info_T *qi)
+{
+    qf_free_all(wp);
+    if (wp == NULL)
+    {
+	/* quickfix list */
+	qi->qf_curlist = 0;
+	qi->qf_listcount = 0;
+    }
+}
+
 /*
  * Populate the quickfix list with the items supplied in the list
  * of dictionaries. "title" will be copied to w:quickfix_title.
@@ -4884,7 +4901,12 @@ set_errorlist(
 	    return FAIL;
     }
 
-    if (what != NULL)
+    if (action == 'f')
+    {
+	/* Free the entire quickfix or location list stack */
+	qf_free_stack(wp, qi);
+    }
+    else if (what != NULL)
 	retval = qf_set_properties(qi, what, action);
     else
 	retval = qf_add_entries(qi, list, title, action);
@@ -5077,6 +5099,7 @@ ex_helpgrep(exarg_T *eap)
     char_u	*lang;
 #endif
     qf_info_T	*qi = &ql_info;
+    qf_info_T	*save_qi;
     int		new_qi = FALSE;
     win_T	*wp;
 #ifdef FEAT_AUTOCMD
@@ -5129,6 +5152,9 @@ ex_helpgrep(exarg_T *eap)
 	    new_qi = TRUE;
 	}
     }
+
+    /* Autocommands may change the list. Save it for later comparison */
+    save_qi = qi;
 
     regmatch.regprog = vim_regcomp(eap->arg, RE_MAGIC + RE_STRING);
     regmatch.rm_ic = FALSE;
@@ -5183,7 +5209,8 @@ ex_helpgrep(exarg_T *eap)
 			    /* Convert a line if 'encoding' is not utf-8 and
 			     * the line contains a non-ASCII character. */
 			    if (vc.vc_type != CONV_NONE
-						   && has_non_ascii(IObuff)) {
+						   && has_non_ascii(IObuff))
+			    {
 				line = string_convert(&vc, IObuff, NULL);
 				if (line == NULL)
 				    line = IObuff;
@@ -5262,7 +5289,7 @@ ex_helpgrep(exarg_T *eap)
     {
 	apply_autocmds(EVENT_QUICKFIXCMDPOST, au_name,
 					       curbuf->b_fname, TRUE, curbuf);
-	if (!new_qi && qi != &ql_info && qf_find_buf(qi) == NULL)
+	if (!new_qi && qi != save_qi && qf_find_buf(qi) == NULL)
 	    /* autocommands made "qi" invalid */
 	    return;
     }

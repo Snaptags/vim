@@ -3,7 +3,7 @@
 
 set belloff=all
 source test_assign.vim
-source test_autocmd.vim
+source test_cd.vim
 source test_changedtick.vim
 source test_cursor_func.vim
 source test_delete.vim
@@ -21,8 +21,9 @@ source test_findfile.vim
 source test_float_func.vim
 source test_fnamemodify.vim
 source test_functions.vim
-source test_glob2regpat.vim
 source test_ga.vim
+source test_glob2regpat.vim
+source test_global.vim
 source test_goto.vim
 source test_help_tagjump.vim
 source test_join.vim
@@ -47,6 +48,7 @@ source test_tabline.vim
 source test_tabpage.vim
 source test_tagcase.vim
 source test_tagjump.vim
+source test_taglist.vim
 source test_timers.vim
 source test_true_false.vim
 source test_unlet.vim

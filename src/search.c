@@ -2851,9 +2851,17 @@ findpar(
     curwin->w_cursor.lnum = curr;
     if (curr == curbuf->b_ml.ml_line_count && what != '}')
     {
-	if ((curwin->w_cursor.col = (colnr_T)STRLEN(ml_get(curr))) != 0)
+	char_u *line = ml_get(curr);
+
+	/* Put the cursor on the last character in the last line and make the
+	 * motion inclusive. */
+	if ((curwin->w_cursor.col = (colnr_T)STRLEN(line)) != 0)
 	{
 	    --curwin->w_cursor.col;
+#ifdef FEAT_MBYTE
+	    curwin->w_cursor.col -=
+			     (*mb_head_off)(line, line + curwin->w_cursor.col);
+#endif
 	    *pincl = TRUE;
 	}
     }
@@ -5013,7 +5021,7 @@ find_pattern_in_path(
 		    {
 			/* using "new_fname" is more reliable, e.g., when
 			 * 'includeexpr' is set. */
-			msg_outtrans_attr(new_fname, hl_attr(HLF_D));
+			msg_outtrans_attr(new_fname, HL_ATTR(HLF_D));
 		    }
 		    else
 		    {
@@ -5059,7 +5067,7 @@ find_pattern_in_path(
 			}
 			save_char = p[i];
 			p[i] = NUL;
-			msg_outtrans_attr(p, hl_attr(HLF_D));
+			msg_outtrans_attr(p, HL_ATTR(HLF_D));
 			p[i] = save_char;
 		    }
 
@@ -5124,7 +5132,7 @@ find_pattern_in_path(
 			vim_snprintf((char*)IObuff, IOSIZE,
 				_("Scanning included file: %s"),
 				(char *)new_fname);
-			msg_trunc_attr(IObuff, TRUE, hl_attr(HLF_R));
+			msg_trunc_attr(IObuff, TRUE, HL_ATTR(HLF_R));
 		    }
 		    else
 #endif
@@ -5572,7 +5580,7 @@ show_pat_in_path(
 	    msg_puts(IObuff);
 	    sprintf((char *)IObuff, "%4ld", *lnum);	/* show line nr */
 						/* Highlight line numbers */
-	    msg_puts_attr(IObuff, hl_attr(HLF_N));
+	    msg_puts_attr(IObuff, HL_ATTR(HLF_N));
 	    MSG_PUTS(" ");
 	}
 	msg_prt_line(line, FALSE);

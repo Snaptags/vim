@@ -392,8 +392,6 @@ ui_breakcheck_force(int force)
 
 #if defined(FEAT_CLIPBOARD) || defined(PROTO)
 
-static void clip_copy_selection(VimClipboard *clip);
-
 /*
  * Selection stuff using Visual mode, for cutting and pasting text to other
  * windows.
@@ -496,7 +494,7 @@ clip_own_selection(VimClipboard *cbd)
 					    || get_real_state() == SELECTMODE)
 		    && (cbd == &clip_star ? clip_isautosel_star()
 						      : clip_isautosel_plus())
-		    && hl_attr(HLF_V) != hl_attr(HLF_VNC))
+		    && HL_ATTR(HLF_V) != HL_ATTR(HLF_VNC))
 		redraw_curbuf_later(INVERTED_ALL);
 	}
     }
@@ -534,7 +532,7 @@ clip_lose_selection(VimClipboard *cbd)
 					    || get_real_state() == SELECTMODE)
 		&& (cbd == &clip_star ?
 				clip_isautosel_star() : clip_isautosel_plus())
-		&& hl_attr(HLF_V) != hl_attr(HLF_VNC))
+		&& HL_ATTR(HLF_V) != HL_ATTR(HLF_VNC))
 	{
 	    update_curbuf(INVERTED_ALL);
 	    setcursor();
@@ -569,7 +567,8 @@ clip_copy_selection(VimClipboard *clip)
  * considerably.
  */
 static int global_change_count = 0; /* if set, inside a start_global_changes */
-static int clipboard_needs_update; /* clipboard needs to be updated */
+static int clipboard_needs_update = FALSE; /* clipboard needs to be updated */
+static int clip_did_set_selection = TRUE;
 
 /*
  * Save clip_unnamed and reset it.
@@ -587,6 +586,16 @@ start_global_changes(void)
 	clip_unnamed = FALSE;
 	clip_did_set_selection = FALSE;
     }
+}
+
+/*
+ * Return TRUE if setting the clipboard was postponed, it already contains the
+ * right text.
+ */
+    int
+is_clipboard_needs_update()
+{
+    return clipboard_needs_update;
 }
 
 /*
@@ -619,6 +628,7 @@ end_global_changes(void)
 	    }
 	}
     }
+    clipboard_needs_update = FALSE;
 }
 
 /*
