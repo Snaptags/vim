@@ -1322,3 +1322,35 @@ func! Test_edit_rightleft()
   set norightleft
   bw!
 endfunc
+
+func Test_edit_complete_very_long_name()
+  if !has('unix') || has('mac')
+    " Long directory names only work on Unix.
+    return
+  endif
+  " Try to get the Vim window position before setting 'columns'.
+  let winposx = getwinposx()
+  let winposy = getwinposy()
+  let save_columns = &columns
+  set columns=2000
+  call assert_equal(2000, &columns)
+  set noswapfile
+
+  let dirname = getcwd() . "/Xdir"
+  let longdirname = dirname . repeat('/' . repeat('d', 255), 4)
+  let longfilename = longdirname . '/' . repeat('a', 255)
+  call mkdir(longdirname, 'p')
+  call writefile(['Totum', 'Table'], longfilename)
+  new
+  exe "next Xfile " . longfilename
+  exe "normal iT\<C-N>"
+
+  bwipe!
+  exe 'bwipe! ' . longfilename
+  call delete(dirname, 'rf')
+  let &columns = save_columns
+  if winposx >= 0 && winposy >= 0
+    exe 'winpos ' . winposx . ' ' . winposy
+  endif
+  set swapfile&
+endfunc
