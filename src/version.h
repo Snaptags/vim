@@ -19,9 +19,9 @@
 #define VIM_VERSION_MINOR_STR		"0"
 #define VIM_VERSION_100	    (VIM_VERSION_MAJOR * 100 + VIM_VERSION_MINOR)
 
-#define VIM_VERSION_BUILD		0627
+#define VIM_VERSION_BUILD		0636
 #define VIM_VERSION_BUILD_BCD		0x119
-#define VIM_VERSION_BUILD_STR		"0627"
+#define VIM_VERSION_BUILD_STR		"0636"
 #define VIM_VERSION_PATCHLEVEL		 0
 #define VIM_VERSION_PATCHLEVEL_STR	"0"
 /* Used by MacOS port should be one of: development, alpha, beta, final */
@@ -34,7 +34,7 @@
  * VIM_VERSION_LONG is used for the ":version" command and "Vim -h".
  */
 #define VIM_VERSION_NODOT	"vim80"
-#define VIM_VERSION_SHORT	"8.0.0627"
-#define VIM_VERSION_MEDIUM	"8.0.0627"
-#define VIM_VERSION_LONG	"VIM - Vi IMproved 8.0.0627 (2017 Jun 06)"
-#define VIM_VERSION_LONG_DATE	"VIM - Vi IMproved 8.0.0627 (2017 Jun 06, compiled "
+#define VIM_VERSION_SHORT	"8.0.0636"
+#define VIM_VERSION_MEDIUM	"8.0.0636"
+#define VIM_VERSION_LONG	"VIM - Vi IMproved 8.0.0636 (2017 Jun 12)"
+#define VIM_VERSION_LONG_DATE	"VIM - Vi IMproved 8.0.0636 (2017 Jun 12, compiled "
