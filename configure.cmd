@@ -18,6 +18,10 @@ set FEATURES=HUGE
 :: yes for gVim, no for vim
 set GUI=yes
 
+:: Enable Terminal support
+set TERMINAL=no
+:: does not work right now: LINK : fatal error LNK1181: cannot open input file 'libvterm/vterm.lib'
+
 set OLE=yes
 set IME=yes
 
