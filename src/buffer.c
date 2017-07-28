@@ -249,7 +249,7 @@ open_buffer(
 	netbeansFireChanges = oldFire;
 #endif
 	/* Help buffer is filtered. */
-	if (curbuf->b_help)
+	if (bt_help(curbuf))
 	    fix_help_buffer();
     }
     else if (read_stdin)
@@ -3626,6 +3626,13 @@ maketitle(void)
 #define SPACE_FOR_ARGNR (IOSIZE - 10)  /* at least room for " - VIM" */
 	    if (curbuf->b_fname == NULL)
 		vim_strncpy(buf, (char_u *)_("[No Name]"), SPACE_FOR_FNAME);
+#ifdef FEAT_TERMINAL
+	    else if (curbuf->b_term != NULL)
+	    {
+		vim_strncpy(buf, term_get_status_text(curbuf->b_term),
+							      SPACE_FOR_FNAME);
+	    }
+#endif
 	    else
 	    {
 		p = transstr(gettail(curbuf->b_fname));
@@ -3633,20 +3640,27 @@ maketitle(void)
 		vim_free(p);
 	    }
 
-	    switch (bufIsChanged(curbuf)
-		    + (curbuf->b_p_ro * 2)
-		    + (!curbuf->b_p_ma * 4))
-	    {
-		case 1: STRCAT(buf, " +"); break;
-		case 2: STRCAT(buf, " ="); break;
-		case 3: STRCAT(buf, " =+"); break;
-		case 4:
-		case 6: STRCAT(buf, " -"); break;
-		case 5:
-		case 7: STRCAT(buf, " -+"); break;
-	    }
+#ifdef FEAT_TERMINAL
+	    if (curbuf->b_term == NULL)
+#endif
+		switch (bufIsChanged(curbuf)
+			+ (curbuf->b_p_ro * 2)
+			+ (!curbuf->b_p_ma * 4))
+		{
+		    case 1: STRCAT(buf, " +"); break;
+		    case 2: STRCAT(buf, " ="); break;
+		    case 3: STRCAT(buf, " =+"); break;
+		    case 4:
+		    case 6: STRCAT(buf, " -"); break;
+		    case 5:
+		    case 7: STRCAT(buf, " -+"); break;
+		}
 
-	    if (curbuf->b_fname != NULL)
+	    if (curbuf->b_fname != NULL
+#ifdef FEAT_TERMINAL
+		    && curbuf->b_term == NULL
+#endif
+		    )
 	    {
 		/* Get path of file, replace home dir with ~ */
 		off = (int)STRLEN(buf);
@@ -3663,18 +3677,8 @@ maketitle(void)
 		p = gettail_sep(buf + off);
 		if (p == buf + off)
 		{
-		    char *txt;
-
-#ifdef FEAT_TERMINAL
-		    if (curbuf->b_term != NULL)
-			txt = term_job_running(curbuf)
-						? _("running") : _("finished");
-		    else
-#endif
-			txt = _("help");
-
-		    /* must be a help or terminal buffer */
-		    vim_strncpy(buf + off, (char_u *)txt,
+		    /* must be a help buffer */
+		    vim_strncpy(buf + off, (char_u *)_("help"),
 					   (size_t)(SPACE_FOR_DIR - off - 1));
 		}
 		else
@@ -5646,6 +5650,82 @@ write_viminfo_bufferlist(FILE *fp)
 }
 #endif
 
+/*
+ * Return TRUE if "buf" is the quickfix buffer.
+ */
+    int
+bt_quickfix(buf_T *buf)
+{
+    return buf != NULL && buf->b_p_bt[0] == 'q';
+}
+
+/*
+ * Return TRUE if "buf" is a terminal buffer.
+ */
+    int
+bt_terminal(buf_T *buf)
+{
+    return buf != NULL && buf->b_p_bt[0] == 't';
+}
+
+/*
+ * Return TRUE if "buf" is a help buffer.
+ */
+    int
+bt_help(buf_T *buf)
+{
+    return buf != NULL && buf->b_help;
+}
+
+/*
+ * Return TRUE if "buf" is a "nofile", "acwrite" or "terminal" buffer.
+ * This means the buffer name is not a file name.
+ */
+    int
+bt_nofile(buf_T *buf)
+{
+    return buf != NULL && ((buf->b_p_bt[0] == 'n' && buf->b_p_bt[2] == 'f')
+	    || buf->b_p_bt[0] == 'a'
+	    || buf->b_p_bt[0] == 't');
+}
+
+/*
+ * Return TRUE if "buf" is a "nowrite", "nofile" or "terminal" buffer.
+ */
+    int
+bt_dontwrite(buf_T *buf)
+{
+    return buf != NULL && (buf->b_p_bt[0] == 'n' || buf->b_p_bt[0] == 't');
+}
+
+    int
+bt_dontwrite_msg(buf_T *buf)
+{
+    if (bt_dontwrite(buf))
+    {
+	EMSG(_("E382: Cannot write, 'buftype' option is set"));
+	return TRUE;
+    }
+    return FALSE;
+}
+
+/*
+ * Return TRUE if the buffer should be hidden, according to 'hidden', ":hide"
+ * and 'bufhidden'.
+ */
+    int
+buf_hide(buf_T *buf)
+{
+    /* 'bufhidden' overrules 'hidden' and ":hide", check it first */
+    switch (buf->b_p_bh[0])
+    {
+	case 'u':		    /* "unload" */
+	case 'w':		    /* "wipe" */
+	case 'd': return FALSE;	    /* "delete" */
+	case 'h': return TRUE;	    /* "hide" */
+    }
+    return (p_hid || cmdmod.hide);
+}
 
 /*
  * Return special buffer name.
@@ -5670,16 +5750,20 @@ buf_spname(buf_T *buf)
 	    return (char_u *)_(msg_qflist);
     }
 #endif
-#ifdef FEAT_QUICKFIX
+
     /* There is no _file_ when 'buftype' is "nofile", b_sfname
-     * contains the name as specified by the user */
+     * contains the name as specified by the user. */
     if (bt_nofile(buf))
     {
+#ifdef FEAT_TERMINAL
+	if (buf->b_term != NULL)
+	    return term_get_status_text(buf->b_term);
+#endif
 	if (buf->b_sfname != NULL)
 	    return buf->b_sfname;
 	return (char_u *)_("[Scratch]");
     }
-#endif
+
     if (buf->b_fname == NULL)
 	return (char_u *)_("[No Name]");
     return NULL;

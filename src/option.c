@@ -2773,7 +2773,7 @@ static struct vimoption options[] =
     {"termkey", "tk",	    P_STRING|P_ALLOCED|P_RWIN|P_VI_DEF,
 #ifdef FEAT_TERMINAL
 			    (char_u *)VAR_WIN, PV_TK,
-			    {(char_u *)"\x17", (char_u *)NULL}
+			    {(char_u *)"", (char_u *)NULL}
 #else
 			    (char_u *)NULL, PV_NONE,
 			    {(char_u *)NULL, (char_u *)0L}
@@ -7465,7 +7465,7 @@ did_set_string_option(
 
 #ifdef FEAT_TERMINAL
     /* 'termkey' */
-    else if (varp == &curwin->w_p_tms)
+    else if (varp == &curwin->w_p_tk)
     {
 	if (*curwin->w_p_tk != NUL && string_to_key(curwin->w_p_tk, TRUE) == 0)
 	    errmsg = e_invarg;
