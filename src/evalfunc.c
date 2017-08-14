@@ -831,10 +831,12 @@ static struct fst
 #endif
     {"tempname",	0, 0, f_tempname},
 #ifdef FEAT_TERMINAL
+    {"term_getaltscreen", 1, 1, f_term_getaltscreen},
     {"term_getattr",	2, 2, f_term_getattr},
     {"term_getcursor",	1, 1, f_term_getcursor},
     {"term_getjob",	1, 1, f_term_getjob},
     {"term_getline",	2, 2, f_term_getline},
+    {"term_getscrolled", 1, 1, f_term_getscrolled},
     {"term_getsize",	1, 1, f_term_getsize},
     {"term_getstatus",	1, 1, f_term_getstatus},
     {"term_gettitle",	1, 1, f_term_gettitle},
@@ -1930,6 +1932,9 @@ f_ch_logfile(typval_T *argvars, typval_T *rettv UNUSED)
     char_u *opt = (char_u *)"";
     char_u buf[NUMBUFLEN];
 
+    /* Don't open a file in restricted mode. */
+    if (check_restricted() || check_secure())
+	return;
     fname = get_tv_string(&argvars[0]);
     if (argvars[1].v_type == VAR_STRING)
 	opt = get_tv_string_buf(&argvars[1], buf);
@@ -2016,7 +2021,7 @@ f_ch_setoptions(typval_T *argvars, typval_T *rettv UNUSED)
 	return;
     clear_job_options(&opt);
     if (get_job_options(&argvars[1], &opt,
-			      JO_CB_ALL + JO_TIMEOUT_ALL + JO_MODE_ALL) == OK)
+			    JO_CB_ALL + JO_TIMEOUT_ALL + JO_MODE_ALL, 0) == OK)
 	channel_set_options(channel, &opt);
     free_job_options(&opt);
 }
@@ -2040,7 +2045,7 @@ f_ch_status(typval_T *argvars, typval_T *rettv)
     if (argvars[1].v_type != VAR_UNKNOWN)
     {
 	clear_job_options(&opt);
-	if (get_job_options(&argvars[1], &opt, JO_PART) == OK
+	if (get_job_options(&argvars[1], &opt, JO_PART, 0) == OK
 						     && (opt.jo_set & JO_PART))
 	    part = opt.jo_part;
     }
@@ -5223,6 +5228,9 @@ get_win_info(win_T *wp, short tpnr, short winnr)
     dict_add_nr_str(dict, "width", wp->w_width, NULL);
     dict_add_nr_str(dict, "bufnr", wp->w_buffer->b_fnum, NULL);
 
+#ifdef FEAT_TERMINAL
+    dict_add_nr_str(dict, "terminal", bt_terminal(wp->w_buffer), NULL);
+#endif
 #ifdef FEAT_QUICKFIX
     dict_add_nr_str(dict, "quickfix", bt_quickfix(wp->w_buffer), NULL);
     dict_add_nr_str(dict, "loclist",
@@ -6778,7 +6786,7 @@ f_job_setoptions(typval_T *argvars, typval_T *rettv UNUSED)
     if (job == NULL)
 	return;
     clear_job_options(&opt);
-    if (get_job_options(&argvars[1], &opt, JO_STOPONEXIT + JO_EXIT_CB) == OK)
+    if (get_job_options(&argvars[1], &opt, JO_STOPONEXIT + JO_EXIT_CB, 0) == OK)
 	job_set_options(job, &opt);
     free_job_options(&opt);
 }
@@ -7841,6 +7849,10 @@ f_mode(typval_T *argvars, typval_T *rettv)
 	buf[0] = 'x';
 	buf[1] = '!';
     }
+#ifdef FEAT_TERMINAL
+    else if (term_use_loop())
+	buf[0] = 't';
+#endif
     else if (VIsual_active)
     {
 	if (VIsual_select)
