@@ -46,7 +46,7 @@ set PERL=c:\Strawberry\perl
 set PERL_VER=524
 
 echo "Updating version numbers from git..."
-call .\tools\UpdateVersionByGitTag.py -i .\src\version.h
+call c:\python27\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
 call %VS_DIR%\VC\Auxiliary\Build\vcvarsall.bat %TOOLCHAIN%
 
