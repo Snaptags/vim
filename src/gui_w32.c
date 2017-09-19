@@ -2953,13 +2953,11 @@ _OnActivateApp(
     return MyWindowProc(hwnd, WM_ACTIVATEAPP, fActivate, (DWORD)dwThreadId);
 }
 
-#if defined(FEAT_WINDOWS) || defined(PROTO)
     void
 gui_mch_destroy_scrollbar(scrollbar_T *sb)
 {
     DestroyWindow(sb->id);
 }
-#endif
 
 /*
  * Get current mouse coordinates in text window.
@@ -3791,12 +3789,11 @@ _OnDropFiles(
     HWND hwnd UNUSED,
     HDROP hDrop)
 {
-#ifdef FEAT_WINDOWS
-# define BUFPATHLEN _MAX_PATH
-# define DRAGQVAL 0xFFFFFFFF
-# ifdef FEAT_MBYTE
+#define BUFPATHLEN _MAX_PATH
+#define DRAGQVAL 0xFFFFFFFF
+#ifdef FEAT_MBYTE
     WCHAR   wszFile[BUFPATHLEN];
-# endif
+#endif
     char    szFile[BUFPATHLEN];
     UINT    cFiles = DragQueryFile(hDrop, DRAGQVAL, NULL, 0);
     UINT    i;
@@ -3817,11 +3814,11 @@ _OnDropFiles(
     if (fnames != NULL)
 	for (i = 0; i < cFiles; ++i)
 	{
-# ifdef FEAT_MBYTE
+#ifdef FEAT_MBYTE
 	    if (DragQueryFileW(hDrop, i, wszFile, BUFPATHLEN) > 0)
 		fnames[i] = utf16_to_enc(wszFile, NULL);
 	    else
-# endif
+#endif
 	    {
 		DragQueryFile(hDrop, i, szFile, BUFPATHLEN);
 		fnames[i] = vim_strsave((char_u *)szFile);
@@ -3843,7 +3840,6 @@ _OnDropFiles(
 
 	s_need_activate = TRUE;
     }
-#endif
 }
 
     static int
@@ -5469,9 +5465,7 @@ gui_mch_init(void)
 #endif
     s_hdc = GetDC(s_textArea);
 
-#ifdef FEAT_WINDOWS
     DragAcceptFiles(s_hwnd, TRUE);
-#endif
 
     /* Do we need to bother with this? */
     /* m_fMouseAvail = GetSystemMetrics(SM_MOUSEPRESENT); */
@@ -5787,7 +5781,7 @@ _OnImeNotify(HWND hWnd, DWORD dwCommand, DWORD dwData UNUSED)
 		State &= ~LANGMAP;
 		if (State & INSERT)
 		{
-#if defined(FEAT_WINDOWS) && defined(FEAT_KEYMAP)
+#if defined(FEAT_KEYMAP)
 		    /* Unshown 'keymap' in status lines */
 		    if (curbuf->b_p_iminsert == B_IMODE_LMAP)
 		    {
