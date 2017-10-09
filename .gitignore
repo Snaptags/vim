@@ -39,6 +39,7 @@ src/Obj*/pathdef.c
 src/libvterm/vterm.lib
 gvimext.dll
 gvimext.lib
+gvim.lib
 runtime/doc/uganda.nsis.txt
 
 # Borland C++
