@@ -49,4 +49,4 @@ echo "Updating version numbers from git..."
 call c:\python27\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
 call %VS_DIR%\VC\Auxiliary\Build\vcvarsall.bat %TOOLCHAIN%
-
+d:
