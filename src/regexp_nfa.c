@@ -6183,7 +6183,7 @@ nfa_regmatch(
 		{
 		    /* If \Z was present, then ignore composing characters.
 		     * When ignoring the base character this always matches. */
-		    if (len == 0 && sta->c != curc)
+		    if (sta->c != curc)
 			result = FAIL;
 		    else
 			result = OK;
@@ -7334,14 +7334,13 @@ nfa_regcomp(char_u *expr, int re_flags)
     nfa_regengine.expr = NULL;
 
 out:
-    vim_free(post_start);
-    post_start = post_ptr = post_end = NULL;
+    VIM_CLEAR(post_start);
+    post_ptr = post_end = NULL;
     state_ptr = NULL;
     return (regprog_T *)prog;
 
 fail:
-    vim_free(prog);
-    prog = NULL;
+    VIM_CLEAR(prog);
 #ifdef ENABLE_LOG
     nfa_postfix_dump(expr, FAIL);
 #endif
