@@ -38,16 +38,13 @@
  * in tl_scrollback are no longer used.
  *
  * TODO:
- * - For the "drop" command accept another argument for options.
- * - Add a way to set the 16 ANSI colors, to be used for 'termguicolors' and in
- *   the GUI.
  * - Win32: Make terminal used for :!cmd in the GUI work better.  Allow for
- *   redirection.
+ *   redirection.  Probably in call to channel_set_pipes().
  * - implement term_setsize()
+ * - add an optional limit for the scrollback size.  When reaching it remove
+ *   10% at the start.
  * - Copy text in the vterm to the Vim buffer once in a while, so that
  *   completion works.
- * - Adding WinBar to terminal window doesn't display, text isn't shifted down.
- *   a job that uses 16 colors while Vim is using > 256.
  * - in GUI vertical split causes problems.  Cursor is flickering. (Hirohito
  *   Higashi, 2017 Sep 19)
  * - after resizing windows overlap. (Boris Staletic, #2164)
@@ -67,8 +64,6 @@
  *   http://bazaar.launchpad.net/~leonerd/pangoterm/trunk/view/head:/main.c#L134
  * - when 'encoding' is not utf-8, or the job is using another encoding, setup
  *   conversions.
- * - add an optional limit for the scrollback size.  When reaching it remove
- *   10% at the start.
  */
 
 #include "vim.h"
@@ -228,8 +223,8 @@ set_term_and_win_size(term_T *term)
 	 * at the command line and scroll up as needed, using tl_toprow. */
 	term->tl_rows = Rows;
 	term->tl_cols = Columns;
+	return;
     }
-    else
 #endif
     if (*curwin->w_p_tms != NUL)
     {
@@ -3144,6 +3139,75 @@ init_default_colors(term_T *term)
     }
 }
 
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+/*
+ * Set the 16 ANSI colors from array of RGB values
+ */
+    static void
+set_vterm_palette(VTerm *vterm, long_u *rgb)
+{
+    int		index = 0;
+    VTermState	*state = vterm_obtain_state(vterm);
+    for (; index < 16; index++)
+    {
+	VTermColor	color;
+	color.red = (unsigned)(rgb[index] >> 16);
+	color.green = (unsigned)(rgb[index] >> 8) & 255;
+	color.blue = (unsigned)rgb[index] & 255;
+	vterm_state_set_palette_color(state, index, &color);
+    }
+}
+
+/*
+ * Set the ANSI color palette from a list of colors
+ */
+    static int
+set_ansi_colors_list(VTerm *vterm, list_T *list)
+{
+    int		n = 0;
+    long_u	rgb[16];
+    listitem_T	*li = list->lv_first;
+
+    for (; li != NULL && n < 16; li = li->li_next, n++)
+    {
+	char_u		*color_name;
+	guicolor_T	guicolor;
+
+	color_name = get_tv_string_chk(&li->li_tv);
+	if (color_name == NULL)
+	    return FAIL;
+
+	guicolor = GUI_GET_COLOR(color_name);
+	if (guicolor == INVALCOLOR)
+	    return FAIL;
+
+	rgb[n] = GUI_MCH_GET_RGB(guicolor);
+    }
+
+    if (n != 16 || li != NULL)
+	return FAIL;
+
+    set_vterm_palette(vterm, rgb);
+
+    return OK;
+}
+
+/*
+ * Initialize the ANSI color palette from g:terminal_ansi_colors[0:15]
+ */
+    static void
+init_vterm_ansi_colors(VTerm *vterm)
+{
+    dictitem_T	*var = find_var((char_u *)"g:terminal_ansi_colors", NULL, TRUE);
+
+    if (var != NULL
+	    && (var->di_tv.v_type != VAR_LIST
+		|| var->di_tv.vval.v_list == NULL
+		|| set_ansi_colors_list(vterm, var->di_tv.vval.v_list) == FAIL))
+	EMSG2(_(e_invarg2), "g:terminal_ansi_colors");
+}
+#endif
+
 /*
  * Handles a "drop" command from the job in the terminal.
  * "item" is the file name, "item->li_next" may have options.
@@ -3152,10 +3216,12 @@ init_default_colors(term_T *term)
 handle_drop_command(listitem_T *item)
 {
     char_u	*fname = get_tv_string(&item->li_tv);
+    listitem_T	*opt_item = item->li_next;
     int		bufnr;
     win_T	*wp;
     tabpage_T   *tp;
     exarg_T	ea;
+    char_u	*tofree = NULL;
 
     bufnr = buflist_add(fname, BLN_LISTED | BLN_NOOPT);
     FOR_ALL_TAB_WINDOWS(tp, wp)
@@ -3168,10 +3234,60 @@ handle_drop_command(listitem_T *item)
 	}
     }
 
-    /* open in new window, like ":sbuffer N" */
     vim_memset(&ea, 0, sizeof(ea));
-    ea.cmd = (char_u *)"sbuffer";
-    goto_buffer(&ea, DOBUF_FIRST, FORWARD, bufnr);
+
+    if (opt_item != NULL && opt_item->li_tv.v_type == VAR_DICT
+					&& opt_item->li_tv.vval.v_dict != NULL)
+    {
+	dict_T *dict = opt_item->li_tv.vval.v_dict;
+	char_u *p;
+
+	p = get_dict_string(dict, (char_u *)"ff", FALSE);
+	if (p == NULL)
+	    p = get_dict_string(dict, (char_u *)"fileformat", FALSE);
+	if (p != NULL)
+	{
+	    if (check_ff_value(p) == FAIL)
+		ch_log(NULL, "Invalid ff argument to drop: %s", p);
+	    else
+		ea.force_ff = *p;
+	}
+	p = get_dict_string(dict, (char_u *)"enc", FALSE);
+	if (p == NULL)
+	    p = get_dict_string(dict, (char_u *)"encoding", FALSE);
+	if (p != NULL)
+	{
+	    ea.cmd = alloc((int)STRLEN(p) + 12);
+	    if (ea.cmd != NULL)
+	    {
+		sprintf((char *)ea.cmd, "sbuf ++enc=%s", p);
+		ea.force_enc = 11;
+		tofree = ea.cmd;
+	    }
+	}
+
+	p = get_dict_string(dict, (char_u *)"bad", FALSE);
+	if (p != NULL)
+	    get_bad_opt(p, &ea);
+
+	if (dict_find(dict, (char_u *)"bin", -1) != NULL)
+	    ea.force_bin = FORCE_BIN;
+	if (dict_find(dict, (char_u *)"binary", -1) != NULL)
+	    ea.force_bin = FORCE_BIN;
+	if (dict_find(dict, (char_u *)"nobin", -1) != NULL)
+	    ea.force_bin = FORCE_NOBIN;
+	if (dict_find(dict, (char_u *)"nobinary", -1) != NULL)
+	    ea.force_bin = FORCE_NOBIN;
+    }
+
+    /* open in new window, like ":split fname" */
+    if (ea.cmd == NULL)
+	ea.cmd = (char_u *)"split";
+    ea.arg = fname;
+    ea.cmdidx = CMD_split;
+    ex_splitview(&ea);
+
+    vim_free(tofree);
 }
 
 /*
@@ -3202,7 +3318,7 @@ handle_call_command(term_T *term, channel_T *channel, listitem_T *item)
     argvars[0].v_type = VAR_NUMBER;
     argvars[0].vval.v_number = term->tl_buffer->b_fnum;
     argvars[1] = item->li_next->li_tv;
-    if (call_func(func, STRLEN(func), &rettv,
+    if (call_func(func, (int)STRLEN(func), &rettv,
 		2, argvars, /* argv_func */ NULL,
 		/* firstline */ 1, /* lastline */ 1,
 		&doesrange, /* evaluate */ TRUE,
@@ -3232,7 +3348,7 @@ parse_osc(const char *command, size_t cmdlen, void *user)
     if (cmdlen < 3 || STRNCMP(command, "51;", 3) != 0)
 	return 0; /* not handled */
 
-    reader.js_buf = vim_strnsave((char_u *)command + 3, cmdlen - 3);
+    reader.js_buf = vim_strnsave((char_u *)command + 3, (int)(cmdlen - 3));
     if (reader.js_buf == NULL)
 	return 1;
     reader.js_fill = NULL;
@@ -3279,6 +3395,26 @@ static VTermParserCallbacks parser_fallbacks = {
 };
 
 /*
+ * Use Vim's allocation functions for vterm so profiling works.
+ */
+    static void *
+vterm_malloc(size_t size, void *data UNUSED)
+{
+    return alloc_clear(size);
+}
+
+    static void
+vterm_memfree(void *ptr, void *data UNUSED)
+{
+    vim_free(ptr);
+}
+
+static VTermAllocatorFunctions vterm_allocator = {
+  &vterm_malloc,
+  &vterm_memfree
+};
+
+/*
  * Create a new vterm and initialize it.
  */
     static void
@@ -3289,7 +3425,7 @@ create_vterm(term_T *term, int rows, int cols)
     VTermState	    *state;
     VTermValue	    value;
 
-    vterm = vterm_new(rows, cols);
+    vterm = vterm_new_with_allocator(rows, cols, &vterm_allocator, NULL);
     term->tl_vterm = vterm;
     screen = vterm_obtain_screen(vterm);
     vterm_screen_set_callbacks(screen, &screen_callbacks, term);
@@ -3302,6 +3438,9 @@ create_vterm(term_T *term, int rows, int cols)
 	    vterm_obtain_state(vterm),
 	    &term->tl_default_color.fg,
 	    &term->tl_default_color.bg);
+
+    if (t_colors >= 16)
+	vterm_state_set_bold_highbright(vterm_obtain_state(vterm), 1);
 
     /* Required to initialize most things. */
     vterm_screen_reset(screen, 1 /* hard */);
@@ -3866,6 +4005,57 @@ read_dump_file(FILE *fd, VTermPos *cursor_pos)
 }
 
 /*
+ * Return an allocated string with at least "text_width" "=" characters and
+ * "fname" inserted in the middle.
+ */
+    static char_u *
+get_separator(int text_width, char_u *fname)
+{
+    int	    width = MAX(text_width, curwin->w_width);
+    char_u  *textline;
+    int	    fname_size;
+    char_u  *p = fname;
+    int	    i;
+    int	    off;
+
+    textline = alloc(width + STRLEN(fname) + 1);
+    if (textline == NULL)
+	return NULL;
+
+    fname_size = vim_strsize(fname);
+    if (fname_size < width - 8)
+    {
+	/* enough room, don't use the full window width */
+	width = MAX(text_width, fname_size + 8);
+    }
+    else if (fname_size > width - 8)
+    {
+	/* full name doesn't fit, use only the tail */
+	p = gettail(fname);
+	fname_size = vim_strsize(p);
+    }
+    /* skip characters until the name fits */
+    while (fname_size > width - 8)
+    {
+	p += (*mb_ptr2len)(p);
+	fname_size = vim_strsize(p);
+    }
+
+    for (i = 0; i < (width - fname_size) / 2 - 1; ++i)
+	textline[i] = '=';
+    textline[i++] = ' ';
+
+    STRCPY(textline + i, p);
+    off = STRLEN(textline);
+    textline[off] = ' ';
+    for (i = 1; i < (width - fname_size) / 2; ++i)
+	textline[off + i] = '=';
+    textline[off + i] = NUL;
+
+    return textline;
+}
+
+/*
  * Common for "term_dumpdiff()" and "term_dumpload()".
  */
     static void
@@ -3962,16 +4152,19 @@ term_load_dump(typval_T *argvars, typval_T *rettv, int do_diff)
 
 	term->tl_top_diff_rows = curbuf->b_ml.ml_line_count;
 
-	textline = alloc(width + 1);
+	textline = get_separator(width, fname1);
 	if (textline == NULL)
 	    goto theend;
-	for (i = 0; i < width; ++i)
-	    textline[i] = '=';
+	if (add_empty_scrollback(term, &term->tl_default_color, 0) == OK)
+	    ml_append(curbuf->b_ml.ml_line_count, textline, 0, FALSE);
+	vim_free(textline);
+
+	textline = get_separator(width, fname2);
+	if (textline == NULL)
+	    goto theend;
+	if (add_empty_scrollback(term, &term->tl_default_color, 0) == OK)
+	    ml_append(curbuf->b_ml.ml_line_count, textline, 0, FALSE);
 	textline[width] = NUL;
-	if (add_empty_scrollback(term, &term->tl_default_color, 0) == OK)
-	    ml_append(curbuf->b_ml.ml_line_count, textline, 0, FALSE);
-	if (add_empty_scrollback(term, &term->tl_default_color, 0) == OK)
-	    ml_append(curbuf->b_ml.ml_line_count, textline, 0, FALSE);
 
 	bot_lnum = curbuf->b_ml.ml_line_count;
 	width2 = read_dump_file(fd2, &cursor_pos2);
@@ -4092,6 +4285,9 @@ term_load_dump(typval_T *argvars, typval_T *rettv, int do_diff)
 	}
 
 	term->tl_cols = width;
+
+	/* looks better without wrapping */
+	curwin->w_p_wrap = 0;
     }
 
 theend:
@@ -4636,6 +4832,68 @@ f_term_sendkeys(typval_T *argvars, typval_T *rettv)
     }
 }
 
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS) || defined(PROTO)
+/*
+ * "term_getansicolors(buf)" function
+ */
+    void
+f_term_getansicolors(typval_T *argvars, typval_T *rettv)
+{
+    buf_T	*buf = term_get_buf(argvars, "term_getansicolors()");
+    term_T	*term;
+    VTermState	*state;
+    VTermColor  color;
+    char_u	hexbuf[10];
+    int		index;
+    list_T	*list;
+
+    if (rettv_list_alloc(rettv) == FAIL)
+	return;
+
+    if (buf == NULL)
+	return;
+    term = buf->b_term;
+    if (term->tl_vterm == NULL)
+	return;
+
+    list = rettv->vval.v_list;
+    state = vterm_obtain_state(term->tl_vterm);
+    for (index = 0; index < 16; index++)
+    {
+	vterm_state_get_palette_color(state, index, &color);
+	sprintf((char *)hexbuf, "#%02x%02x%02x",
+		color.red, color.green, color.blue);
+	if (list_append_string(list, hexbuf, 7) == FAIL)
+	    return;
+    }
+}
+
+/*
+ * "term_setansicolors(buf, list)" function
+ */
+    void
+f_term_setansicolors(typval_T *argvars, typval_T *rettv UNUSED)
+{
+    buf_T	*buf = term_get_buf(argvars, "term_setansicolors()");
+    term_T	*term;
+
+    if (buf == NULL)
+	return;
+    term = buf->b_term;
+    if (term->tl_vterm == NULL)
+	return;
+
+    if (argvars[1].v_type != VAR_LIST || argvars[1].vval.v_list == NULL)
+    {
+	EMSG(_(e_listreq));
+	return;
+    }
+
+    if (set_ansi_colors_list(term->tl_vterm, argvars[1].vval.v_list) == FAIL)
+	EMSG(_(e_invarg));
+}
+#endif
+
 /*
  * "term_setrestore(buf, command)" function
  */
@@ -4698,7 +4956,8 @@ f_term_start(typval_T *argvars, typval_T *rettv)
 		JO2_TERM_NAME + JO2_TERM_FINISH + JO2_HIDDEN + JO2_TERM_OPENCMD
 		    + JO2_TERM_COLS + JO2_TERM_ROWS + JO2_VERTICAL + JO2_CURWIN
 		    + JO2_CWD + JO2_ENV + JO2_EOF_CHARS
-		    + JO2_NORESTORE + JO2_TERM_KILL) == FAIL)
+		    + JO2_NORESTORE + JO2_TERM_KILL
+		    + JO2_ANSI_COLORS) == FAIL)
 	return;
 
     buf = term_start(&argvars[0], NULL, &opt, 0);
@@ -5026,6 +5285,13 @@ term_and_job_init(
 
     create_vterm(term, term->tl_rows, term->tl_cols);
 
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+    if (opt->jo_set2 & JO2_ANSI_COLORS)
+	set_vterm_palette(term->tl_vterm, opt->jo_ansi_colors);
+    else
+	init_vterm_ansi_colors(term->tl_vterm);
+#endif
+
     channel_set_job(channel, job, opt);
     job_set_options(job, opt);
 
@@ -5197,6 +5463,13 @@ term_and_job_init(
 	jobopt_T    *opt)
 {
     create_vterm(term, term->tl_rows, term->tl_cols);
+
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+    if (opt->jo_set2 & JO2_ANSI_COLORS)
+	set_vterm_palette(term->tl_vterm, opt->jo_ansi_colors);
+    else
+	init_vterm_ansi_colors(term->tl_vterm);
+#endif
 
     /* This may change a string in "argvar". */
     term->tl_job = job_start(argvar, argv, opt);
