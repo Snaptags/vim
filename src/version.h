@@ -36,5 +36,5 @@
 #define VIM_VERSION_NODOT	"vim80"
 #define VIM_VERSION_SHORT	"8.0.1839"
 #define VIM_VERSION_MEDIUM	"8.0.1839"
-#define VIM_VERSION_LONG	"VIM - Vi IMproved 8.0.1839 (2018 May 14)"
-#define VIM_VERSION_LONG_DATE	"VIM - Vi IMproved 8.0.1839 (2018 May 14, compiled "
+#define VIM_VERSION_LONG	"VIM - Vi IMproved 8.0.1839 (2018 May 17)"
+#define VIM_VERSION_LONG_DATE	"VIM - Vi IMproved 8.0.1839 (2018 May 17, compiled "
