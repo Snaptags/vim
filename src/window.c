@@ -2114,6 +2114,8 @@ leaving_window(win_T *win)
     // When leaving a prompt window stop Insert mode and perhaps restart
     // it when entering that window again.
     win->w_buffer->b_prompt_insert = restart_edit;
+    if (restart_edit != 0 && mode_displayed)
+	clear_cmdline = TRUE;		/* unshow mode later */
     restart_edit = NUL;
 
     // When leaving the window (or closing the window) was done from a
@@ -5430,25 +5432,49 @@ frame_setwidth(frame_T *curfrp, int width)
 }
 
 /*
- * Check 'winminheight' for a valid value.
+ * Check 'winminheight' for a valid value and reduce it if needed.
  */
     void
 win_setminheight(void)
 {
     int		room;
+    int		needed;
     int		first = TRUE;
-    win_T	*wp;
 
-    /* loop until there is a 'winminheight' that is possible */
+    // loop until there is a 'winminheight' that is possible
     while (p_wmh > 0)
     {
-	/* TODO: handle vertical splits */
-	room = -p_wh;
-	FOR_ALL_WINDOWS(wp)
-	    room += VISIBLE_HEIGHT(wp) - p_wmh;
-	if (room >= 0)
+	room = Rows - p_ch;
+	needed = frame_minheight(topframe, NULL);
+	if (room >= needed)
 	    break;
 	--p_wmh;
+	if (first)
+	{
+	    EMSG(_(e_noroom));
+	    first = FALSE;
+	}
+    }
+}
+
+/*
+ * Check 'winminwidth' for a valid value and reduce it if needed.
+ */
+    void
+win_setminwidth(void)
+{
+    int		room;
+    int		needed;
+    int		first = TRUE;
+
+    // loop until there is a 'winminheight' that is possible
+    while (p_wmw > 0)
+    {
+	room = Columns;
+	needed = frame_minwidth(topframe, NULL);
+	if (room >= needed)
+	    break;
+	--p_wmw;
 	if (first)
 	{
 	    EMSG(_(e_noroom));
