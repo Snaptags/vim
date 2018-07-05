@@ -37,6 +37,7 @@ def main(argv):
       line = re.sub('(VIM_VERSION_MEDIUM\t).*', r'\g<1>"'+version+'"', line)
       line = re.sub('(VIM_VERSION_LONG\t).*', r'\g<1>"VIM - Vi IMproved '+version+' ('+date+')"', line)
       line = re.sub('(VIM_VERSION_LONG_DATE\t).*', r'\g<1>"VIM - Vi IMproved '+version+' ('+date+', compiled "', line)
+      line = re.sub('(VIM_VERSION_DATE_ONLY\t).*', r'\g<1>"'+date+'"', line)
       sys.stdout.write(line)
 
 if __name__ == "__main__":
