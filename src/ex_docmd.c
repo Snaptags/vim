@@ -7750,7 +7750,7 @@ ex_stop(exarg_T *eap)
 	stoptermcap();
 	out_flush();		/* needed for SUN to restore xterm buffer */
 #ifdef FEAT_TITLE
-	mch_restore_title(3);	/* restore window titles */
+	mch_restore_title(SAVE_RESTORE_BOTH);	/* restore window titles */
 #endif
 	ui_suspend();		/* call machine specific function */
 #ifdef FEAT_TITLE
@@ -11768,7 +11768,7 @@ put_view(
      */
     if ((*flagp & SSOP_FOLDS)
 	    && wp->w_buffer->b_ffname != NULL
-	    && (*wp->w_buffer->b_p_bt == NUL || bt_help(wp->w_buffer)))
+	    && (bt_normal(wp->w_buffer) || bt_help(wp->w_buffer)))
     {
 	if (put_folds(fd, wp) == FAIL)
 	    return FAIL;
