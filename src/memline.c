@@ -2055,21 +2055,16 @@ get_b0_dict(char_u *fname, dict_T *d)
 	if (read_eintr(fd, &b0, sizeof(b0)) == sizeof(b0))
 	{
 	    if (ml_check_b0_id(&b0) == FAIL)
-		dict_add_string(d, "error",
-			       vim_strsave((char_u *)"Not a swap file"));
+		dict_add_string(d, "error", (char_u *)"Not a swap file");
 	    else if (b0_magic_wrong(&b0))
-		dict_add_string(d, "error",
-			       vim_strsave((char_u *)"Magic number mismatch"));
+		dict_add_string(d, "error", (char_u *)"Magic number mismatch");
 	    else
 	    {
 		/* we have swap information */
-		dict_add_string(d, "version", vim_strnsave(b0.b0_version, 10));
-		dict_add_string(d, "user",
-				     vim_strnsave(b0.b0_uname, B0_UNAME_SIZE));
-		dict_add_string(d, "host",
-				     vim_strnsave(b0.b0_hname, B0_HNAME_SIZE));
-		dict_add_string(d, "fname",
-				 vim_strnsave(b0.b0_fname, B0_FNAME_SIZE_ORG));
+		dict_add_string_len(d, "version", b0.b0_version, 10);
+		dict_add_string_len(d, "user", b0.b0_uname, B0_UNAME_SIZE);
+		dict_add_string_len(d, "host", b0.b0_hname, B0_HNAME_SIZE);
+		dict_add_string_len(d, "fname", b0.b0_fname, B0_FNAME_SIZE_ORG);
 
 		dict_add_number(d, "pid", char_to_long(b0.b0_pid));
 		dict_add_number(d, "mtime", char_to_long(b0.b0_mtime));
@@ -2080,12 +2075,11 @@ get_b0_dict(char_u *fname, dict_T *d)
 	    }
 	}
 	else
-	    dict_add_string(d, "error",
-				    vim_strsave((char_u *)"Cannot read file"));
+	    dict_add_string(d, "error", (char_u *)"Cannot read file");
 	close(fd);
     }
     else
-	dict_add_string(d, "error", vim_strsave((char_u *)"Cannot open file"));
+	dict_add_string(d, "error", (char_u *)"Cannot open file");
 }
 #endif
 
@@ -2487,7 +2481,6 @@ ml_get_buf(
 {
     bhdr_T	*hp;
     DATA_BL	*dp;
-    char_u	*ptr;
     static int	recursive = 0;
 
     if (lnum > buf->b_ml.ml_line_count)	/* invalid line number */
@@ -2518,6 +2511,10 @@ errorret:
      */
     if (buf->b_ml.ml_line_lnum != lnum || mf_dont_release)
     {
+	unsigned    start, end;
+	colnr_T	    len;
+	int	    idx;
+
 	ml_flush_line(buf);
 
 	/*
@@ -2540,8 +2537,18 @@ errorret:
 
 	dp = (DATA_BL *)(hp->bh_data);
 
-	ptr = (char_u *)dp + ((dp->db_index[lnum - buf->b_ml.ml_locked_low]) & DB_INDEX_MASK);
-	buf->b_ml.ml_line_ptr = ptr;
+	idx = lnum - buf->b_ml.ml_locked_low;
+	start = ((dp->db_index[idx]) & DB_INDEX_MASK);
+	// The text ends where the previous line starts.  The first line ends
+	// at the end of the block.
+	if (idx == 0)
+	    end = dp->db_txt_end;
+	else
+	    end = ((dp->db_index[idx - 1]) & DB_INDEX_MASK);
+	len = end - start;
+
+	buf->b_ml.ml_line_ptr = (char_u *)dp + start;
+	buf->b_ml.ml_line_len = len;
 	buf->b_ml.ml_line_lnum = lnum;
 	buf->b_ml.ml_flags &= ~ML_LINE_DIRTY;
     }
@@ -2614,20 +2621,21 @@ ml_append_buf(
     static int
 ml_append_int(
     buf_T	*buf,
-    linenr_T	lnum,		/* append after this line (can be 0) */
-    char_u	*line,		/* text of the new line */
-    colnr_T	len,		/* length of line, including NUL, or 0 */
-    int		newfile,	/* flag, see above */
-    int		mark)		/* mark the new line */
+    linenr_T	lnum,		// append after this line (can be 0)
+    char_u	*line,		// text of the new line
+    colnr_T	len_arg,	// length of line, including NUL, or 0
+    int		newfile,	// flag, see above
+    int		mark)		// mark the new line
 {
+    colnr_T	len = len_arg;	// length of line, including NUL, or 0
     int		i;
-    int		line_count;	/* number of indexes in current block */
+    int		line_count;	// number of indexes in current block
     int		offset;
     int		from, to;
-    int		space_needed;	/* space needed for new line */
+    int		space_needed;	// space needed for new line
     int		page_size;
     int		page_count;
-    int		db_idx;		/* index for lnum in data block */
+    int		db_idx;		// index for lnum in data block
     bhdr_T	*hp;
     memfile_T	*mfp;
     DATA_BL	*dp;
@@ -2642,8 +2650,8 @@ ml_append_int(
 	lowest_marked = lnum + 1;
 
     if (len == 0)
-	len = (colnr_T)STRLEN(line) + 1;	/* space needed for the text */
-    space_needed = len + INDEX_SIZE;	/* space needed for text + index */
+	len = (colnr_T)STRLEN(line) + 1;	// space needed for the text
+    space_needed = len + INDEX_SIZE;	// space needed for text + index
 
     mfp = buf->b_ml.ml_mfp;
     page_size = mfp->mf_page_size;
@@ -2728,7 +2736,8 @@ ml_append_int(
 		dp->db_index[i + 1] = dp->db_index[i] - len;
 	    dp->db_index[db_idx + 1] = offset - len;
 	}
-	else				    /* add line at the end */
+	else
+	    // add line at the end (which is the start of the text)
 	    dp->db_index[db_idx + 1] = dp->db_txt_start;
 
 	/*
@@ -3128,6 +3137,19 @@ ml_append_int(
     int
 ml_replace(linenr_T lnum, char_u *line, int copy)
 {
+    colnr_T len = -1;
+
+    if (line != NULL)
+	len = (colnr_T)STRLEN(line);
+    return ml_replace_len(lnum, line, len, copy);
+}
+
+    int
+ml_replace_len(linenr_T lnum, char_u *line_arg, colnr_T len_arg, int copy)
+{
+    char_u *line = line_arg;
+    colnr_T len = len_arg;
+
     if (line == NULL)		/* just checking... */
 	return FAIL;
 
@@ -3135,7 +3157,7 @@ ml_replace(linenr_T lnum, char_u *line, int copy)
     if (curbuf->b_ml.ml_mfp == NULL && open_buffer(FALSE, NULL, 0) == FAIL)
 	return FAIL;
 
-    if (copy && (line = vim_strsave(line)) == NULL) /* allocate memory */
+    if (copy && (line = vim_strnsave(line, len)) == NULL) /* allocate memory */
 	return FAIL;
 #ifdef FEAT_NETBEANS_INTG
     if (netbeans_active())
@@ -3144,11 +3166,48 @@ ml_replace(linenr_T lnum, char_u *line, int copy)
 	netbeans_inserted(curbuf, lnum, 0, line, (int)STRLEN(line));
     }
 #endif
-    if (curbuf->b_ml.ml_line_lnum != lnum)	    /* other line buffered */
-	ml_flush_line(curbuf);			    /* flush it */
-    else if (curbuf->b_ml.ml_flags & ML_LINE_DIRTY) /* same line allocated */
+    if (curbuf->b_ml.ml_line_lnum != lnum)
+    {
+	// another line is buffered, flush it
+	ml_flush_line(curbuf);
+	curbuf->b_ml.ml_flags &= ~ML_LINE_DIRTY;
+
+#ifdef FEAT_TEXT_PROP
+	if (curbuf->b_has_textprop)
+	    // Need to fetch the old line to copy over any text properties.
+	    ml_get_buf(curbuf, lnum, TRUE);
+#endif
+    }
+
+#ifdef FEAT_TEXT_PROP
+    if (curbuf->b_has_textprop)
+    {
+	size_t	oldtextlen = STRLEN(curbuf->b_ml.ml_line_ptr) + 1;
+
+	if (oldtextlen < (size_t)curbuf->b_ml.ml_line_len)
+	{
+	    char_u *newline;
+	    size_t textproplen = curbuf->b_ml.ml_line_len - oldtextlen;
+
+	    // Need to copy over text properties, stored after the text.
+	    newline = alloc(len + 1 + (int)textproplen);
+	    if (newline != NULL)
+	    {
+		mch_memmove(newline, line, len + 1);
+		mch_memmove(newline + len + 1, curbuf->b_ml.ml_line_ptr + oldtextlen, textproplen);
+		vim_free(line);
+		line = newline;
+		len += (colnr_T)textproplen;
+	    }
+	}
+    }
+#endif
+
+    if (curbuf->b_ml.ml_flags & ML_LINE_DIRTY) /* same line allocated */
 	vim_free(curbuf->b_ml.ml_line_ptr);	    /* free it */
+
     curbuf->b_ml.ml_line_ptr = line;
+    curbuf->b_ml.ml_line_len = len + 1;
     curbuf->b_ml.ml_line_lnum = lnum;
     curbuf->b_ml.ml_flags = (curbuf->b_ml.ml_flags | ML_LINE_DIRTY) & ~ML_EMPTY;
 
@@ -3490,7 +3549,7 @@ ml_flush_line(buf_T *buf)
 		old_len = dp->db_txt_end - start;
 	    else		/* text of previous line follows */
 		old_len = (dp->db_index[idx - 1] & DB_INDEX_MASK) - start;
-	    new_len = (colnr_T)STRLEN(new_line) + 1;
+	    new_len = buf->b_ml.ml_line_len;
 	    extra = new_len - old_len;	    /* negative if lines gets smaller */
 
 	    /*
@@ -5009,8 +5068,7 @@ ml_updatechunk(
 	 */
 	buf->b_ml.ml_usedchunks = 1;
 	buf->b_ml.ml_chunksize[0].mlcs_numlines = 1;
-	buf->b_ml.ml_chunksize[0].mlcs_totalsize =
-				  (long)STRLEN(buf->b_ml.ml_line_ptr) + 1;
+	buf->b_ml.ml_chunksize[0].mlcs_totalsize = (long)buf->b_ml.ml_line_len;
 	return;
     }
 
@@ -5067,6 +5125,7 @@ ml_updatechunk(
 	{
 	    int	    count;	    /* number of entries in block */
 	    int	    idx;
+	    int	    end_idx;
 	    int	    text_end;
 	    int	    linecnt;
 
@@ -5090,23 +5149,39 @@ ml_updatechunk(
 			(long)(buf->b_ml.ml_locked_low) + 1;
 		idx = curline - buf->b_ml.ml_locked_low;
 		curline = buf->b_ml.ml_locked_high + 1;
-		if (idx == 0)/* first line in block, text at the end */
-		    text_end = dp->db_txt_end;
-		else
-		    text_end = ((dp->db_index[idx - 1]) & DB_INDEX_MASK);
-		/* Compute index of last line to use in this MEMLINE */
+
+		// compute index of last line to use in this MEMLINE
 		rest = count - idx;
 		if (linecnt + rest > MLCS_MINL)
 		{
-		    idx += MLCS_MINL - linecnt - 1;
+		    end_idx = idx + MLCS_MINL - linecnt - 1;
 		    linecnt = MLCS_MINL;
 		}
 		else
 		{
-		    idx = count - 1;
+		    end_idx = count - 1;
 		    linecnt += rest;
 		}
-		size += text_end - ((dp->db_index[idx]) & DB_INDEX_MASK);
+#ifdef FEAT_TEXT_PROP
+		if (buf->b_has_textprop)
+		{
+		    int i;
+
+		    // We cannot use the text pointers to get the text length,
+		    // the text prop info would also be counted.  Go over the
+		    // lines.
+		    for (i = end_idx; i < idx; ++i)
+			size += STRLEN((char_u *)dp + (dp->db_index[i] & DB_INDEX_MASK)) + 1;
+		}
+		else
+#endif
+		{
+		    if (idx == 0)/* first line in block, text at the end */
+			text_end = dp->db_txt_end;
+		    else
+			text_end = ((dp->db_index[idx - 1]) & DB_INDEX_MASK);
+		    size += text_end - ((dp->db_index[end_idx]) & DB_INDEX_MASK);
+		}
 	    }
 	    buf->b_ml.ml_chunksize[curix].mlcs_numlines = linecnt;
 	    buf->b_ml.ml_chunksize[curix + 1].mlcs_numlines -= linecnt;
@@ -5296,7 +5371,20 @@ ml_find_line_or_offset(buf_T *buf, linenr_T lnum, long *offp)
 		idx++;
 	    }
 	}
-	len = text_end - ((dp->db_index[idx]) & DB_INDEX_MASK);
+#ifdef FEAT_TEXT_PROP
+	if (buf->b_has_textprop)
+	{
+	    int i;
+
+	    // cannot use the db_index pointer, need to get the actual text
+	    // lengths.
+	    len = 0;
+	    for (i = start_idx; i <= idx; ++i)
+		len += STRLEN((char_u *)dp + ((dp->db_index[i]) & DB_INDEX_MASK)) + 1;
+	}
+	else
+#endif
+	    len = text_end - ((dp->db_index[idx]) & DB_INDEX_MASK);
 	size += len;
 	if (offset != 0 && size >= offset)
 	{

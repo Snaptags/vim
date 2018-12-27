@@ -2827,18 +2827,22 @@ parse_command_modifiers(exarg_T *eap, char_u **errormsg, int skip_only)
 
 	    case 't':	if (checkforcmd(&p, "tab", 3))
 			{
-			    long tabnr = get_address(eap, &eap->cmd, ADDR_TABS,
-					       eap->skip, skip_only, FALSE, 1);
-			    if (tabnr == MAXLNUM)
-				cmdmod.tab = tabpage_index(curtab) + 1;
-			    else
+			    if (!skip_only)
 			    {
-				if (tabnr < 0 || tabnr > LAST_TAB_NR)
+				long tabnr = get_address(eap, &eap->cmd,
+						    ADDR_TABS, eap->skip,
+						    skip_only, FALSE, 1);
+				if (tabnr == MAXLNUM)
+				    cmdmod.tab = tabpage_index(curtab) + 1;
+				else
 				{
-				    *errormsg = (char_u *)_(e_invrange);
-				    return FAIL;
+				    if (tabnr < 0 || tabnr > LAST_TAB_NR)
+				    {
+					*errormsg = (char_u *)_(e_invrange);
+					return FAIL;
+				    }
+				    cmdmod.tab = tabnr + 1;
 				}
-				cmdmod.tab = tabnr + 1;
 			    }
 			    eap->cmd = p;
 			    continue;
@@ -4669,7 +4673,7 @@ get_address(
 #ifdef FEAT_VIRTUALEDIT
 		    pos.coladd = 0;
 #endif
-		    if (searchit(curwin, curbuf, &pos,
+		    if (searchit(curwin, curbuf, &pos, NULL,
 				*cmd == '?' ? BACKWARD : FORWARD,
 				(char_u *)"", 1L, SEARCH_MSG,
 					i, (linenr_T)0, NULL, NULL) != FAIL)
@@ -9126,8 +9130,9 @@ post_chdir(int local)
     void
 ex_cd(exarg_T *eap)
 {
-    char_u		*new_dir;
-    char_u		*tofree;
+    char_u	*new_dir;
+    char_u	*tofree;
+    int		dir_differs;
 
     new_dir = eap->arg;
 #if !defined(UNIX) && !defined(VMS)
@@ -9183,7 +9188,9 @@ ex_cd(exarg_T *eap)
 	    new_dir = NameBuff;
 	}
 #endif
-	if (new_dir == NULL || vim_chdir(new_dir))
+	dir_differs = new_dir == NULL || prev_dir == NULL
+			|| pathcmp((char *)prev_dir, (char *)new_dir, -1) != 0;
+	if (new_dir == NULL || (dir_differs && vim_chdir(new_dir)))
 	    EMSG(_(e_failed));
 	else
 	{
@@ -9195,9 +9202,11 @@ ex_cd(exarg_T *eap)
 	    /* Echo the new current directory if the command was typed. */
 	    if (KeyTyped || p_verbose >= 5)
 		ex_pwd(eap);
-	    apply_autocmds(EVENT_DIRCHANGED,
-		    is_local_chdir ? (char_u *)"window" : (char_u *)"global",
-		    new_dir, FALSE, curbuf);
+
+	    if (dir_differs)
+		apply_autocmds(EVENT_DIRCHANGED,
+		      is_local_chdir ? (char_u *)"window" : (char_u *)"global",
+		      new_dir, FALSE, curbuf);
 	}
 	vim_free(tofree);
     }
@@ -11683,7 +11692,7 @@ ses_skipframe(frame_T *fr)
 {
     frame_T	*frc;
 
-    for (frc = fr; frc != NULL; frc = frc->fr_next)
+    FOR_ALL_FRAMES(frc, fr)
 	if (ses_do_frame(frc))
 	    break;
     return frc;
@@ -11700,7 +11709,7 @@ ses_do_frame(frame_T *fr)
 
     if (fr->fr_layout == FR_LEAF)
 	return ses_do_win(fr->fr_win);
-    for (frc = fr->fr_child; frc != NULL; frc = frc->fr_next)
+    FOR_ALL_FRAMES(frc, fr->fr_child)
 	if (ses_do_frame(frc))
 	    return TRUE;
     return FALSE;
@@ -12413,7 +12422,7 @@ ex_digraphs(exarg_T *eap UNUSED)
     if (*eap->arg != NUL)
 	putdigraph(eap->arg);
     else
-	listdigraphs();
+	listdigraphs(eap->forceit);
 #else
     EMSG(_("E196: No digraphs in this version"));
 #endif
