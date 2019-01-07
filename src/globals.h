@@ -1583,6 +1583,9 @@ EXTERN char_u e_invalidreg[]    INIT(= N_("E850: Invalid register name"));
 #endif
 EXTERN char_u e_dirnotf[]	INIT(= N_("E919: Directory not found in '%s': \"%s\""));
 EXTERN char_u e_au_recursive[]	INIT(= N_("E952: Autocommand caused recursive behavior"));
+#ifdef FEAT_MENU
+EXTERN char_u e_menuothermode[] INIT(= N_("E328: Menu only exists in another mode"));
+#endif
 
 #ifdef FEAT_GUI_MAC
 EXTERN short disallow_gui	INIT(= FALSE);
@@ -1656,6 +1659,10 @@ EXTERN int *eval_lavars_used INIT(= NULL);
 
 #ifdef WIN3264
 EXTERN int ctrl_break_was_pressed INIT(= FALSE);
+#endif
+
+#ifdef FEAT_TEXT_PROP
+EXTERN int text_prop_frozen INIT(= 0);
 #endif
 
 /*
