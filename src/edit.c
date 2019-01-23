@@ -360,7 +360,7 @@ edit(
     /* Don't allow inserting in the sandbox. */
     if (sandbox != 0)
     {
-	EMSG(_(e_sandbox));
+	emsg(_(e_sandbox));
 	return FALSE;
     }
 #endif
@@ -368,7 +368,7 @@ edit(
      * caller of getcmdline() may get confused. */
     if (textlock != 0)
     {
-	EMSG(_(e_secure));
+	emsg(_(e_secure));
 	return FALSE;
     }
 
@@ -376,7 +376,7 @@ edit(
     /* Don't allow recursive insert mode when busy with completion. */
     if (compl_started || compl_busy || pum_visible())
     {
-	EMSG(_(e_secure));
+	emsg(_(e_secure));
 	return FALSE;
     }
     ins_compl_clear();	    /* clear stuff for CTRL-X mode */
@@ -476,7 +476,7 @@ edit(
 	if (p_fkmap && p_ri)
 	{
 	    beep_flush();
-	    EMSG(farsi_text_3);	    /* encoded in Farsi */
+	    emsg(farsi_text_3);	    /* encoded in Farsi */
 	    State = INSERT;
 	}
 	else
@@ -1745,23 +1745,24 @@ ins_redraw(
     }
 #endif
 
-    if (must_redraw)
-	update_screen(0);
-    else if (clear_cmdline || redraw_cmdline)
-	showmode();		/* clear cmdline and show mode */
-# if defined(FEAT_CONCEAL)
+#if defined(FEAT_CONCEAL)
     if ((conceal_update_lines
 	    && (conceal_old_cursor_line != conceal_new_cursor_line
 		|| conceal_cursor_line(curwin)))
 	    || need_cursor_line_redraw)
     {
 	if (conceal_old_cursor_line != conceal_new_cursor_line)
-	    update_single_line(curwin, conceal_old_cursor_line);
-	update_single_line(curwin, conceal_new_cursor_line == 0
-		       ? curwin->w_cursor.lnum : conceal_new_cursor_line);
+	    redrawWinline(curwin, conceal_old_cursor_line);
+	redrawWinline(curwin, conceal_new_cursor_line == 0
+			    ? curwin->w_cursor.lnum : conceal_new_cursor_line);
 	curwin->w_valid &= ~VALID_CROW;
+	need_cursor_line_redraw = FALSE;
     }
-# endif
+#endif
+    if (must_redraw)
+	update_screen(0);
+    else if (clear_cmdline || redraw_cmdline)
+	showmode();		/* clear cmdline and show mode */
     showruler(FALSE);
     setcursor();
     emsg_on_display = FALSE;	/* may remove error message now */
@@ -2386,8 +2387,8 @@ has_compl_option(int dict_opt)
     {
 	ctrl_x_mode = CTRL_X_NORMAL;
 	edit_submode = NULL;
-	msg_attr(dict_opt ? (char_u *)_("'dictionary' option is empty")
-			  : (char_u *)_("'thesaurus' option is empty"),
+	msg_attr(dict_opt ? _("'dictionary' option is empty")
+			  : _("'thesaurus' option is empty"),
 							      HL_ATTR(HLF_E));
 	if (emsg_silent == 0)
 	{
@@ -3019,7 +3020,8 @@ ins_compl_upd_pum(void)
     if (compl_match_array != NULL)
     {
 	h = curwin->w_cline_height;
-	update_screen(0);
+	// Update the screen later, before drawing the popup menu over it.
+	pum_call_update_screen();
 	if (h != curwin->w_cline_height)
 	    ins_compl_del_pum();
     }
@@ -3109,8 +3111,8 @@ ins_compl_show_pum(void)
     do_cmdline_cmd((char_u *)"if exists('g:loaded_matchparen')|3match none|endif");
 #endif
 
-    /* Update the screen before drawing the popup menu over it. */
-    update_screen(0);
+    // Update the screen later, before drawing the popup menu over it.
+    pum_call_update_screen();
 
     if (compl_match_array == NULL)
     {
@@ -3383,7 +3385,7 @@ ins_compl_files(
 	{
 	    vim_snprintf((char *)IObuff, IOSIZE,
 			      _("Scanning dictionary: %s"), (char *)files[i]);
-	    (void)msg_trunc_attr(IObuff, TRUE, HL_ATTR(HLF_R));
+	    (void)msg_trunc_attr((char *)IObuff, TRUE, HL_ATTR(HLF_R));
 	}
 
 	if (fp != NULL)
@@ -3667,11 +3669,11 @@ ins_compl_new_leader(void)
 	spell_bad_len = 0;	/* need to redetect bad word */
 #endif
 	/*
-	 * Matches were cleared, need to search for them now.  First display
-	 * the changed text before the cursor.  Set "compl_restarting" to
-	 * avoid that the first match is inserted.
+	 * Matches were cleared, need to search for them now.  Befor drawing
+	 * the popup menu display the changed text before the cursor.  Set
+	 * "compl_restarting" to avoid that the first match is inserted.
 	 */
-	update_screen(0);
+	pum_call_update_screen();
 #ifdef FEAT_GUI
 	if (gui.in_use)
 	{
@@ -4261,14 +4263,14 @@ expand_by_function(
 
     if (curwin_save != curwin || curbuf_save != curbuf)
     {
-	EMSG(_(e_complwin));
+	emsg(_(e_complwin));
 	goto theend;
     }
     curwin->w_cursor = pos;	/* restore the cursor position */
     validate_cursor();
     if (!EQUAL_POS(curwin->w_cursor, pos))
     {
-	EMSG(_(e_compldel));
+	emsg(_(e_compldel));
 	goto theend;
     }
 
@@ -4498,7 +4500,7 @@ ins_compl_get_exp(pos_T *ini)
 			    : ins_buf->b_sfname == NULL
 				? ins_buf->b_fname
 				: ins_buf->b_sfname);
-		(void)msg_trunc_attr(IObuff, TRUE, HL_ATTR(HLF_R));
+		(void)msg_trunc_attr((char *)IObuff, TRUE, HL_ATTR(HLF_R));
 	    }
 	    else if (*e_cpt == NUL)
 		break;
@@ -4528,7 +4530,7 @@ ins_compl_get_exp(pos_T *ini)
 		{
 		    type = CTRL_X_TAGS;
 		    vim_snprintf((char *)IObuff, IOSIZE, _("Scanning tags."));
-		    (void)msg_trunc_attr(IObuff, TRUE, HL_ATTR(HLF_R));
+		    (void)msg_trunc_attr((char *)IObuff, TRUE, HL_ATTR(HLF_R));
 		}
 		else
 		    type = -1;
@@ -5076,8 +5078,9 @@ ins_compl_next(
 	/* may undisplay the popup menu first */
 	ins_compl_upd_pum();
 
-	/* redraw to show the user what was inserted */
-	update_screen(0);
+	// Redraw before showing the popup menu to show the user what was
+	// inserted.
+	pum_call_update_screen();
 
 	/* display the updated popup menu */
 	ins_compl_show_pum();
@@ -5129,7 +5132,7 @@ ins_compl_next(
 	    }
 	    vim_snprintf((char *)IObuff, IOSIZE, "%s %s%s", lead,
 				s > compl_shown_match->cp_fname ? "<" : "", s);
-	    msg(IObuff);
+	    msg((char *)IObuff);
 	    redraw_cmdline = FALSE;	    /* don't overwrite! */
 	}
     }
@@ -5566,7 +5569,7 @@ ins_complete(int c, int enable_pum)
 					  ? curbuf->b_p_cfu : curbuf->b_p_ofu;
 	    if (*funcname == NUL)
 	    {
-		EMSG2(_(e_notset), ctrl_x_mode == CTRL_X_FUNCTION
+		semsg(_(e_notset), ctrl_x_mode == CTRL_X_FUNCTION
 					     ? "completefunc" : "omnifunc");
 		/* restore did_ai, so that adding comment leader works */
 		did_ai = save_did_ai;
@@ -5586,14 +5589,14 @@ ins_complete(int c, int enable_pum)
 	    State = save_State;
 	    if (curwin_save != curwin || curbuf_save != curbuf)
 	    {
-		EMSG(_(e_complwin));
+		emsg(_(e_complwin));
 		return FAIL;
 	    }
 	    curwin->w_cursor = pos;	/* restore the cursor position */
 	    validate_cursor();
 	    if (!EQUAL_POS(curwin->w_cursor, pos))
 	    {
-		EMSG(_(e_compldel));
+		emsg(_(e_compldel));
 		return FAIL;
 	    }
 
@@ -5875,7 +5878,7 @@ ins_complete(int c, int enable_pum)
 	    if (edit_submode_extra != NULL)
 	    {
 		if (!p_smd)
-		    msg_attr(edit_submode_extra,
+		    msg_attr((char *)edit_submode_extra,
 			    edit_submode_highl < HLF_COUNT
 			    ? HL_ATTR(edit_submode_highl) : 0);
 	    }
@@ -6497,6 +6500,7 @@ internal_format(
 	char_u	*saved_text = NULL;
 	colnr_T	col;
 	colnr_T	end_col;
+	int	wcc;			// counter for whitespace chars
 
 	virtcol = get_nolist_virtcol()
 		+ char2cells(c != NUL ? c : gchar_cursor());
@@ -6558,14 +6562,26 @@ internal_format(
 		/* remember position of blank just before text */
 		end_col = curwin->w_cursor.col;
 
-		/* find start of sequence of blanks */
+		// find start of sequence of blanks
+		wcc = 0;
 		while (curwin->w_cursor.col > 0 && WHITECHAR(cc))
 		{
 		    dec_cursor();
 		    cc = gchar_cursor();
+
+		    // Increment count of how many whitespace chars in this
+		    // group; we only need to know if it's more than one.
+		    if (wcc < 2)
+		        wcc++;
 		}
 		if (curwin->w_cursor.col == 0 && WHITECHAR(cc))
 		    break;		/* only spaces in front of text */
+
+		// Don't break after a period when 'formatoptions' has 'p' and
+		// there are less than two spaces.
+		if (has_format_option(FO_PERIOD_ABBR) && cc == '.' && wcc < 2)
+		    continue;
+
 #ifdef FEAT_COMMENTS
 		/* Don't break until after the comment leader */
 		if (curwin->w_cursor.col < leader_len)
@@ -7664,7 +7680,7 @@ stuff_inserted(
     ptr = get_last_insert();
     if (ptr == NULL)
     {
-	EMSG(_(e_noinstext));
+	emsg(_(e_noinstext));
 	return FAIL;
     }
 
@@ -8521,6 +8537,7 @@ ins_reg(void)
     ++no_u_sync;
     if (regname == '=')
     {
+	pos_T	curpos = curwin->w_cursor;
 # ifdef HAVE_INPUT_METHOD
 	int	im_on = im_get_status();
 # endif
@@ -8529,8 +8546,12 @@ ins_reg(void)
 	u_sync_once = 2;
 
 	regname = get_expr_register();
+
+	// Cursor may be moved back a column.
+	curwin->w_cursor = curpos;
+	check_cursor();
 # ifdef HAVE_INPUT_METHOD
-	/* Restore the Input Method. */
+	// Restore the Input Method.
 	if (im_on)
 	    im_set_active(TRUE);
 # endif
@@ -8840,7 +8861,7 @@ ins_esc(
     if (reg_recording != 0 || restart_edit != NUL)
 	showmode();
     else if (p_smd)
-	MSG("");
+	msg("");
 
     return TRUE;	    /* exit Insert mode */
 }
@@ -8955,7 +8976,7 @@ ins_insert(int replaceState)
     if (p_fkmap && p_ri)
     {
 	beep_flush();
-	EMSG(farsi_text_3);	/* encoded in Farsi */
+	emsg(farsi_text_3);	/* encoded in Farsi */
 	return;
     }
 #endif

@@ -920,7 +920,7 @@ alloc_check(unsigned size)
     {
 	/* Don't hide this message */
 	emsg_silent = 0;
-	EMSG(_("E340: Line is becoming too long"));
+	emsg(_("E340: Line is becoming too long"));
 	return NULL;
     }
 #endif
@@ -960,7 +960,7 @@ lalloc(long_u size, int message)
     {
 	/* Don't hide this message */
 	emsg_silent = 0;
-	IEMSGN(_("E341: Internal error: lalloc(%ld, )"), size);
+	siemsg(_("E341: Internal error: lalloc(%ld, )"), size);
 	return NULL;
     }
 
@@ -1033,6 +1033,7 @@ theend:
 /*
  * lalloc() with an ID for alloc_fail().
  */
+#if defined(FEAT_SIGNS) || defined(PROTO)
     char_u *
 lalloc_id(long_u size, int message, alloc_id_T id UNUSED)
 {
@@ -1042,6 +1043,7 @@ lalloc_id(long_u size, int message, alloc_id_T id UNUSED)
 #endif
     return (lalloc((long_u)size, message));
 }
+#endif
 
 #if defined(MEM_PROFILE) || defined(PROTO)
 /*
@@ -1079,7 +1081,7 @@ do_outofmem_msg(long_u size)
 	 * message fails, e.g. when setting v:errmsg. */
 	did_outofmem_msg = TRUE;
 
-	EMSGN(_("E342: Out of memory!  (allocating %lu bytes)"), size);
+	semsg(_("E342: Out of memory!  (allocating %lu bytes)"), size);
     }
 }
 
@@ -2135,6 +2137,7 @@ ga_grow(garray_T *gap, int n)
     return OK;
 }
 
+#if defined(FEAT_EVAL) || defined(FEAT_SEARCHPATH) || defined(PROTO)
 /*
  * For a growing array that contains a list of strings: concatenate all the
  * strings with a separating "sep".
@@ -2170,6 +2173,7 @@ ga_concat_strings(garray_T *gap, char *sep)
     }
     return s;
 }
+#endif
 
 #if defined(FEAT_VIMINFO) || defined(FEAT_EVAL) || defined(PROTO)
 /*
@@ -3272,7 +3276,7 @@ call_shell(char_u *cmd, int opt)
     if (p_verbose > 3)
     {
 	verbose_enter();
-	smsg((char_u *)_("Calling shell to execute: \"%s\""),
+	smsg(_("Calling shell to execute: \"%s\""),
 						    cmd == NULL ? p_sh : cmd);
 	out_char('\n');
 	cursor_on();
@@ -3286,7 +3290,7 @@ call_shell(char_u *cmd, int opt)
 
     if (*p_sh == NUL)
     {
-	EMSG(_(e_shellempty));
+	emsg(_(e_shellempty));
 	retval = -1;
     }
     else
@@ -3411,7 +3415,7 @@ same_directory(char_u *f1, char_u *f2)
 
 #if defined(FEAT_SESSION) || defined(FEAT_AUTOCHDIR) \
 	|| defined(MSWIN) || defined(FEAT_GUI_MAC) || defined(FEAT_GUI_GTK) \
-	|| defined(FEAT_SUN_WORKSHOP) || defined(FEAT_NETBEANS_INTG) \
+	|| defined(FEAT_NETBEANS_INTG) \
 	|| defined(PROTO)
 /*
  * Change to a file's directory.
@@ -3538,7 +3542,7 @@ static char * mshape_names[] =
  * ("what" is SHAPE_MOUSE).
  * Returns error message for an illegal option, NULL otherwise.
  */
-    char_u *
+    char *
 parse_shape_opt(int what)
 {
     char_u	*modep;
@@ -3574,9 +3578,9 @@ parse_shape_opt(int what)
 	    commap = vim_strchr(modep, ',');
 
 	    if (colonp == NULL || (commap != NULL && commap < colonp))
-		return (char_u *)N_("E545: Missing colon");
+		return N_("E545: Missing colon");
 	    if (colonp == modep)
-		return (char_u *)N_("E546: Illegal mode");
+		return N_("E546: Illegal mode");
 
 	    /*
 	     * Repeat for all mode's before the colon.
@@ -3602,7 +3606,7 @@ parse_shape_opt(int what)
 				break;
 			if (idx == SHAPE_IDX_COUNT
 				   || (shape_table[idx].used_for & what) == 0)
-			    return (char_u *)N_("E546: Illegal mode");
+			    return N_("E546: Illegal mode");
 			if (len == 2 && modep[0] == 'v' && modep[1] == 'e')
 			    found_ve = TRUE;
 		    }
@@ -3641,7 +3645,7 @@ parse_shape_opt(int what)
 			    if (mshape_names[i] == NULL)
 			    {
 				if (!VIM_ISDIGIT(*p))
-				    return (char_u *)N_("E547: Illegal mouseshape");
+				    return N_("E547: Illegal mouseshape");
 				if (round == 2)
 				    shape_table[idx].mshape =
 					      getdigits(&p) + MSHAPE_NUMBERED;
@@ -3681,12 +3685,12 @@ parse_shape_opt(int what)
 			{
 			    p += len;
 			    if (!VIM_ISDIGIT(*p))
-				return (char_u *)N_("E548: digit expected");
+				return N_("E548: digit expected");
 			    n = getdigits(&p);
 			    if (len == 3)   /* "ver" or "hor" */
 			    {
 				if (n == 0)
-				    return (char_u *)N_("E549: Illegal percentage");
+				    return N_("E549: Illegal percentage");
 				if (round == 2)
 				{
 				    if (TOLOWER_ASC(i) == 'v')
@@ -4385,7 +4389,7 @@ vim_findfile_init(
 	{
 	    if (len + 5 >= MAXPATHL)
 	    {
-		EMSG(_(e_pathtoolong));
+		emsg(_(e_pathtoolong));
 		break;
 	    }
 	    if (STRNCMP(wc_part, "**", 2) == 0)
@@ -4404,7 +4408,7 @@ vim_findfile_init(
 		wc_part = (char_u *)errpt;
 		if (*wc_part != NUL && !vim_ispathsep(*wc_part))
 		{
-		    EMSG2(_("E343: Invalid path: '**[number]' must be at the end of the path or be followed by '%s'."), PATHSEPSTR);
+		    semsg(_("E343: Invalid path: '**[number]' must be at the end of the path or be followed by '%s'."), PATHSEPSTR);
 		    goto error_return;
 		}
 	    }
@@ -4436,7 +4440,7 @@ vim_findfile_init(
     if (STRLEN(search_ctx->ffsc_start_dir)
 			  + STRLEN(search_ctx->ffsc_fix_path) + 3 >= MAXPATHL)
     {
-	EMSG(_(e_pathtoolong));
+	emsg(_(e_pathtoolong));
 	goto error_return;
     }
     STRCPY(ff_expand_buffer, search_ctx->ffsc_start_dir);
@@ -4667,10 +4671,10 @@ vim_findfile(void *search_ctx_arg)
 		if (p_verbose >= 5)
 		{
 		    verbose_enter_scroll();
-		    smsg((char_u *)"Already Searched: %s (%s)",
+		    smsg("Already Searched: %s (%s)",
 				   stackp->ffs_fix_path, stackp->ffs_wc_path);
 		    /* don't overwrite this either */
-		    msg_puts((char_u *)"\n");
+		    msg_puts("\n");
 		    verbose_leave_scroll();
 		}
 #endif
@@ -4681,10 +4685,10 @@ vim_findfile(void *search_ctx_arg)
 	    else if (p_verbose >= 5)
 	    {
 		verbose_enter_scroll();
-		smsg((char_u *)"Searching: %s (%s)",
+		smsg("Searching: %s (%s)",
 				   stackp->ffs_fix_path, stackp->ffs_wc_path);
 		/* don't overwrite this either */
-		msg_puts((char_u *)"\n");
+		msg_puts("\n");
 		verbose_leave_scroll();
 	    }
 #endif
@@ -4900,10 +4904,10 @@ vim_findfile(void *search_ctx_arg)
 				    if (p_verbose >= 5)
 				    {
 					verbose_enter_scroll();
-					smsg((char_u *)"Already: %s",
+					smsg("Already: %s",
 								   file_path);
 					/* don't overwrite this either */
-					msg_puts((char_u *)"\n");
+					msg_puts("\n");
 					verbose_leave_scroll();
 				    }
 				    continue;
@@ -4928,9 +4932,9 @@ vim_findfile(void *search_ctx_arg)
 				if (p_verbose >= 5)
 				{
 				    verbose_enter_scroll();
-				    smsg((char_u *)"HIT: %s", file_path);
+				    smsg("HIT: %s", file_path);
 				    /* don't overwrite this either */
-				    msg_puts((char_u *)"\n");
+				    msg_puts("\n");
 				    verbose_leave_scroll();
 				}
 #endif
@@ -5128,10 +5132,10 @@ ff_get_visited_list(
 		if (p_verbose >= 5)
 		{
 		    verbose_enter_scroll();
-		    smsg((char_u *)"ff_get_visited_list: FOUND list for %s",
+		    smsg("ff_get_visited_list: FOUND list for %s",
 								    filename);
 		    /* don't overwrite this either */
-		    msg_puts((char_u *)"\n");
+		    msg_puts("\n");
 		    verbose_leave_scroll();
 		}
 #endif
@@ -5145,9 +5149,9 @@ ff_get_visited_list(
     if (p_verbose >= 5)
     {
 	verbose_enter_scroll();
-	smsg((char_u *)"ff_get_visited_list: new list for %s", filename);
+	smsg("ff_get_visited_list: new list for %s", filename);
 	/* don't overwrite this either */
-	msg_puts((char_u *)"\n");
+	msg_puts("\n");
 	verbose_leave_scroll();
     }
 #endif
@@ -5766,19 +5770,19 @@ find_file_in_path_option(
 	if (first == TRUE)
 	{
 	    if (find_what == FINDFILE_DIR)
-		EMSG2(_("E344: Can't find directory \"%s\" in cdpath"),
+		semsg(_("E344: Can't find directory \"%s\" in cdpath"),
 			ff_file_to_find);
 	    else
-		EMSG2(_("E345: Can't find file \"%s\" in path"),
+		semsg(_("E345: Can't find file \"%s\" in path"),
 			ff_file_to_find);
 	}
 	else
 	{
 	    if (find_what == FINDFILE_DIR)
-		EMSG2(_("E346: No more directory \"%s\" found in cdpath"),
+		semsg(_("E346: No more directory \"%s\" found in cdpath"),
 			ff_file_to_find);
 	    else
-		EMSG2(_("E347: No more file \"%s\" found in path"),
+		semsg(_("E347: No more file \"%s\" found in path"),
 			ff_file_to_find);
 	}
     }
