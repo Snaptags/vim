@@ -577,7 +577,6 @@ var_redir_stop(void)
     VIM_CLEAR(redir_varname);
 }
 
-# if defined(FEAT_MBYTE) || defined(PROTO)
     int
 eval_charconvert(
     char_u	*enc_from,
@@ -602,7 +601,6 @@ eval_charconvert(
 	return FAIL;
     return OK;
 }
-# endif
 
 # if defined(FEAT_POSTSCRIPT) || defined(PROTO)
     int
@@ -2587,7 +2585,6 @@ eval_for_line(
     char_u	*expr;
     typval_T	tv;
     list_T	*l;
-    blob_T	*b;
 
     *errp = TRUE;	/* default: there is an error */
 
@@ -2632,16 +2629,17 @@ eval_for_line(
 	    }
 	    else if (tv.v_type == VAR_BLOB)
 	    {
-		b = tv.vval.v_blob;
-		if (b == NULL)
-		    clear_tv(&tv);
-		else
+		fi->fi_bi = 0;
+		if (tv.vval.v_blob != NULL)
 		{
-		    // No need to increment the refcount, it's already set for
-		    // the blob being used in "tv".
-		    fi->fi_blob = b;
-		    fi->fi_bi = 0;
+		    typval_T btv;
+
+		    // Make a copy, so that the iteration still works when the
+		    // blob is changed.
+		    blob_copy(&tv, &btv);
+		    fi->fi_blob = btv.vval.v_blob;
 		}
+		clear_tv(&tv);
 	    }
 	    else
 	    {
@@ -4723,12 +4721,13 @@ eval_index(
 		}
 		else
 		{
-		    // The resulting variable is a string of a single
-		    // character.  If the index is too big or negative the
-		    // result is empty.
+		    // The resulting variable is a byte value.
+		    // If the index is too big or negative that is an error.
+		    if (n1 < 0)
+			n1 = len + n1;
 		    if (n1 < len && n1 >= 0)
 		    {
-			int v = (int)blob_get(rettv->vval.v_blob, n1);
+			int v = blob_get(rettv->vval.v_blob, n1);
 
 			clear_tv(rettv);
 			rettv->v_type = VAR_NUMBER;
@@ -4997,13 +4996,11 @@ get_string_tv(char_u **arg, typval_T *rettv, int evaluate)
 				  nr = (nr << 4) + hex2nr(*p);
 			      }
 			      ++p;
-#ifdef FEAT_MBYTE
 			      /* For "\u" store the number according to
 			       * 'encoding'. */
 			      if (c != 'X')
 				  name += (*mb_char2bytes)(nr, name);
 			      else
-#endif
 				  *name++ = nr;
 			  }
 			  break;
@@ -6210,12 +6207,10 @@ var2fpos(
 	    return NULL;	/* invalid column number */
 	--pos.col;
 
-#ifdef FEAT_VIRTUALEDIT
 	/* Get the virtual offset.  Defaults to zero. */
 	pos.coladd = list_find_nr(l, 2L, &error);
 	if (error)
 	    pos.coladd = 0;
-#endif
 
 	return &pos;
     }
@@ -6239,9 +6234,7 @@ var2fpos(
 	return pp;
     }
 
-#ifdef FEAT_VIRTUALEDIT
     pos.coladd = 0;
-#endif
 
     if (name[0] == 'w' && dollar_lnum)
     {
@@ -6326,13 +6319,11 @@ list2fpos(
 	return FAIL;
     posp->col = n;
 
-#ifdef FEAT_VIRTUALEDIT
     n = list_find_nr(l, i, NULL);	/* off */
     if (n < 0)
 	posp->coladd = 0;
     else
 	posp->coladd = n;
-#endif
 
     if (curswantp != NULL)
 	*curswantp = list_find_nr(l, i + 1, NULL);  /* curswant */
@@ -6703,11 +6694,9 @@ set_vim_var_char(int c)
 {
     char_u	buf[MB_MAXBYTES + 1];
 
-#ifdef FEAT_MBYTE
     if (has_mbyte)
 	buf[(*mb_char2bytes)(c, buf)] = NUL;
     else
-#endif
     {
 	buf[0] = c;
 	buf[1] = NUL;
@@ -6884,12 +6873,10 @@ set_cmdarg(exarg_T *eap, char_u *oldarg)
 
     if (eap->force_ff != 0)
 	len += 10; /* " ++ff=unix" */
-# ifdef FEAT_MBYTE
     if (eap->force_enc != 0)
 	len += (unsigned)STRLEN(eap->cmd + eap->force_enc) + 7;
     if (eap->bad_char != 0)
 	len += 7 + 4;  /* " ++bad=" + "keep" or "drop" */
-# endif
 
     newval = alloc(len + 1);
     if (newval == NULL)
@@ -6910,7 +6897,6 @@ set_cmdarg(exarg_T *eap, char_u *oldarg)
 						eap->force_ff == 'u' ? "unix"
 						: eap->force_ff == 'd' ? "dos"
 						: "mac");
-#ifdef FEAT_MBYTE
     if (eap->force_enc != 0)
 	sprintf((char *)newval + STRLEN(newval), " ++enc=%s",
 					       eap->cmd + eap->force_enc);
@@ -6920,7 +6906,6 @@ set_cmdarg(exarg_T *eap, char_u *oldarg)
 	STRCPY(newval + STRLEN(newval), " ++bad=drop");
     else if (eap->bad_char != 0)
 	sprintf((char *)newval + STRLEN(newval), " ++bad=%c", eap->bad_char);
-#endif
     vimvars[VV_CMDARG].vv_str = newval;
     return oldval;
 }
@@ -7891,9 +7876,16 @@ set_var(
 	{
 	    if (v->di_tv.v_type == VAR_STRING)
 	    {
-		vim_free(v->di_tv.vval.v_string);
+		VIM_CLEAR(v->di_tv.vval.v_string);
 		if (copy || tv->v_type != VAR_STRING)
-		    v->di_tv.vval.v_string = vim_strsave(tv_get_string(tv));
+		{
+		    char_u *val = tv_get_string(tv);
+
+		    // Careful: when assigning to v:errmsg and tv_get_string()
+		    // causes an error message the variable will alrady be set.
+		    if (v->di_tv.vval.v_string == NULL)
+			v->di_tv.vval.v_string = vim_strsave(val);
+		}
 		else
 		{
 		    /* Take over the string to avoid an extra alloc/free. */
@@ -8076,7 +8068,7 @@ tv_check_lock(int lock, char_u *name, int use_gettext)
 /*
  * Copy the values from typval_T "from" to typval_T "to".
  * When needed allocates string or increases reference count.
- * Does not make a copy of a list or dict but copies the reference!
+ * Does not make a copy of a list, blob or dict but copies the reference!
  * It is OK for "from" and "to" to point to the same item.  This is used to
  * make a copy later.
  */
@@ -8216,19 +8208,7 @@ item_copy(
 		ret = FAIL;
 	    break;
 	case VAR_BLOB:
-	    to->v_type = VAR_BLOB;
-	    if (from->vval.v_blob == NULL)
-		to->vval.v_blob = NULL;
-	    else if (rettv_blob_alloc(to) == FAIL)
-		ret = FAIL;
-	    else
-	    {
-		int  len = from->vval.v_blob->bv_ga.ga_len;
-
-		to->vval.v_blob->bv_ga.ga_data =
-			    vim_memsave(from->vval.v_blob->bv_ga.ga_data, len);
-		to->vval.v_blob->bv_ga.ga_len = len;
-	    }
+	    ret = blob_copy(from, to);
 	    break;
 	case VAR_DICT:
 	    to->v_type = VAR_DICT;
@@ -8436,7 +8416,6 @@ ex_echo(exarg_T *eap)
 		    }
 		    else
 		    {
-#ifdef FEAT_MBYTE
 			if (has_mbyte)
 			{
 			    int i = (*mb_ptr2len)(p);
@@ -8445,7 +8424,6 @@ ex_echo(exarg_T *eap)
 			    p += i - 1;
 			}
 			else
-#endif
 			    (void)msg_outtrans_len_attr(p, 1, echo_attr);
 		    }
 		}
@@ -9511,14 +9489,54 @@ assert_fails(typval_T *argvars)
 }
 
 /*
+ * Append "p[clen]" to "gap", escaping unprintable characters.
+ * Changes NL to \n, CR to \r, etc.
+ */
+    static void
+ga_concat_esc(garray_T *gap, char_u *p, int clen)
+{
+    char_u  buf[NUMBUFLEN];
+
+    if (clen > 1)
+    {
+	mch_memmove(buf, p, clen);
+	buf[clen] = NUL;
+	ga_concat(gap, buf);
+    }
+    else switch (*p)
+    {
+	case BS: ga_concat(gap, (char_u *)"\\b"); break;
+	case ESC: ga_concat(gap, (char_u *)"\\e"); break;
+	case FF: ga_concat(gap, (char_u *)"\\f"); break;
+	case NL: ga_concat(gap, (char_u *)"\\n"); break;
+	case TAB: ga_concat(gap, (char_u *)"\\t"); break;
+	case CAR: ga_concat(gap, (char_u *)"\\r"); break;
+	case '\\': ga_concat(gap, (char_u *)"\\\\"); break;
+	default:
+		   if (*p < ' ')
+		   {
+		       vim_snprintf((char *)buf, NUMBUFLEN, "\\x%02x", *p);
+		       ga_concat(gap, buf);
+		   }
+		   else
+		       ga_append(gap, *p);
+		   break;
+    }
+}
+
+/*
  * Append "str" to "gap", escaping unprintable characters.
  * Changes NL to \n, CR to \r, etc.
  */
     static void
-ga_concat_esc(garray_T *gap, char_u *str)
+ga_concat_shorten_esc(garray_T *gap, char_u *str)
 {
     char_u  *p;
+    char_u  *s;
+    int	    c;
+    int	    clen;
     char_u  buf[NUMBUFLEN];
+    int	    same_len;
 
     if (str == NULL)
     {
@@ -9527,25 +9545,29 @@ ga_concat_esc(garray_T *gap, char_u *str)
     }
 
     for (p = str; *p != NUL; ++p)
-	switch (*p)
+    {
+	same_len = 1;
+	s = p;
+	c = mb_ptr2char_adv(&s);
+	clen = s - p;
+	while (*s != NUL && c == mb_ptr2char(s))
 	{
-	    case BS: ga_concat(gap, (char_u *)"\\b"); break;
-	    case ESC: ga_concat(gap, (char_u *)"\\e"); break;
-	    case FF: ga_concat(gap, (char_u *)"\\f"); break;
-	    case NL: ga_concat(gap, (char_u *)"\\n"); break;
-	    case TAB: ga_concat(gap, (char_u *)"\\t"); break;
-	    case CAR: ga_concat(gap, (char_u *)"\\r"); break;
-	    case '\\': ga_concat(gap, (char_u *)"\\\\"); break;
-	    default:
-		if (*p < ' ')
-		{
-		    vim_snprintf((char *)buf, NUMBUFLEN, "\\x%02x", *p);
-		    ga_concat(gap, buf);
-		}
-		else
-		    ga_append(gap, *p);
-		break;
+	    ++same_len;
+	    s += clen;
 	}
+	if (same_len > 20)
+	{
+	    ga_concat(gap, (char_u *)"\\[");
+	    ga_concat_esc(gap, p, clen);
+	    ga_concat(gap, (char_u *)" occurs ");
+	    vim_snprintf((char *)buf, NUMBUFLEN, "%d", same_len);
+	    ga_concat(gap, buf);
+	    ga_concat(gap, (char_u *)" times]");
+	    p = s - 1;
+	}
+	else
+	    ga_concat_esc(gap, p, clen);
+    }
 }
 
 /*
@@ -9578,11 +9600,11 @@ fill_assert_error(
 	ga_concat(gap, (char_u *)"Expected ");
     if (exp_str == NULL)
     {
-	ga_concat_esc(gap, tv2string(exp_tv, &tofree, numbuf, 0));
+	ga_concat_shorten_esc(gap, tv2string(exp_tv, &tofree, numbuf, 0));
 	vim_free(tofree);
     }
     else
-	ga_concat_esc(gap, exp_str);
+	ga_concat_shorten_esc(gap, exp_str);
     if (atype != ASSERT_NOTEQUAL)
     {
 	if (atype == ASSERT_MATCH)
@@ -9591,7 +9613,7 @@ fill_assert_error(
 	    ga_concat(gap, (char_u *)" does match ");
 	else
 	    ga_concat(gap, (char_u *)" but got ");
-	ga_concat_esc(gap, tv2string(got_tv, &tofree, numbuf, 0));
+	ga_concat_shorten_esc(gap, tv2string(got_tv, &tofree, numbuf, 0));
 	vim_free(tofree);
     }
 }
@@ -10086,10 +10108,8 @@ shortpath_for_partial(
     /* Count the paths backward to find the beginning of the desired string. */
     for (p = tfname + len - 1; p >= tfname; --p)
     {
-#ifdef FEAT_MBYTE
 	if (has_mbyte)
 	    p -= mb_head_off(tfname, p);
-#endif
 	if (vim_ispathsep(*p))
 	{
 	    if (sepcount == 0 || (hasTilde && sepcount == 1))

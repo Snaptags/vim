@@ -804,7 +804,6 @@ qf_get_next_file_line(qfstate_T *state)
     else
 	state->linebuf = IObuff;
 
-#ifdef FEAT_MBYTE
     // Convert a line if it contains a non-ASCII character.
     if (state->vc.vc_type != CONV_NONE && has_non_ascii(state->linebuf))
     {
@@ -827,7 +826,6 @@ qf_get_next_file_line(qfstate_T *state)
 	    }
 	}
     }
-#endif
 
     return QF_OK;
 }
@@ -872,9 +870,7 @@ qf_get_nextline(qfstate_T *state)
 #endif
     }
 
-#ifdef FEAT_MBYTE
     remove_bom(state->linebuf);
-#endif
 
     return QF_OK;
 }
@@ -1538,11 +1534,9 @@ qf_setup_state(
 	linenr_T	lnumfirst,
 	linenr_T	lnumlast)
 {
-#ifdef FEAT_MBYTE
     pstate->vc.vc_type = CONV_NONE;
     if (enc != NULL && *enc != NUL)
 	convert_setup(&pstate->vc, enc, p_enc);
-#endif
 
     if (efile != NULL && (pstate->fd = mch_fopen((char *)efile, "r")) == NULL)
     {
@@ -1576,10 +1570,8 @@ qf_cleanup_state(qfstate_T *pstate)
 	fclose(pstate->fd);
 
     vim_free(pstate->growbuf);
-#ifdef FEAT_MBYTE
     if (pstate->vc.vc_type != CONV_NONE)
 	convert_setup(&pstate->vc, NULL, NULL);
-#endif
 }
 
 /*
@@ -3072,9 +3064,7 @@ qf_jump_goto_line(
 	if (qf_col > 0)
 	{
 	    curwin->w_cursor.col = qf_col - 1;
-#ifdef FEAT_VIRTUALEDIT
 	    curwin->w_cursor.coladd = 0;
-#endif
 	    if (qf_viscol == TRUE)
 	    {
 		// Check each character from the beginning of the error
@@ -4116,9 +4106,7 @@ qf_win_goto(win_T *win, linenr_T lnum)
     curbuf = win->w_buffer;
     curwin->w_cursor.lnum = lnum;
     curwin->w_cursor.col = 0;
-#ifdef FEAT_VIRTUALEDIT
     curwin->w_cursor.coladd = 0;
-#endif
     curwin->w_curswant = 0;
     update_topline();		// scroll to show the line
     redraw_later(VALID);
@@ -4690,9 +4678,7 @@ ex_make(exarg_T *eap)
 	    return;
 #endif
     }
-#ifdef FEAT_MBYTE
     enc = (*curbuf->b_p_menc != NUL) ? curbuf->b_p_menc : p_menc;
-#endif
 
     if (is_loclist_cmd(eap->cmdidx))
 	wp = curwin;
@@ -5032,9 +5018,7 @@ ex_cfile(exarg_T *eap)
     }
     if (au_name != NULL)
 	apply_autocmds(EVENT_QUICKFIXCMDPRE, au_name, NULL, FALSE, curbuf);
-#ifdef FEAT_MBYTE
     enc = (*curbuf->b_p_menc != NUL) ? curbuf->b_p_menc : p_menc;
-#endif
 #ifdef FEAT_BROWSE
     if (cmdmod.browse)
     {
@@ -7035,9 +7019,7 @@ hgr_get_ll(int *new_ll)
 hgr_search_file(
 	qf_info_T *qi,
 	char_u *fname,
-#ifdef FEAT_MBYTE
 	vimconv_T *p_vc,
-#endif
 	regmatch_T *p_regmatch)
 {
     FILE	*fd;
@@ -7051,7 +7033,7 @@ hgr_search_file(
     while (!vim_fgets(IObuff, IOSIZE, fd) && !got_int)
     {
 	char_u    *line = IObuff;
-#ifdef FEAT_MBYTE
+
 	// Convert a line if 'encoding' is not utf-8 and
 	// the line contains a non-ASCII character.
 	if (p_vc->vc_type != CONV_NONE
@@ -7061,7 +7043,6 @@ hgr_search_file(
 	    if (line == NULL)
 		line = IObuff;
 	}
-#endif
 
 	if (vim_regexec(p_regmatch, line, (colnr_T)0))
 	{
@@ -7089,17 +7070,13 @@ hgr_search_file(
 			) == FAIL)
 	    {
 		got_int = TRUE;
-#ifdef FEAT_MBYTE
 		if (line != IObuff)
 		    vim_free(line);
-#endif
 		break;
 	    }
 	}
-#ifdef FEAT_MBYTE
 	if (line != IObuff)
 	    vim_free(line);
-#endif
 	++lnum;
 	line_breakcheck();
     }
@@ -7114,10 +7091,8 @@ hgr_search_file(
 hgr_search_files_in_dir(
 	qf_info_T *qi,
 	char_u *dirname,
-	regmatch_T *p_regmatch
-#ifdef FEAT_MBYTE
-	, vimconv_T *p_vc
-#endif
+	regmatch_T *p_regmatch,
+	vimconv_T *p_vc
 #ifdef FEAT_MULTI_LANG
 	, char_u *lang
 #endif
@@ -7147,11 +7122,7 @@ hgr_search_files_in_dir(
 		continue;
 #endif
 
-	    hgr_search_file(qi, fnames[fi],
-#ifdef FEAT_MBYTE
-		    p_vc,
-#endif
-		    p_regmatch);
+	    hgr_search_file(qi, fnames[fi], p_vc, p_regmatch);
 	}
 	FreeWild(fcount, fnames);
     }
@@ -7168,7 +7139,6 @@ hgr_search_in_rtp(qf_info_T *qi, regmatch_T *p_regmatch, char_u *lang)
 {
     char_u	*p;
 
-#ifdef FEAT_MBYTE
     vimconv_T	vc;
 
     // Help files are in utf-8 or latin1, convert lines when 'encoding'
@@ -7176,7 +7146,6 @@ hgr_search_in_rtp(qf_info_T *qi, regmatch_T *p_regmatch, char_u *lang)
     vc.vc_type = CONV_NONE;
     if (!enc_utf8)
 	convert_setup(&vc, (char_u *)"utf-8", p_enc);
-#endif
 
     // Go through all the directories in 'runtimepath'
     p = p_rtp;
@@ -7184,20 +7153,15 @@ hgr_search_in_rtp(qf_info_T *qi, regmatch_T *p_regmatch, char_u *lang)
     {
 	copy_option_part(&p, NameBuff, MAXPATHL, ",");
 
-	hgr_search_files_in_dir(qi, NameBuff, p_regmatch
-#ifdef FEAT_MBYTE
-		, &vc
-#endif
+	hgr_search_files_in_dir(qi, NameBuff, p_regmatch, &vc
 #ifdef FEAT_MULTI_LANG
 		, lang
 #endif
 		);
     }
 
-#ifdef FEAT_MBYTE
     if (vc.vc_type != CONV_NONE)
 	convert_setup(&vc, NULL, NULL);
-#endif
 }
 
 /*

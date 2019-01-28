@@ -95,6 +95,13 @@ func Test_blob_get()
   call assert_equal(999, get(b, 5, 999))
   call assert_equal(-1, get(b, -8))
   call assert_equal(999, get(b, -8, 999))
+
+  call assert_equal(0x00, b[0])
+  call assert_equal(0x22, b[2])
+  call assert_equal(0x44, b[4])
+  call assert_equal(0x44, b[-1])
+  call assert_fails('echo b[5]', 'E979:')
+  call assert_fails('echo b[-8]', 'E979:')
 endfunc
 
 func Test_blob_to_string()
@@ -154,6 +161,7 @@ func Test_blob_for_loop()
     call assert_equal(i, byte)
     let i += 1
   endfor
+    call assert_equal(4, i)
 
   let blob = 0z00
   call remove(blob, 0)
@@ -161,6 +169,19 @@ func Test_blob_for_loop()
   for byte in blob
     call assert_error('loop over empty blob')
   endfor
+
+  let blob = 0z0001020304
+  let i = 0
+  for byte in blob
+    call assert_equal(i, byte)
+    if i == 1
+      call remove(blob, 0)
+    elseif i == 3
+      call remove(blob, 3)
+    endif
+    let i += 1
+  endfor
+  call assert_equal(5, i)
 endfunc
 
 func Test_blob_concatenate()
