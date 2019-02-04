@@ -3705,15 +3705,18 @@ f_feedkeys(typval_T *argvars, typval_T *rettv UNUSED)
 #endif
 	    }
 	    else
+	    {
 		ins_typebuf(keys_esc, (remap ? REMAP_YES : REMAP_NONE),
 				  insert ? 0 : typebuf.tb_len, !typed, FALSE);
-	    vim_free(keys_esc);
-	    if (vgetc_busy
+		if (vgetc_busy
 #ifdef FEAT_TIMERS
-		    || timer_busy
+			|| timer_busy
 #endif
-		    )
-		typebuf_was_filled = TRUE;
+			)
+		    typebuf_was_filled = TRUE;
+	    }
+	    vim_free(keys_esc);
+
 	    if (execute)
 	    {
 		int save_msg_scroll = msg_scroll;
@@ -6118,6 +6121,15 @@ f_has(typval_T *argvars, typval_T *rettv)
 #ifdef __BEOS__
 	"beos",
 #endif
+#if defined(BSD) && !defined(MACOS_X)
+	"bsd",
+#endif
+#ifdef hpux
+	"hpux",
+#endif
+#ifdef __linux__
+	"linux",
+#endif
 #ifdef MACOS_X
 	"mac",		/* Mac OS X (and, once, Mac OS Classic) */
 	"osx",		/* Mac OS X */
@@ -6128,6 +6140,11 @@ f_has(typval_T *argvars, typval_T *rettv)
 #endif
 #ifdef __QNX__
 	"qnx",
+#endif
+#ifdef SUN_SYSTEM
+	"sun",
+#else
+	"moon",
 #endif
 #ifdef UNIX
 	"unix",
@@ -6158,7 +6175,7 @@ f_has(typval_T *argvars, typval_T *rettv)
 #endif
 	"autocmd",
 #ifdef FEAT_AUTOCHDIR
-       "autochdir",
+	"autochdir",
 #endif
 #ifdef FEAT_AUTOSERVERNAME
 	"autoservername",
@@ -6720,6 +6737,10 @@ f_has(typval_T *argvars, typval_T *rettv)
 #if defined(FEAT_TERMINAL) && defined(WIN3264)
 	else if (STRICMP(name, "terminal") == 0)
 	    n = terminal_enabled();
+#endif
+#if defined(FEAT_TERMINAL) && defined(WIN3264)
+	else if (STRICMP(name, "conpty") == 0)
+	    n = use_conpty();
 #endif
     }
 

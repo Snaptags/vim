@@ -7211,6 +7211,15 @@ ex_colorscheme(exarg_T *eap)
     }
     else if (load_colors(eap->arg) == FAIL)
 	semsg(_("E185: Cannot find color scheme '%s'"), eap->arg);
+
+#ifdef FEAT_VTP
+    else if (has_vtp_working())
+    {
+	// background color change requires clear + redraw
+	update_screen(CLEAR);
+	redrawcmd();
+    }
+#endif
 }
 
     static void
@@ -8914,7 +8923,7 @@ ex_syncbind(exarg_T *eap UNUSED)
 	{
 	    if (wp->w_p_scb && wp->w_buffer)
 	    {
-		y = wp->w_buffer->b_ml.ml_line_count - p_so;
+		y = wp->w_buffer->b_ml.ml_line_count - get_scrolloff_value();
 		if (topline > y)
 		    topline = y;
 	    }
