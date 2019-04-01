@@ -253,7 +253,7 @@ typedef int HBITMAP;
 typedef int HBRUSH;
 typedef int HDROP;
 typedef int INT;
-typedef int LOGFONT[];
+typedef int LOGFONTW[];
 typedef int LPARAM;
 typedef int LPCREATESTRUCT;
 typedef int LPCSTR;
@@ -507,15 +507,15 @@ static void TrackUserActivity(UINT uMsg);
 /*
  * For control IME.
  *
- * These LOGFONT used for IME.
+ * These LOGFONTW used for IME.
  */
 #if defined(FEAT_MBYTE_IME) || defined(GLOBAL_IME)
-/* holds LOGFONT for 'guifontwide' if available, otherwise 'guifont' */
-static LOGFONT norm_logfont;
+/* holds LOGFONTW for 'guifontwide' if available, otherwise 'guifont' */
+static LOGFONTW norm_logfont;
 #endif
 #ifdef FEAT_MBYTE_IME
-/* holds LOGFONT for 'guifont' always. */
-static LOGFONT sub_logfont;
+/* holds LOGFONTW for 'guifont' always. */
+static LOGFONTW sub_logfont;
 #endif
 
 #ifdef FEAT_MBYTE_IME
@@ -1161,9 +1161,7 @@ _OnFindRepl(void)
     /* If the OS is Windows NT, and 'encoding' differs from active codepage:
      * convert text from wide string. */
     if (enc_codepage >= 0 && (int)GetACP() != enc_codepage)
-    {
 	findrep_wtoa(&s_findrep_struct, &s_findrep_struct_w);
-    }
 
     if (s_findrep_struct.Flags & FR_DIALOGTERM)
 	/* Give main window the focus back. */
@@ -1526,12 +1524,12 @@ gui_mch_adjust_charheight(void)
 }
 
     static GuiFont
-get_font_handle(LOGFONT *lf)
+get_font_handle(LOGFONTW *lf)
 {
     HFONT   font = NULL;
 
     /* Load the font */
-    font = CreateFontIndirect(lf);
+    font = CreateFontIndirectW(lf);
 
     if (font == NULL)
 	return NOFONT;
@@ -1562,7 +1560,7 @@ gui_mch_get_font(
     char_u	*name,
     int		giveErrorIfMissing)
 {
-    LOGFONT	lf;
+    LOGFONTW	lf;
     GuiFont	font = NOFONT;
 
     if (get_logfont(&lf, name, NULL, giveErrorIfMissing) == OK)
@@ -2286,9 +2284,6 @@ gui_mch_draw_menubar(void)
 
 #ifndef PROTO
 void
-#ifdef VIMDLL
-_export
-#endif
 _cdecl
 SaveInst(HINSTANCE hInst)
 {
@@ -2642,9 +2637,7 @@ gui_mch_update_tabline(void)
 	    }
 	}
 	if (wstr == NULL)
-	{
 	    TabCtrl_SetItem(s_tabhwnd, nr, &tie);
-	}
     }
 
     /* Remove any old labels. */
@@ -3210,23 +3203,18 @@ gui_mch_exit(int rc UNUSED)
 }
 
     static char_u *
-logfont2name(LOGFONT lf)
+logfont2name(LOGFONTW lf)
 {
     char	*p;
     char	*res;
     char	*charset_name;
     char	*quality_name;
-    char	*font_name = lf.lfFaceName;
+    char	*font_name;
 
+    font_name = (char *)utf16_to_enc(lf.lfFaceName, NULL);
+    if (font_name == NULL)
+	return NULL;
     charset_name = charset_id2name((int)lf.lfCharSet);
-    /* Convert a font name from the current codepage to 'encoding'.
-     * TODO: Use Wide APIs (including LOGFONTW) instead of ANSI APIs. */
-    if (enc_codepage >= 0 && (int)GetACP() != enc_codepage)
-    {
-	int	len;
-	acp_to_enc((char_u *)lf.lfFaceName, (int)strlen(lf.lfFaceName),
-						(char_u **)&font_name, &len);
-    }
     quality_name = quality_id2name((int)lf.lfQuality);
 
     res = (char *)alloc((unsigned)(strlen(font_name) + 20
@@ -3263,25 +3251,24 @@ logfont2name(LOGFONT lf)
 	}
     }
 
-    if (font_name != lf.lfFaceName)
-	vim_free(font_name);
+    vim_free(font_name);
     return (char_u *)res;
 }
 
 
 #ifdef FEAT_MBYTE_IME
 /*
- * Set correct LOGFONT to IME.  Use 'guifontwide' if available, otherwise use
+ * Set correct LOGFONTW to IME.  Use 'guifontwide' if available, otherwise use
  * 'guifont'
  */
     static void
 update_im_font(void)
 {
-    LOGFONT	lf_wide;
+    LOGFONTW	lf_wide;
 
     if (p_guifontwide != NULL && *p_guifontwide != NUL
 	    && gui.wide_font != NOFONT
-	    && GetObject((HFONT)gui.wide_font, sizeof(lf_wide), &lf_wide))
+	    && GetObjectW((HFONT)gui.wide_font, sizeof(lf_wide), &lf_wide))
 	norm_logfont = lf_wide;
     else
 	norm_logfont = sub_logfont;
@@ -3295,7 +3282,7 @@ update_im_font(void)
     void
 gui_mch_wide_font_changed(void)
 {
-    LOGFONT lf;
+    LOGFONTW lf;
 
 #ifdef FEAT_MBYTE_IME
     update_im_font();
@@ -3309,7 +3296,7 @@ gui_mch_wide_font_changed(void)
     gui.wide_boldital_font = NOFONT;
 
     if (gui.wide_font
-	&& GetObject((HFONT)gui.wide_font, sizeof(lf), &lf))
+	&& GetObjectW((HFONT)gui.wide_font, sizeof(lf), &lf))
     {
 	if (!lf.lfItalic)
 	{
@@ -3337,7 +3324,7 @@ gui_mch_wide_font_changed(void)
     int
 gui_mch_init_font(char_u *font_name, int fontset UNUSED)
 {
-    LOGFONT	lf;
+    LOGFONTW	lf;
     GuiFont	font = NOFONT;
     char_u	*p;
 
@@ -3888,151 +3875,6 @@ _OnScroll(
 }
 
 
-/*
- * Get command line arguments.
- * Use "prog" as the name of the program and "cmdline" as the arguments.
- * Copy the arguments to allocated memory.
- * Return the number of arguments (including program name).
- * Return pointers to the arguments in "argvp".  Memory is allocated with
- * malloc(), use free() instead of vim_free().
- * Return pointer to buffer in "tofree".
- * Returns zero when out of memory.
- */
-    int
-get_cmd_args(char *prog, char *cmdline, char ***argvp, char **tofree)
-{
-    int		i;
-    char	*p;
-    char	*progp;
-    char	*pnew = NULL;
-    char	*newcmdline;
-    int		inquote;
-    int		argc;
-    char	**argv = NULL;
-    int		round;
-
-    *tofree = NULL;
-
-    /* Try using the Unicode version first, it takes care of conversion when
-     * 'encoding' is changed. */
-    argc = get_cmd_argsW(&argv);
-    if (argc != 0)
-	goto done;
-
-    /* Handle the program name.  Remove the ".exe" extension, and find the 1st
-     * non-space. */
-    p = strrchr(prog, '.');
-    if (p != NULL)
-	*p = NUL;
-    for (progp = prog; *progp == ' '; ++progp)
-	;
-
-    /* The command line is copied to allocated memory, so that we can change
-     * it.  Add the size of the string, the separating NUL and a terminating
-     * NUL. */
-    newcmdline = malloc(STRLEN(cmdline) + STRLEN(progp) + 2);
-    if (newcmdline == NULL)
-	return 0;
-
-    /*
-     * First round: count the number of arguments ("pnew" == NULL).
-     * Second round: produce the arguments.
-     */
-    for (round = 1; round <= 2; ++round)
-    {
-	/* First argument is the program name. */
-	if (pnew != NULL)
-	{
-	    argv[0] = pnew;
-	    strcpy(pnew, progp);
-	    pnew += strlen(pnew);
-	    *pnew++ = NUL;
-	}
-
-	/*
-	 * Isolate each argument and put it in argv[].
-	 */
-	p = cmdline;
-	argc = 1;
-	while (*p != NUL)
-	{
-	    inquote = FALSE;
-	    if (pnew != NULL)
-		argv[argc] = pnew;
-	    ++argc;
-	    while (*p != NUL && (inquote || (*p != ' ' && *p != '\t')))
-	    {
-		/* Backslashes are only special when followed by a double
-		 * quote. */
-		i = (int)strspn(p, "\\");
-		if (p[i] == '"')
-		{
-		    /* Halve the number of backslashes. */
-		    if (i > 1 && pnew != NULL)
-		    {
-			vim_memset(pnew, '\\', i / 2);
-			pnew += i / 2;
-		    }
-
-		    /* Even nr of backslashes toggles quoting, uneven copies
-		     * the double quote. */
-		    if ((i & 1) == 0)
-			inquote = !inquote;
-		    else if (pnew != NULL)
-			*pnew++ = '"';
-		    p += i + 1;
-		}
-		else if (i > 0)
-		{
-		    /* Copy span of backslashes unmodified. */
-		    if (pnew != NULL)
-		    {
-			vim_memset(pnew, '\\', i);
-			pnew += i;
-		    }
-		    p += i;
-		}
-		else
-		{
-		    if (pnew != NULL)
-			*pnew++ = *p;
-		    /* Can't use mb_* functions, because 'encoding' is not
-		     * initialized yet here. */
-		    if (IsDBCSLeadByte(*p))
-		    {
-			++p;
-			if (pnew != NULL)
-			    *pnew++ = *p;
-		    }
-		    ++p;
-		}
-	    }
-
-	    if (pnew != NULL)
-		*pnew++ = NUL;
-	    while (*p == ' ' || *p == '\t')
-		++p;		    /* advance until a non-space */
-	}
-
-	if (round == 1)
-	{
-	    argv = (char **)malloc((argc + 1) * sizeof(char *));
-	    if (argv == NULL )
-	    {
-		free(newcmdline);
-		return 0;		   /* malloc error */
-	    }
-	    pnew = newcmdline;
-	    *tofree = newcmdline;
-	}
-    }
-
-done:
-    argv[argc] = NULL;		/* NULL-terminated list */
-    *argvp = argv;
-    return argc;
-}
-
 #ifdef FEAT_XPM_W32
 # include "xpm_w32.h"
 #endif
@@ -4379,8 +4221,8 @@ static HIMC (WINAPI *pImmAssociateContext)(HWND, HIMC);
 static BOOL (WINAPI *pImmReleaseContext)(HWND, HIMC);
 static BOOL (WINAPI *pImmGetOpenStatus)(HIMC);
 static BOOL (WINAPI *pImmSetOpenStatus)(HIMC, BOOL);
-static BOOL (WINAPI *pImmGetCompositionFont)(HIMC, LPLOGFONTA);
-static BOOL (WINAPI *pImmSetCompositionFont)(HIMC, LPLOGFONTA);
+static BOOL (WINAPI *pImmGetCompositionFontW)(HIMC, LPLOGFONTW);
+static BOOL (WINAPI *pImmSetCompositionFontW)(HIMC, LPLOGFONTW);
 static BOOL (WINAPI *pImmSetCompositionWindow)(HIMC, LPCOMPOSITIONFORM);
 static BOOL (WINAPI *pImmGetConversionStatus)(HIMC, LPDWORD, LPDWORD);
 static BOOL (WINAPI *pImmSetConversionStatus)(HIMC, DWORD, DWORD);
@@ -4393,8 +4235,8 @@ static void dyn_imm_load(void);
 # define pImmReleaseContext	  ImmReleaseContext
 # define pImmGetOpenStatus	  ImmGetOpenStatus
 # define pImmSetOpenStatus	  ImmSetOpenStatus
-# define pImmGetCompositionFont   ImmGetCompositionFontA
-# define pImmSetCompositionFont   ImmSetCompositionFontA
+# define pImmGetCompositionFontW  ImmGetCompositionFontW
+# define pImmSetCompositionFontW  ImmSetCompositionFontW
 # define pImmSetCompositionWindow ImmSetCompositionWindow
 # define pImmGetConversionStatus  ImmGetConversionStatus
 # define pImmSetConversionStatus  ImmSetConversionStatus
@@ -4449,9 +4291,7 @@ gui_mswin_get_menu_height(
     }
 
     if (fix_window && menu_height != old_menu_height)
-    {
 	gui_set_shellsize(FALSE, FALSE, RESIZE_VERT);
-    }
     old_menu_height = menu_height;
 
     return menu_height;
@@ -4533,14 +4373,14 @@ _OnMouseWheel(
  * Return OK or FAIL.
  */
     static int
-gui_w32_get_menu_font(LOGFONT *lf)
+gui_w32_get_menu_font(LOGFONTW *lf)
 {
-    NONCLIENTMETRICS nm;
+    NONCLIENTMETRICSW nm;
 
-    nm.cbSize = sizeof(NONCLIENTMETRICS);
-    if (!SystemParametersInfo(
+    nm.cbSize = sizeof(NONCLIENTMETRICSW);
+    if (!SystemParametersInfoW(
 	    SPI_GETNONCLIENTMETRICS,
-	    sizeof(NONCLIENTMETRICS),
+	    sizeof(NONCLIENTMETRICSW),
 	    &nm,
 	    0))
 	return FAIL;
@@ -4557,7 +4397,7 @@ gui_w32_get_menu_font(LOGFONT *lf)
     static void
 set_tabline_font(void)
 {
-    LOGFONT	lfSysmenu;
+    LOGFONTW	lfSysmenu;
     HFONT	font;
     HWND	hwnd;
     HDC		hdc;
@@ -4567,7 +4407,7 @@ set_tabline_font(void)
     if (gui_w32_get_menu_font(&lfSysmenu) != OK)
 	return;
 
-    font = CreateFontIndirect(&lfSysmenu);
+    font = CreateFontIndirectW(&lfSysmenu);
 
     SendMessage(s_tabhwnd, WM_SETFONT, (WPARAM)font, TRUE);
 
@@ -5021,9 +4861,7 @@ _WndProc(
     default:
 #ifdef MSWIN_FIND_REPLACE
 	if (uMsg == s_findrep_msg && s_findrep_msg != 0)
-	{
 	    _OnFindRepl();
-	}
 #endif
 	return MyWindowProc(hwnd, uMsg, wParam, lParam);
     }
@@ -5716,7 +5554,7 @@ _OnImeNotify(HWND hWnd, DWORD dwCommand, DWORD dwData UNUSED)
 	case IMN_SETOPENSTATUS:
 	    if (pImmGetOpenStatus(hImc))
 	    {
-		pImmSetCompositionFont(hImc, &norm_logfont);
+		pImmSetCompositionFontW(hImc, &norm_logfont);
 		im_set_position(gui.row, gui.col);
 
 		/* Disable langmap */
@@ -5857,13 +5695,13 @@ GetResultStr(HWND hwnd, int GCS, int *lenp)
  * set font to IM.
  */
     void
-im_set_font(LOGFONT *lf)
+im_set_font(LOGFONTW *lf)
 {
     HIMC hImc;
 
     if (pImmGetContext && (hImc = pImmGetContext(s_hwnd)) != (HIMC)0)
     {
-	pImmSetCompositionFont(hImc, lf);
+	pImmSetCompositionFontW(hImc, lf);
 	pImmReleaseContext(s_hwnd, hImc);
     }
 }
@@ -6983,7 +6821,7 @@ gui_mch_dialog(
     int		dlgPaddingX;
     int		dlgPaddingY;
 #ifdef USE_SYSMENU_FONT
-    LOGFONT	lfSysmenu;
+    LOGFONTW	lfSysmenu;
     int		use_lfSysmenu = FALSE;
 #endif
     garray_T	ga;
@@ -7048,7 +6886,7 @@ gui_mch_dialog(
 #ifdef USE_SYSMENU_FONT
     if (gui_w32_get_menu_font(&lfSysmenu) == OK)
     {
-	font = CreateFontIndirect(&lfSysmenu);
+	font = CreateFontIndirectW(&lfSysmenu);
 	use_lfSysmenu = TRUE;
     }
     else
@@ -7277,7 +7115,8 @@ gui_mch_dialog(
 	    /* point size */
 	    *p++ = -MulDiv(lfSysmenu.lfHeight, 72,
 		    GetDeviceCaps(hdc, LOGPIXELSY));
-	    nchar = nCopyAnsiToWideChar(p, lfSysmenu.lfFaceName, FALSE);
+	    wcscpy(p, lfSysmenu.lfFaceName);
+	    nchar = (int)wcslen(lfSysmenu.lfFaceName) + 1;
 	}
 	else
 #endif
@@ -7642,14 +7481,14 @@ get_dialog_font_metrics(void)
     DWORD	    dlgFontSize;
     SIZE	    size;
 #ifdef USE_SYSMENU_FONT
-    LOGFONT	    lfSysmenu;
+    LOGFONTW	    lfSysmenu;
 #endif
 
     s_usenewlook = FALSE;
 
 #ifdef USE_SYSMENU_FONT
     if (gui_w32_get_menu_font(&lfSysmenu) == OK)
-	hfontTools = CreateFontIndirect(&lfSysmenu);
+	hfontTools = CreateFontIndirectW(&lfSysmenu);
     else
 #endif
 	hfontTools = CreateFont(-DLG_FONT_POINT_SIZE, 0, 0, 0, 0, 0, 0, 0,
@@ -7717,7 +7556,7 @@ gui_mch_tearoff(
     int		x;
     int		y;
 #ifdef USE_SYSMENU_FONT
-    LOGFONT	lfSysmenu;
+    LOGFONTW	lfSysmenu;
     int		use_lfSysmenu = FALSE;
 #endif
 
@@ -7753,7 +7592,7 @@ gui_mch_tearoff(
 #ifdef USE_SYSMENU_FONT
     if (gui_w32_get_menu_font(&lfSysmenu) == OK)
     {
-	font = CreateFontIndirect(&lfSysmenu);
+	font = CreateFontIndirectW(&lfSysmenu);
 	use_lfSysmenu = TRUE;
     }
     else
@@ -7862,7 +7701,8 @@ gui_mch_tearoff(
 	    /* point size */
 	    *p++ = -MulDiv(lfSysmenu.lfHeight, 72,
 		    GetDeviceCaps(hdc, LOGPIXELSY));
-	    nchar = nCopyAnsiToWideChar(p, lfSysmenu.lfFaceName, FALSE);
+	    wcscpy(p, lfSysmenu.lfFaceName);
+	    nchar = (int)wcslen(lfSysmenu.lfFaceName) + 1;
 	}
 	else
 #endif
@@ -8290,10 +8130,10 @@ dyn_imm_load(void)
 	    = (void *)GetProcAddress(hLibImm, "ImmGetOpenStatus");
     pImmSetOpenStatus
 	    = (void *)GetProcAddress(hLibImm, "ImmSetOpenStatus");
-    pImmGetCompositionFont
-	    = (void *)GetProcAddress(hLibImm, "ImmGetCompositionFontA");
-    pImmSetCompositionFont
-	    = (void *)GetProcAddress(hLibImm, "ImmSetCompositionFontA");
+    pImmGetCompositionFontW
+	    = (void *)GetProcAddress(hLibImm, "ImmGetCompositionFontW");
+    pImmSetCompositionFontW
+	    = (void *)GetProcAddress(hLibImm, "ImmSetCompositionFontW");
     pImmSetCompositionWindow
 	    = (void *)GetProcAddress(hLibImm, "ImmSetCompositionWindow");
     pImmGetConversionStatus
@@ -8308,8 +8148,8 @@ dyn_imm_load(void)
 	    || pImmReleaseContext == NULL
 	    || pImmGetOpenStatus == NULL
 	    || pImmSetOpenStatus == NULL
-	    || pImmGetCompositionFont == NULL
-	    || pImmSetCompositionFont == NULL
+	    || pImmGetCompositionFontW == NULL
+	    || pImmSetCompositionFontW == NULL
 	    || pImmSetCompositionWindow == NULL
 	    || pImmGetConversionStatus == NULL
 	    || pImmSetConversionStatus == NULL)
