@@ -98,6 +98,7 @@ SRC_ALL =	\
 		src/textprop.c \
 		src/ui.c \
 		src/undo.c \
+		src/usercmd.c \
 		src/userfunc.c \
 		src/version.c \
 		src/version.h \
@@ -212,6 +213,7 @@ SRC_ALL =	\
 		src/proto/textprop.pro \
 		src/proto/ui.pro \
 		src/proto/undo.pro \
+		src/proto/usercmd.pro \
 		src/proto/userfunc.pro \
 		src/proto/version.pro \
 		src/proto/winclip.pro \
@@ -452,6 +454,7 @@ SRC_DOS =	\
 		src/iscygpty.h \
 		src/iid_ole.c \
 		src/os_dos.h \
+		src/os_w32dll.c \
 		src/os_w32exe.c \
 		src/os_win32.c \
 		src/os_mswin.c \
