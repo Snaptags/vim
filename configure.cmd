@@ -4,7 +4,7 @@
 set SDK_INCLUDE_DIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1\Include
 
 :: Visual Studio directory. Quotation marks, no trailing backslash.
-set VS_DIR="c:\Program Files (x86)\Microsoft Visual Studio\2017\Professional"
+set VS_DIR="c:\Program Files (x86)\Microsoft Visual Studio\2019\Professional"
 
 :: Target architecture, AMD64 (64-bit) or I386 (32-bit)
 set CPU=AMD64
