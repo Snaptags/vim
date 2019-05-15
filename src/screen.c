@@ -564,6 +564,16 @@ update_screen(int type_arg)
 	type = 0;
     }
 
+#ifdef FEAT_EVAL
+    {
+	buf_T *buf;
+
+	// Before updating the screen, notify any listeners of changed text.
+	FOR_ALL_BUFFERS(buf)
+	    invoke_listeners(buf);
+    }
+#endif
+
     if (must_redraw)
     {
 	if (type < must_redraw)	    /* use maximal type */
@@ -2945,9 +2955,6 @@ static textprop_T	*current_text_props = NULL;
 static buf_T		*current_buf = NULL;
 
     static int
-#ifdef __BORLANDC__
-_RTLENTRYF
-#endif
 text_prop_compare(const void *s1, const void *s2)
 {
     int  idx1, idx2;
@@ -5594,8 +5601,10 @@ win_line(
 	    break;
 	}
 
-	/* line continues beyond line end */
-	if (lcs_ext
+	// Show "extends" character from 'listchars' if beyond the line end and
+	// 'list' is set.
+	if (lcs_ext != NUL
+		&& wp->w_p_list
 		&& !wp->w_p_wrap
 #ifdef FEAT_DIFF
 		&& filler_todo <= 0
