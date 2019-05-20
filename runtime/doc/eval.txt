@@ -2701,6 +2701,7 @@ test_alloc_fail({id}, {countdown}, {repeat})
 test_autochdir()		none	enable 'autochdir' during startup
 test_feedinput({string})	none	add key sequence to input buffer
 test_garbagecollect_now()	none	free memory right now for testing
+test_getvalue({string})		any	get value of an internal variable
 test_ignore_error({expr})	none	ignore a specific error
 test_null_blob()		Blob	null value for testing
 test_null_channel()		Channel	null value for testing
@@ -9894,6 +9895,11 @@ test_garbagecollect_now()			 *test_garbagecollect_now()*
 		internally, and |v:testing| must have been set before calling
 		any function.
 
+test_getvalue({name})					*test_getvalue()*
+		Get the value of an internal variable.  These values for
+		{name} are supported:
+			need_fileinfo
+
 test_ignore_error({expr})			 *test_ignore_error()*
 		Ignore any error containing {expr}.  A normal message is given
 		instead.
@@ -11410,6 +11416,44 @@ This does NOT work: >
 			Like above, but append/add/subtract the value for each
 			|List| item.
 
+					*:let=<<* *:let-heredoc* *E990* *E991*
+:let {var-name} =<< [trim] {marker}
+text...
+text...
+{marker}
+			Set internal variable {var-name} to a List containing
+			the lines of text bounded by the string {marker}.
+			{marker} must not contain white space.
+			The last line should end only with the {marker} string
+			without any other character.  Watch out for white
+			space after {marker}!
+			If {marker} is not supplied, then "." is used as the
+			default marker.
+
+			Any white space characters in the lines of text are
+			preserved.  If "trim" is specified before {marker},
+			then all the leading indentation exactly matching the
+			leading indentation before `let` is stripped from the
+			input lines and the line containing {marker}.  Note
+			that the difference between space and tab matters
+			here.
+
+			If {var-name} didn't exist yet, it is created.
+			Cannot be followed by another command, but can be
+			followed by a comment.
+
+			Examples: >
+				let var1 =<< END
+			Sample text 1
+			    Sample text 2
+			Sample text 3
+			END
+
+				let data =<< trim DATA
+				1 2 3 4
+				5 6 7 8
+				DATA
+<
 								*E121*
 :let {var-name}	..	List the value of variable {var-name}.  Multiple
 			variable names may be given.  Special names recognized

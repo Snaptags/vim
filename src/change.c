@@ -152,11 +152,76 @@ changed_internal(void)
 }
 
 #ifdef FEAT_EVAL
-static list_T *recorded_changes = NULL;
 static long next_listener_id = 0;
 
 /*
+ * Check if the change at "lnum" / "col" is above or overlaps with an existing
+ * changed. If above then flush changes and invoke listeners.
+ * If "merge" is TRUE do the merge.
+ * Returns TRUE if the change was merged.
+ */
+    static int
+check_recorded_changes(
+	buf_T		*buf,
+	linenr_T	lnum,
+	colnr_T		col,
+	linenr_T	lnume,
+	long		xtra,
+	int		merge)
+{
+    if (buf->b_recorded_changes != NULL && xtra != 0)
+    {
+	listitem_T *li;
+	linenr_T    nr;
+
+	for (li = buf->b_recorded_changes->lv_first; li != NULL;
+							      li = li->li_next)
+	{
+	    nr = (linenr_T)dict_get_number(
+				      li->li_tv.vval.v_dict, (char_u *)"lnum");
+	    if (nr >= lnum || nr > lnume)
+	    {
+		if (li->li_next == NULL && lnum == nr
+			&& col + 1 == (colnr_T)dict_get_number(
+				      li->li_tv.vval.v_dict, (char_u *)"col"))
+		{
+		    if (merge)
+		    {
+			dictitem_T	*di;
+
+			// Same start point and nothing is following, entries
+			// can be merged.
+			di = dict_find(li->li_tv.vval.v_dict,
+							  (char_u *)"end", -1);
+			if (di != NULL)
+			{
+			    nr = tv_get_number(&di->di_tv);
+			    if (lnume > nr)
+				di->di_tv.vval.v_number = lnume;
+			}
+			di = dict_find(li->li_tv.vval.v_dict,
+							(char_u *)"added", -1);
+			if (di != NULL)
+			    di->di_tv.vval.v_number += xtra;
+			return TRUE;
+		    }
+		}
+		else
+		{
+		    // the current change is going to make the line number in
+		    // the older change invalid, flush now
+		    invoke_listeners(curbuf);
+		    break;
+		}
+	    }
+	}
+    }
+    return FALSE;
+}
+
+/*
  * Record a change for listeners added with listener_add().
+ * Always for the current buffer.
  */
     static void
 may_record_change(
@@ -172,50 +237,16 @@ may_record_change(
 
     // If the new change is going to change the line numbers in already listed
     // changes, then flush.
-    if (recorded_changes != NULL && xtra != 0)
+    if (check_recorded_changes(curbuf, lnum, col, lnume, xtra, TRUE))
+	return;
+
+    if (curbuf->b_recorded_changes == NULL)
     {
-	listitem_T *li;
-	linenr_T    nr;
-
-	for (li = recorded_changes->lv_first; li != NULL; li = li->li_next)
-	{
-	    nr = (linenr_T)dict_get_number(
-				      li->li_tv.vval.v_dict, (char_u *)"lnum");
-	    if (nr >= lnum || nr > lnume)
-	    {
-		if (li->li_next == NULL && lnum == nr
-			&& col + 1 == (colnr_T)dict_get_number(
-				      li->li_tv.vval.v_dict, (char_u *)"col"))
-		{
-		    dictitem_T	*di;
-
-		    // Same start point and nothing is following, entries can
-		    // be merged.
-		    di = dict_find(li->li_tv.vval.v_dict, (char_u *)"end", -1);
-		    nr = tv_get_number(&di->di_tv);
-		    if (lnume > nr)
-			di->di_tv.vval.v_number = lnume;
-		    di = dict_find(li->li_tv.vval.v_dict,
-							(char_u *)"added", -1);
-		    di->di_tv.vval.v_number += xtra;
-		    return;
-		}
-
-		// the current change is going to make the line number in the
-		// older change invalid, flush now
-		invoke_listeners(curbuf);
-		break;
-	    }
-	}
-    }
-
-    if (recorded_changes == NULL)
-    {
-	recorded_changes = list_alloc();
-	if (recorded_changes == NULL)  // out of memory
+	curbuf->b_recorded_changes = list_alloc();
+	if (curbuf->b_recorded_changes == NULL)  // out of memory
 	    return;
-	++recorded_changes->lv_refcount;
-	recorded_changes->lv_lock = VAR_FIXED;
+	++curbuf->b_recorded_changes->lv_refcount;
+	curbuf->b_recorded_changes->lv_lock = VAR_FIXED;
     }
 
     dict = dict_alloc();
@@ -226,7 +257,7 @@ may_record_change(
     dict_add_number(dict, "added", (varnumber_T)xtra);
     dict_add_number(dict, "col", (varnumber_T)col + 1);
 
-    list_append_dict(recorded_changes, dict);
+    list_append_dict(curbuf->b_recorded_changes, dict);
 }
 
 /*
@@ -317,6 +348,16 @@ f_listener_remove(typval_T *argvars, typval_T *rettv UNUSED)
 }
 
 /*
+ * Called before inserting a line above "lnum"/"lnum3" or deleting line "lnum"
+ * to "lnume".
+ */
+    void
+may_invoke_listeners(buf_T *buf, linenr_T lnum, linenr_T lnume, int added)
+{
+    check_recorded_changes(buf, lnum, 0, lnume, added, FALSE);
+}
+
+/*
  * Called when a sequence of changes is done: invoke listeners added with
  * listener_add().
  */
@@ -332,7 +373,7 @@ invoke_listeners(buf_T *buf)
     linenr_T	end = 0;
     linenr_T	added = 0;
 
-    if (recorded_changes == NULL  // nothing changed
+    if (buf->b_recorded_changes == NULL  // nothing changed
 	    || buf->b_listener == NULL)  // no listeners
 	return;
 
@@ -340,7 +381,7 @@ invoke_listeners(buf_T *buf)
     argv[0].vval.v_number = buf->b_fnum; // a:bufnr
 
 
-    for (li = recorded_changes->lv_first; li != NULL; li = li->li_next)
+    for (li = buf->b_recorded_changes->lv_first; li != NULL; li = li->li_next)
     {
 	varnumber_T lnum;
 
@@ -360,7 +401,7 @@ invoke_listeners(buf_T *buf)
     argv[3].vval.v_number = added;
 
     argv[4].v_type = VAR_LIST;
-    argv[4].vval.v_list = recorded_changes;
+    argv[4].vval.v_list = buf->b_recorded_changes;
     ++textlock;
 
     for (lnr = buf->b_listener; lnr != NULL; lnr = lnr->lr_next)
@@ -371,8 +412,8 @@ invoke_listeners(buf_T *buf)
     }
 
     --textlock;
-    list_unref(recorded_changes);
-    recorded_changes = NULL;
+    list_unref(buf->b_recorded_changes);
+    buf->b_recorded_changes = NULL;
 }
 #endif
 
@@ -641,12 +682,12 @@ changed_bytes(linenr_T lnum, colnr_T col)
     void
 inserted_bytes(linenr_T lnum, colnr_T col, int added UNUSED)
 {
-    changed_bytes(lnum, col);
-
 #ifdef FEAT_TEXT_PROP
     if (curbuf->b_has_textprop && added != 0)
-	adjust_prop_columns(lnum, col, added);
+	adjust_prop_columns(lnum, col, added, 0);
 #endif
+
+    changed_bytes(lnum, col);
 }
 
 /*
@@ -2133,6 +2174,12 @@ open_line(
 	    )
 	    mark_adjust(curwin->w_cursor.lnum + 1, (linenr_T)MAXLNUM, 1L, 0L);
 	did_append = TRUE;
+#ifdef FEAT_TEXT_PROP
+	if ((State & INSERT) && !(State & VREPLACE_FLAG))
+	    // properties after the split move to the next line
+	    adjust_props_for_split(curwin->w_cursor.lnum, curwin->w_cursor.lnum,
+						  curwin->w_cursor.col + 1, 0);
+#endif
     }
     else
     {
