@@ -61,7 +61,7 @@ init_longVersion(void)
 		+ strlen(VIM_VERSION_DATE_ONLY)
 		+ strlen(date_time);
 
-    longVersion = (char *)alloc((unsigned)len);
+    longVersion = (char *)alloc(len);
     if (longVersion == NULL)
 	longVersion = VIM_VERSION_LONG;
     else
@@ -767,6 +767,68 @@ static char *(features[]) =
 
 static int included_patches[] =
 {   /* Add new patch number below this line */
+/**/
+    1390,
+/**/
+    1389,
+/**/
+    1388,
+/**/
+    1387,
+/**/
+    1386,
+/**/
+    1385,
+/**/
+    1384,
+/**/
+    1383,
+/**/
+    1382,
+/**/
+    1381,
+/**/
+    1380,
+/**/
+    1379,
+/**/
+    1378,
+/**/
+    1377,
+/**/
+    1376,
+/**/
+    1375,
+/**/
+    1374,
+/**/
+    1373,
+/**/
+    1372,
+/**/
+    1371,
+/**/
+    1370,
+/**/
+    1369,
+/**/
+    1368,
+/**/
+    1367,
+/**/
+    1366,
+/**/
+    1365,
+/**/
+    1364,
+/**/
+    1363,
+/**/
+    1362,
+/**/
+    1361,
+/**/
+    1360,
 /**/
     1359,
 /**/

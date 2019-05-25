@@ -2789,8 +2789,7 @@ findtag_end:
 	match_count = 0;
 
     if (match_count > 0)
-	matches = (char_u **)lalloc((long_u)(match_count * sizeof(char_u *)),
-									TRUE);
+	matches = (char_u **)alloc(match_count * sizeof(char_u *));
     else
 	matches = NULL;
     match_count = 0;
@@ -3781,7 +3780,7 @@ test_for_current(
 	fullname = expand_tag_fname(fname, tag_fname, TRUE);
 	if (fullname != NULL)
 	{
-	    retval = (fullpathcmp(fullname, buf_ffname, TRUE) & FPC_SAME);
+	    retval = (fullpathcmp(fullname, buf_ffname, TRUE, TRUE) & FPC_SAME);
 	    vim_free(fullname);
 	}
 #ifdef FEAT_EMACS_TAGS
