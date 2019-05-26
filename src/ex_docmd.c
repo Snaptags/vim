@@ -397,6 +397,9 @@ static void	ex_folddo(exarg_T *eap);
 #if !defined(FEAT_X11) || !defined(FEAT_XCLIPBOARD)
 # define ex_xrestore		ex_ni
 #endif
+#if !defined(FEAT_TEXT_PROP)
+# define ex_popupclear		ex_ni
+#endif
 
 /*
  * Declare cmdnames[].
@@ -4813,7 +4816,7 @@ replace_makeprg(exarg_T *eap, char_u *p, char_u **cmdlinep)
 	    while ((pos = (char_u *)strstr((char *)pos + 2, "$*")) != NULL)
 		++i;
 	    len = (int)STRLEN(p);
-	    new_cmdline = alloc((int)(STRLEN(program) + i * (len - 2) + 1));
+	    new_cmdline = alloc(STRLEN(program) + i * (len - 2) + 1);
 	    if (new_cmdline == NULL)
 		return NULL;			/* out of memory */
 	    ptr = new_cmdline;
@@ -4829,7 +4832,7 @@ replace_makeprg(exarg_T *eap, char_u *p, char_u **cmdlinep)
 	}
 	else
 	{
-	    new_cmdline = alloc((int)(STRLEN(program) + STRLEN(p) + 2));
+	    new_cmdline = alloc(STRLEN(program) + STRLEN(p) + 2);
 	    if (new_cmdline == NULL)
 		return NULL;			/* out of memory */
 	    STRCPY(new_cmdline, program);
