@@ -19,7 +19,7 @@ def main(argv):
          inputfile = arg
 
 # get latest git tag
-   tag = subprocess.check_output(["git", "describe", "--abbrev=0", "--tags"])
+   tag = subprocess.check_output(["git", "describe", "--abbrev=0", "--tags"]).decode('utf-8')
    version = re.sub('^v', r'', tag).rstrip()
    version_split = version.split(".")
    now = datetime.datetime.now()
