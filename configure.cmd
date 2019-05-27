@@ -32,13 +32,13 @@ set CSCOPE=no
 set MBYTE=yes
 
 :: Enable Python scripting
-set DYNAMIC_PYTHON=yes
-set PYTHON=C:\Python27
-set PYTHON_VER=27
+::set DYNAMIC_PYTHON=yes
+::set PYTHON=C:\Python27
+::set PYTHON_VER=27
 
-::set DYNAMIC_PYTHON3=yes
-::set PYTHON3=c:\Users\LaM\AppData\Local\Programs\Python\Python36-32\ 
-::set PYTHON3_VER=36
+set DYNAMIC_PYTHON3=yes
+set PYTHON3=c:\Users\lam\AppData\Local\Programs\Python\Python37
+set PYTHON3_VER=37
 
 :: Enable Perl scripting
 set DYNAMIC_PERL=yes
@@ -46,7 +46,7 @@ set PERL=c:\Strawberry\perl
 set PERL_VER=524
 
 echo "Updating version numbers from git..."
-call c:\python27\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
+call python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
 call %VS_DIR%\VC\Auxiliary\Build\vcvarsall.bat %TOOLCHAIN%
 d:
