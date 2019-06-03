@@ -328,27 +328,25 @@ redraw_asap(int type)
 
     /* Allocate space to save the text displayed in the command line area. */
     rows = screen_Rows - cmdline_row;
-    screenline = (schar_T *)lalloc(rows * cols * sizeof(schar_T), FALSE);
-    screenattr = (sattr_T *)lalloc(rows * cols * sizeof(sattr_T), FALSE);
+    screenline = LALLOC_MULT(schar_T, rows * cols);
+    screenattr = LALLOC_MULT(sattr_T, rows * cols);
     if (screenline == NULL || screenattr == NULL)
 	ret = 2;
     if (enc_utf8)
     {
-	screenlineUC = (u8char_T *)lalloc(
-				       rows * cols * sizeof(u8char_T), FALSE);
+	screenlineUC = LALLOC_MULT(u8char_T, rows * cols);
 	if (screenlineUC == NULL)
 	    ret = 2;
 	for (i = 0; i < p_mco; ++i)
 	{
-	    screenlineC[i] = (u8char_T *)lalloc(
-				       rows * cols * sizeof(u8char_T), FALSE);
+	    screenlineC[i] = LALLOC_MULT(u8char_T, rows * cols);
 	    if (screenlineC[i] == NULL)
 		ret = 2;
 	}
     }
     if (enc_dbcs == DBCS_JPNU)
     {
-	screenline2 = (schar_T *)lalloc(rows * cols * sizeof(schar_T), FALSE);
+	screenline2 = LALLOC_MULT(schar_T, rows * cols);
 	if (screenline2 == NULL)
 	    ret = 2;
     }
@@ -508,8 +506,12 @@ redrawWinline(
     redraw_win_later(wp, VALID);
 }
 
+/*
+ * To be called when "updating_screen" was set before and now the postponed
+ * side effects may take place.
+ */
     void
-reset_updating_screen(int may_resize_shell UNUSED)
+after_updating_screen(int may_resize_shell UNUSED)
 {
     updating_screen = FALSE;
 #ifdef FEAT_GUI
@@ -611,7 +613,12 @@ update_screen(int type_arg)
 #ifdef FEAT_TEXT_PROP
     // TODO: avoid redrawing everything when there is a popup window.
     if (popup_any_visible())
-	type = NOT_VALID;
+    {
+	if (type < NOT_VALID)
+	    type = NOT_VALID;
+	FOR_ALL_WINDOWS(wp)
+	    wp->w_redr_type = NOT_VALID;
+    }
 #endif
 
     updating_screen = TRUE;
@@ -638,7 +645,7 @@ update_screen(int type_arg)
 		type = CLEAR;
 	    FOR_ALL_WINDOWS(wp)
 	    {
-		if (W_WINROW(wp) < msg_scrolled)
+		if (wp->w_winrow < msg_scrolled)
 		{
 		    if (W_WINROW(wp) + wp->w_height > msg_scrolled
 			    && wp->w_redr_type < REDRAW_TOP
@@ -805,7 +812,7 @@ update_screen(int type_arg)
     FOR_ALL_WINDOWS(wp)
 	wp->w_buffer->b_mod_set = FALSE;
 
-    reset_updating_screen(TRUE);
+    after_updating_screen(TRUE);
 
     /* Clear or redraw the command line.  Done last, because scrolling may
      * mess up the command line. */
@@ -821,7 +828,7 @@ update_screen(int type_arg)
     did_intro = TRUE;
 
 #ifdef FEAT_TEXT_PROP
-    // Display popup windows on top of the others.
+    // Display popup windows on top of the windows.
     update_popups();
 #endif
 
@@ -888,7 +895,7 @@ update_finish(void)
     end_search_hl();
 # endif
 
-    reset_updating_screen(TRUE);
+    after_updating_screen(TRUE);
 
 # ifdef FEAT_GUI
     /* Redraw the cursor and update the scrollbars when all screen updating is
@@ -985,51 +992,195 @@ update_debug_sign(buf_T *buf, linenr_T lnum)
 	    win_redr_status(wp, FALSE);
     }
 
+#ifdef FEAT_TEXT_PROP
+    // Display popup windows on top of the others.
+    update_popups();
+#endif
+
     update_finish();
 }
 #endif
 
+/*
+ * Get 'wincolor' attribute for window "wp".  If not set and "wp" is a popup
+ * window then get the "Pmenu" highlight attribute.
+ */
+    static int
+get_wcr_attr(win_T *wp)
+{
+    int wcr_attr = 0;
+
+    if (*wp->w_p_wcr != NUL)
+	wcr_attr = syn_name2attr(wp->w_p_wcr);
 #ifdef FEAT_TEXT_PROP
+    if (bt_popup(wp->w_buffer) && wcr_attr == 0)
+	wcr_attr = HL_ATTR(HLF_PNI);
+#endif
+    return wcr_attr;
+}
+
+#ifdef FEAT_TEXT_PROP
+/*
+ * Return a string of "len" spaces in IObuff.
+ */
+    static char_u *
+get_spaces(int len)
+{
+    vim_memset(IObuff, ' ', (size_t)len);
+    IObuff[len] = NUL;
+    return IObuff;
+}
+
     static void
 update_popups(void)
 {
     win_T   *wp;
-    win_T   *lowest_wp;
-    int	    lowest_zindex;
+    int	    top_off;
+    int	    left_off;
+    int	    total_width;
+    int	    total_height;
+    int	    popup_attr;
+    int	    border_attr[4];
+    int	    border_char[8] = {'-', '|', '-', '|', '+', '+', '+', '+', };
+    char_u  buf[MB_MAXBYTES];
+    int	    row;
+    int	    i;
 
-    // Reset all the VALID_POPUP flags.
-    for (wp = first_popupwin; wp != NULL; wp = wp->w_next)
-	wp->w_popup_flags &= ~PFL_REDRAWN;
-    for (wp = curtab->tp_first_popupwin; wp != NULL; wp = wp->w_next)
-	wp->w_popup_flags &= ~PFL_REDRAWN;
-
+    // Find the window with the lowest zindex that hasn't been updated yet,
+    // so that the window with a higher zindex is drawn later, thus goes on
+    // top.
     // TODO: don't redraw every popup every time.
-    for (;;)
+    popup_visible = FALSE;
+    popup_reset_handled();
+    while ((wp = find_next_popup(TRUE)) != NULL)
     {
-	// Find the window with the lowest zindex that hasn't been updated yet,
-	// so that the window with a higher zindex is drawn later, thus goes on
-	// top.
-	lowest_zindex = INT_MAX;
-	lowest_wp = NULL;
-	for (wp = first_popupwin; wp != NULL; wp = wp->w_next)
-	    if ((wp->w_popup_flags & (PFL_REDRAWN|PFL_HIDDEN)) == 0
-					       && wp->w_zindex < lowest_zindex)
-	    {
-		lowest_zindex = wp->w_zindex;
-		lowest_wp = wp;
-	    }
-	for (wp = curtab->tp_first_popupwin; wp != NULL; wp = wp->w_next)
-	    if ((wp->w_popup_flags & (PFL_REDRAWN|PFL_HIDDEN)) == 0
-					       && wp->w_zindex < lowest_zindex)
-	    {
-		lowest_zindex = wp->w_zindex;
-		lowest_wp = wp;
-	    }
+	// Recompute the position if the text changed.
+	if (wp->w_popup_last_changedtick != CHANGEDTICK(wp->w_buffer))
+	    popup_adjust_position(wp);
 
-	if (lowest_wp == NULL)
-	    break;
-	win_update(lowest_wp);
-	lowest_wp->w_popup_flags |= PFL_REDRAWN;
+	// adjust w_winrow and w_wincol for border and padding, since
+	// win_update() doesn't handle them.
+	top_off = wp->w_popup_padding[0] + wp->w_popup_border[0];
+	left_off = wp->w_popup_padding[3] + wp->w_popup_border[3];
+	wp->w_winrow += top_off;
+	wp->w_wincol += left_off;
+
+	// Draw the popup text.
+	win_update(wp);
+	popup_visible = TRUE;
+
+	wp->w_winrow -= top_off;
+	wp->w_wincol -= left_off;
+
+	total_width = wp->w_popup_border[3] + wp->w_popup_padding[3]
+		+ wp->w_width + wp->w_popup_padding[1] + wp->w_popup_border[1];
+	total_height = wp->w_popup_border[0] + wp->w_popup_padding[0]
+		+ wp->w_height + wp->w_popup_padding[2] + wp->w_popup_border[2];
+	popup_attr = get_wcr_attr(wp);
+
+	if (enc_utf8)
+	{
+	    border_char[0] = border_char[2] = 0x2550;
+	    border_char[1] = border_char[3] = 0x2551;
+	    border_char[4] = 0x2554;
+	    border_char[5] = 0x2557;
+	    border_char[6] = 0x255d;
+	    border_char[7] = 0x255a;
+	}
+	for (i = 0; i < 8; ++i)
+	    if (wp->w_border_char[i] != 0)
+		border_char[i] = wp->w_border_char[i];
+
+	for (i = 0; i < 4; ++i)
+	{
+	    border_attr[i] = popup_attr;
+	    if (wp->w_border_highlight[i] != NULL)
+		border_attr[i] = syn_name2attr(wp->w_border_highlight[i]);
+	}
+
+	if (wp->w_popup_border[0] > 0)
+	{
+	    // top border
+	    screen_fill(wp->w_winrow, wp->w_winrow + 1,
+		    wp->w_wincol,
+		    wp->w_wincol + total_width,
+		    wp->w_popup_border[3] != 0
+					     ? border_char[4] : border_char[0],
+		    border_char[0], border_attr[0]);
+	    if (wp->w_popup_border[1] > 0)
+	    {
+		buf[mb_char2bytes(border_char[5], buf)] = NUL;
+		screen_puts(buf, wp->w_winrow,
+			       wp->w_wincol + total_width - 1, border_attr[1]);
+	    }
+	}
+
+	if (wp->w_popup_padding[0] > 0)
+	{
+	    // top padding
+	    row = wp->w_winrow + wp->w_popup_border[0];
+	    screen_fill(row, row + wp->w_popup_padding[0],
+		    wp->w_wincol + wp->w_popup_border[3],
+		    wp->w_wincol + total_width - wp->w_popup_border[1],
+							 ' ', ' ', popup_attr);
+	}
+
+	for (row = wp->w_winrow + wp->w_popup_border[0];
+		row < wp->w_winrow + total_height - wp->w_popup_border[2];
+		    ++row)
+	{
+	    // left border
+	    if (wp->w_popup_border[3] > 0)
+	    {
+		buf[mb_char2bytes(border_char[3], buf)] = NUL;
+		screen_puts(buf, row, wp->w_wincol, border_attr[3]);
+	    }
+	    // left padding
+	    if (wp->w_popup_padding[3] > 0)
+		screen_puts(get_spaces(wp->w_popup_padding[3]), row,
+			wp->w_wincol + wp->w_popup_border[3], popup_attr);
+	    // right border
+	    if (wp->w_popup_border[1] > 0)
+	    {
+		buf[mb_char2bytes(border_char[1], buf)] = NUL;
+		screen_puts(buf, row,
+			       wp->w_wincol + total_width - 1, border_attr[1]);
+	    }
+	    // right padding
+	    if (wp->w_popup_padding[1] > 0)
+		screen_puts(get_spaces(wp->w_popup_padding[1]), row,
+			wp->w_wincol + wp->w_popup_border[3]
+			   + wp->w_popup_padding[3] + wp->w_width, popup_attr);
+	}
+
+	if (wp->w_popup_padding[2] > 0)
+	{
+	    // bottom padding
+	    row = wp->w_winrow + wp->w_popup_border[0]
+				       + wp->w_popup_padding[0] + wp->w_height;
+	    screen_fill(row, row + wp->w_popup_padding[2],
+		    wp->w_wincol + wp->w_popup_border[3],
+		    wp->w_wincol + total_width - wp->w_popup_border[1],
+							 ' ', ' ', popup_attr);
+	}
+
+	if (wp->w_popup_border[2] > 0)
+	{
+	    // bottom border
+	    row = wp->w_winrow + total_height - 1;
+	    screen_fill(row , row + 1,
+		    wp->w_wincol,
+		    wp->w_wincol + total_width,
+		    wp->w_popup_border[3] != 0
+					     ? border_char[7] : border_char[2],
+		    border_char[2], border_attr[2]);
+	    if (wp->w_popup_border[1] > 0)
+	    {
+		buf[mb_char2bytes(border_char[6], buf)] = NUL;
+		screen_puts(buf, row,
+			       wp->w_wincol + total_width - 1, border_attr[2]);
+	    }
+	}
     }
 }
 #endif
@@ -1071,6 +1222,11 @@ updateWindow(win_T *wp)
 # endif
 	    )
 	win_redr_status(wp, FALSE);
+
+#ifdef FEAT_TEXT_PROP
+    // Display popup windows on top of everything.
+    update_popups();
+#endif
 
     update_finish();
 }
@@ -2099,6 +2255,9 @@ win_update(win_T *wp)
 		    && wp->w_lines[idx].wl_lnum == lnum
 		    && lnum > wp->w_topline
 		    && !(dy_flags & (DY_LASTLINE | DY_TRUNCATE))
+#ifdef FEAT_TEXT_PROP
+		    && !bt_popup(wp->w_buffer)
+#endif
 		    && srow + wp->w_lines[idx].wl_size > wp->w_height
 #ifdef FEAT_DIFF
 		    && diff_check_fill(wp, lnum) == 0
@@ -2254,6 +2413,13 @@ win_update(win_T *wp)
 	    wp->w_filler_rows = wp->w_height - srow;
 	}
 #endif
+#ifdef FEAT_TEXT_PROP
+	else if (bt_popup(wp->w_buffer))
+	{
+	    // popup line that doesn't fit is left as-is
+	    wp->w_botline = lnum;
+	}
+#endif
 	else if (dy_flags & DY_TRUNCATE)	/* 'display' has "truncate" */
 	{
 	    int scr_row = W_WINROW(wp) + wp->w_height - 1;
@@ -2314,7 +2480,11 @@ win_update(win_T *wp)
 
 	// Make sure the rest of the screen is blank
 	// put '~'s on rows that aren't part of the file.
-	win_draw_end(wp, '~', ' ', FALSE, row, wp->w_height, HLF_EOB);
+	win_draw_end(wp,
+#ifdef FEAT_TEXT_PROP
+		bt_popup(wp->w_buffer) ? ' ' :
+#endif
+				  '~', ' ', FALSE, row, wp->w_height, HLF_EOB);
     }
 
 #ifdef SYN_TIME_LIMIT
@@ -2419,13 +2589,9 @@ win_draw_end(
 {
     int		n = 0;
     int		attr = HL_ATTR(hl);
-    int		wcr_attr = 0;
+    int		wcr_attr = get_wcr_attr(wp);
 
-    if (*wp->w_p_wcr != NUL)
-    {
-	wcr_attr = syn_name2attr(wp->w_p_wcr);
-	attr = hl_combine_attr(wcr_attr, attr);
-    }
+    attr = hl_combine_attr(wcr_attr, attr);
 
     if (draw_margin)
     {
@@ -3115,6 +3281,8 @@ win_line(
     int		vi_attr = 0;		// attributes for Visual and incsearch
 					// highlighting
     int		wcr_attr = 0;		// attributes from 'wincolor'
+    int		win_attr = 0;		// background for whole window, except
+					// margins and "~" lines.
     int		area_attr = 0;		// attributes desired by highlighting
     int		search_attr = 0;	// attributes desired by 'hlsearch'
 #ifdef FEAT_SYN_HL
@@ -3196,7 +3364,6 @@ win_line(
 #ifdef FEAT_TERMINAL
     int		get_term_attr = FALSE;
 #endif
-    int		win_attr = 0;		// background for whole window
 
     /* draw_state: items that are drawn in sequence: */
 #define WL_START	0		/* nothing done yet */
@@ -3566,28 +3733,15 @@ win_line(
 	}
     }
 
-    if (*wp->w_p_wcr != NUL)
+    wcr_attr = get_wcr_attr(wp);
+    if (wcr_attr != 0)
     {
-	wcr_attr = syn_name2attr(wp->w_p_wcr);
-
-	// 'wincolor' highlighting for the whole window
-	if (wcr_attr != 0)
-	{
-	    win_attr = wcr_attr;
-	    area_highlighting = TRUE;
-	}
+	win_attr = wcr_attr;
+	area_highlighting = TRUE;
     }
 #ifdef FEAT_TEXT_PROP
     if (bt_popup(wp->w_buffer))
-    {
 	screen_line_flags |= SLF_POPUP;
-
-	if (win_attr == 0)
-	{
-	    win_attr = HL_ATTR(HLF_PNI);
-	    area_highlighting = TRUE;
-	}
-    }
 #endif
 
     /*
@@ -3808,14 +3962,13 @@ win_line(
 	{
 	    // Make a copy of the properties, so that they are properly
 	    // aligned.
-	    text_props = (textprop_T *)alloc(
-					 text_prop_count * sizeof(textprop_T));
+	    text_props = ALLOC_MULT(textprop_T, text_prop_count);
 	    if (text_props != NULL)
 		mch_memmove(text_props, prop_start,
 					 text_prop_count * sizeof(textprop_T));
 
 	    // Allocate an array for the indexes.
-	    text_prop_idxs = (int *)alloc(text_prop_count * sizeof(int));
+	    text_prop_idxs = ALLOC_MULT(int, text_prop_count);
 	    area_highlighting = TRUE;
 	    extra_check = TRUE;
 	}
@@ -6659,6 +6812,11 @@ redraw_statuslines(void)
 	    win_redr_status(wp, FALSE);
     if (redraw_tabline)
 	draw_tabline();
+
+#ifdef FEAT_TEXT_PROP
+    // Display popup windows on top of the status lines.
+    update_popups();
+#endif
 }
 
 #if defined(FEAT_WILDMENU) || defined(PROTO)
@@ -8898,26 +9056,31 @@ retry:
 	win_free_lsize(wp);
     if (aucmd_win != NULL)
 	win_free_lsize(aucmd_win);
+#ifdef FEAT_TEXT_PROP
+    // global popup windows
+    for (wp = first_popupwin; wp != NULL; wp = wp->w_next)
+	win_free_lsize(wp);
+    // tab-local popup windows
+    FOR_ALL_TABPAGES(tp)
+	for (wp = tp->tp_first_popupwin; wp != NULL; wp = wp->w_next)
+	    win_free_lsize(wp);
+#endif
 
-    new_ScreenLines = (schar_T *)lalloc(
-			      (Rows + 1) * Columns * sizeof(schar_T), FALSE);
+    new_ScreenLines = LALLOC_MULT(schar_T, (Rows + 1) * Columns);
     vim_memset(new_ScreenLinesC, 0, sizeof(u8char_T *) * MAX_MCO);
     if (enc_utf8)
     {
-	new_ScreenLinesUC = (u8char_T *)lalloc(
-			     (Rows + 1) * Columns * sizeof(u8char_T), FALSE);
+	new_ScreenLinesUC = LALLOC_MULT(u8char_T, (Rows + 1) * Columns);
 	for (i = 0; i < p_mco; ++i)
-	    new_ScreenLinesC[i] = (u8char_T *)lalloc_clear(
-			     (Rows + 1) * Columns * sizeof(u8char_T), FALSE);
+	    new_ScreenLinesC[i] = LALLOC_CLEAR_MULT(u8char_T,
+							 (Rows + 1) * Columns);
     }
     if (enc_dbcs == DBCS_JPNU)
-	new_ScreenLines2 = (schar_T *)lalloc(
-			     (Rows + 1) * Columns * sizeof(schar_T), FALSE);
-    new_ScreenAttrs = (sattr_T *)lalloc(
-			      (Rows + 1) * Columns * sizeof(sattr_T), FALSE);
-    new_LineOffset = (unsigned *)lalloc(Rows * sizeof(unsigned), FALSE);
-    new_LineWraps = (char_u *)lalloc(Rows * sizeof(char_u), FALSE);
-    new_TabPageIdxs = (short *)lalloc(Columns * sizeof(short), FALSE);
+	new_ScreenLines2 = LALLOC_MULT(schar_T, (Rows + 1) * Columns);
+    new_ScreenAttrs = LALLOC_MULT(sattr_T, (Rows + 1) * Columns);
+    new_LineOffset = LALLOC_MULT(unsigned, Rows);
+    new_LineWraps = LALLOC_MULT(char_u, Rows);
+    new_TabPageIdxs = LALLOC_MULT(short, Columns);
 
     FOR_ALL_TAB_WINDOWS(tp, wp)
     {
@@ -8930,6 +9093,24 @@ retry:
     if (aucmd_win != NULL && aucmd_win->w_lines == NULL
 					&& win_alloc_lines(aucmd_win) == FAIL)
 	outofmem = TRUE;
+#ifdef FEAT_TEXT_PROP
+    // global popup windows
+    for (wp = first_popupwin; wp != NULL; wp = wp->w_next)
+	if (win_alloc_lines(wp) == FAIL)
+	{
+	    outofmem = TRUE;
+	    goto give_up;
+	}
+    // tab-local popup windows
+    FOR_ALL_TABPAGES(tp)
+	for (wp = tp->tp_first_popupwin; wp != NULL; wp = wp->w_next)
+	    if (win_alloc_lines(wp) == FAIL)
+	    {
+		outofmem = TRUE;
+		goto give_up;
+	    }
+#endif
+
 give_up:
 
     for (i = 0; i < p_mco; ++i)
@@ -10856,8 +11037,7 @@ redraw_win_toolbar(win_T *wp)
     vim_free(wp->w_winbar_items);
     for (menu = wp->w_winbar->children; menu != NULL; menu = menu->next)
 	++item_count;
-    wp->w_winbar_items = (winbar_item_T *)alloc_clear(
-				     sizeof(winbar_item_T) * (item_count + 1));
+    wp->w_winbar_items = ALLOC_CLEAR_MULT(winbar_item_T, item_count + 1);
 
     /* TODO: use fewer spaces if there is not enough room */
     for (menu = wp->w_winbar->children;
@@ -10943,6 +11123,11 @@ showruler(int always)
     /* Redraw the tab pages line if needed. */
     if (redraw_tabline)
 	draw_tabline();
+
+#ifdef FEAT_TEXT_PROP
+    // Display popup windows on top of everything.
+    update_popups();
+#endif
 }
 
 #ifdef FEAT_CMDL_INFO

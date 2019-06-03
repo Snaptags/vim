@@ -3269,7 +3269,7 @@ static void check_redraw(long_u flags);
 static int findoption(char_u *);
 static int find_key_option(char_u *arg_arg, int has_lt);
 static void showoptions(int all, int opt_flags);
-static int optval_default(struct vimoption *, char_u *varp);
+static int optval_default(struct vimoption *, char_u *varp, int compatible);
 static void showoneopt(struct vimoption *, int opt_flags);
 static int put_setstring(FILE *fd, char *cmd, char *name, char_u **valuep, long_u flags);
 static int put_setnum(FILE *fd, char *cmd, char *name, long *valuep);
@@ -3891,6 +3891,36 @@ set_number_default(char *name, long val)
     opt_idx = findoption((char_u *)name);
     if (opt_idx >= 0)
 	options[opt_idx].def_val[VI_DEFAULT] = (char_u *)(long_i)val;
+}
+
+/*
+ * Set all window-local and buffer-local options to the Vim default.
+ * local-global options will use the global value.
+ */
+    void
+set_local_options_default(win_T *wp)
+{
+    win_T	*save_curwin = curwin;
+    int		i;
+
+    curwin = wp;
+    curbuf = curwin->w_buffer;
+    block_autocmds();
+
+    for (i = 0; !istermoption(&options[i]); i++)
+    {
+	struct vimoption    *p = &(options[i]);
+	char_u		    *varp = get_varp_scope(p, OPT_LOCAL);
+
+	if (p->indir != PV_NONE
+		&& !(options[i].flags & P_NODEFAULT)
+		&& !optval_default(p, varp, FALSE))
+	    set_option_default(i, OPT_LOCAL, FALSE);
+    }
+
+    unblock_autocmds();
+    curwin = save_curwin;
+    curbuf = curwin->w_buffer;
 }
 
 #if defined(EXITFREE) || defined(PROTO)
@@ -7966,7 +7996,7 @@ skip:
 	wp->w_p_cc_cols = NULL;
     else
     {
-	wp->w_p_cc_cols = (int *)alloc(sizeof(int) * (count + 1));
+	wp->w_p_cc_cols = ALLOC_MULT(int, count + 1);
 	if (wp->w_p_cc_cols != NULL)
 	{
 	    /* sort the columns for faster usage on screen redraw inside
@@ -10106,8 +10136,7 @@ showoptions(
 #define INC 20
 #define GAP 3
 
-    items = (struct vimoption **)alloc(sizeof(struct vimoption *)
-								* PARAM_COUNT);
+    items = ALLOC_MULT(struct vimoption *, PARAM_COUNT);
     if (items == NULL)
 	return;
 
@@ -10150,7 +10179,7 @@ showoptions(
 	    if (varp != NULL
 		    && ((all == 2 && isterm)
 			|| (all == 1 && !isterm)
-			|| (all == 0 && !optval_default(p, varp))))
+			|| (all == 0 && !optval_default(p, varp, p_cp))))
 	    {
 		if (p->flags & P_BOOL)
 		    len = 1;		/* a toggle option fits always */
@@ -10200,13 +10229,13 @@ showoptions(
  * Return TRUE if option "p" has its default value.
  */
     static int
-optval_default(struct vimoption *p, char_u *varp)
+optval_default(struct vimoption *p, char_u *varp, int compatible)
 {
     int		dvi;
 
     if (varp == NULL)
 	return TRUE;	    /* hidden option is always at default */
-    dvi = ((p->flags & P_VI_DEF) || p_cp) ? VI_DEFAULT : VIM_DEFAULT;
+    dvi = ((p->flags & P_VI_DEF) || compatible) ? VI_DEFAULT : VIM_DEFAULT;
     if (p->flags & P_NUM)
 	return (*(long *)varp == (long)(long_i)p->def_val[dvi]);
     if (p->flags & P_BOOL)
@@ -10312,7 +10341,7 @@ makeset(FILE *fd, int opt_flags, int local_only)
 
 	    /* Global values are only written when not at the default value. */
 	    varp = get_varp_scope(p, opt_flags);
-	    if ((opt_flags & OPT_GLOBAL) && optval_default(p, varp))
+	    if ((opt_flags & OPT_GLOBAL) && optval_default(p, varp, p_cp))
 		continue;
 
 	    round = 2;
@@ -10328,7 +10357,7 @@ makeset(FILE *fd, int opt_flags, int local_only)
 		    if (!(opt_flags & OPT_GLOBAL) && !local_only)
 		    {
 			varp_fresh = get_varp_scope(p, OPT_GLOBAL);
-			if (!optval_default(p, varp_fresh))
+			if (!optval_default(p, varp_fresh, p_cp))
 			{
 			    round = 1;
 			    varp_local = varp;
@@ -11998,7 +12027,7 @@ ExpandSettings(
 		*num_file = num_term;
 	    else
 		return OK;
-	    *file = (char_u **)alloc(*num_file * sizeof(char_u *));
+	    *file = ALLOC_MULT(char_u *, *num_file);
 	    if (*file == NULL)
 	    {
 		*file = (char_u **)"";
@@ -12016,7 +12045,7 @@ ExpandOldSetting(int *num_file, char_u ***file)
     char_u  *buf;
 
     *num_file = 0;
-    *file = (char_u **)alloc(sizeof(char_u *));
+    *file = ALLOC_ONE(char_u *);
     if (*file == NULL)
 	return FAIL;
 
@@ -12879,7 +12908,7 @@ tabstop_set(char_u *var, int **array)
 	return FALSE;
     }
 
-    *array = (int *)alloc((valcount + 1) * sizeof(int));
+    *array = ALLOC_MULT(int, valcount + 1);
     if (*array == NULL)
 	return FALSE;
     (*array)[0] = valcount;
@@ -13102,7 +13131,7 @@ tabstop_copy(int *oldts)
 
     if (oldts == NULL)
 	return NULL;
-    newts = (int *)alloc((oldts[0] + 1) * sizeof(int));
+    newts = ALLOC_MULT(int, oldts[0] + 1);
     if (newts != NULL)
 	for (t = 0; t <= oldts[0]; ++t)
 	    newts[t] = oldts[t];

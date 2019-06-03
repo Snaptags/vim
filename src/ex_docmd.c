@@ -5452,6 +5452,8 @@ ex_doautocmd(exarg_T *eap)
     static void
 ex_bunload(exarg_T *eap)
 {
+    if (NOT_IN_POPUP_WINDOW)
+	return;
     eap->errmsg = do_bufdel(
 	    eap->cmdidx == CMD_bdelete ? DOBUF_DEL
 		: eap->cmdidx == CMD_bwipeout ? DOBUF_WIPE
@@ -5466,6 +5468,8 @@ ex_bunload(exarg_T *eap)
     static void
 ex_buffer(exarg_T *eap)
 {
+    if (NOT_IN_POPUP_WINDOW)
+	return;
     if (*eap->arg)
 	eap->errmsg = e_trailing;
     else
@@ -6550,7 +6554,7 @@ alist_unlink(alist_T *al)
     void
 alist_new(void)
 {
-    curwin->w_alist = (alist_T *)alloc(sizeof(alist_T));
+    curwin->w_alist = ALLOC_ONE(alist_T);
     if (curwin->w_alist == NULL)
     {
 	curwin->w_alist = &global_alist;
@@ -6584,7 +6588,7 @@ alist_expand(int *fnum_list, int fnum_len)
      * expansion.  Also, the vimrc file isn't read yet, thus the user
      * can't set the options. */
     p_su = empty_option;
-    old_arg_files = (char_u **)alloc(sizeof(char_u *) * GARGCOUNT);
+    old_arg_files = ALLOC_MULT(char_u *, GARGCOUNT);
     if (old_arg_files != NULL)
     {
 	for (i = 0; i < GARGCOUNT; ++i)
@@ -6768,6 +6772,9 @@ ex_splitview(exarg_T *eap)
 		       || eap->cmdidx == CMD_tabfind
 		       || eap->cmdidx == CMD_tabnew;
 
+    if (NOT_IN_POPUP_WINDOW)
+	return;
+
 #ifdef FEAT_GUI
     need_mouse_correct = TRUE;
 #endif
@@ -6895,6 +6902,8 @@ ex_tabnext(exarg_T *eap)
 {
     int tab_number;
 
+    if (NOT_IN_POPUP_WINDOW)
+	return;
     switch (eap->cmdidx)
     {
 	case CMD_tabfirst:
@@ -7146,6 +7155,8 @@ do_exedit(
     int		need_hide;
     int		exmode_was = exmode_active;
 
+    if (NOT_IN_POPUP_WINDOW)
+	return;
     /*
      * ":vi" command ends Ex mode.
      */

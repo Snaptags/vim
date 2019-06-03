@@ -492,6 +492,7 @@ static void f_values(typval_T *argvars, typval_T *rettv);
 static void f_virtcol(typval_T *argvars, typval_T *rettv);
 static void f_visualmode(typval_T *argvars, typval_T *rettv);
 static void f_wildmenumode(typval_T *argvars, typval_T *rettv);
+static void f_win_execute(typval_T *argvars, typval_T *rettv);
 static void f_win_findbuf(typval_T *argvars, typval_T *rettv);
 static void f_win_getid(typval_T *argvars, typval_T *rettv);
 static void f_win_gotoid(typval_T *argvars, typval_T *rettv);
@@ -808,9 +809,13 @@ static struct fst
     {"perleval",	1, 1, f_perleval},
 #endif
 #ifdef FEAT_TEXT_PROP
-    {"popup_close",	1, 1, f_popup_close},
+    {"popup_atcursor",	2, 2, f_popup_atcursor},
+    {"popup_close",	1, 2, f_popup_close},
     {"popup_create",	2, 2, f_popup_create},
+    {"popup_getoptions", 1, 1, f_popup_getoptions},
+    {"popup_getpos",	1, 1, f_popup_getpos},
     {"popup_hide",	1, 1, f_popup_hide},
+    {"popup_move",	2, 2, f_popup_move},
     {"popup_show",	1, 1, f_popup_show},
 #endif
 #ifdef FEAT_FLOAT
@@ -1043,6 +1048,7 @@ static struct fst
     {"virtcol",		1, 1, f_virtcol},
     {"visualmode",	0, 1, f_visualmode},
     {"wildmenumode",	0, 0, f_wildmenumode},
+    {"win_execute",	2, 3, f_win_execute},
     {"win_findbuf",	1, 1, f_win_findbuf},
     {"win_getid",	0, 2, f_win_getid},
     {"win_gotoid",	1, 1, f_win_gotoid},
@@ -3517,7 +3523,7 @@ get_list_line(
  * "execute()" function
  */
     static void
-f_execute(typval_T *argvars, typval_T *rettv)
+execute_common(typval_T *argvars, typval_T *rettv, int arg_off)
 {
     char_u	*cmd = NULL;
     list_T	*list = NULL;
@@ -3533,9 +3539,9 @@ f_execute(typval_T *argvars, typval_T *rettv)
     rettv->vval.v_string = NULL;
     rettv->v_type = VAR_STRING;
 
-    if (argvars[0].v_type == VAR_LIST)
+    if (argvars[arg_off].v_type == VAR_LIST)
     {
-	list = argvars[0].vval.v_list;
+	list = argvars[arg_off].vval.v_list;
 	if (list == NULL || list->lv_first == NULL)
 	    /* empty list, no commands, empty output */
 	    return;
@@ -3543,15 +3549,15 @@ f_execute(typval_T *argvars, typval_T *rettv)
     }
     else
     {
-	cmd = tv_get_string_chk(&argvars[0]);
+	cmd = tv_get_string_chk(&argvars[arg_off]);
 	if (cmd == NULL)
 	    return;
     }
 
-    if (argvars[1].v_type != VAR_UNKNOWN)
+    if (argvars[arg_off + 1].v_type != VAR_UNKNOWN)
     {
 	char_u	buf[NUMBUFLEN];
-	char_u  *s = tv_get_string_buf_chk(&argvars[1], buf);
+	char_u  *s = tv_get_string_buf_chk(&argvars[arg_off + 1], buf);
 
 	if (s == NULL)
 	    return;
@@ -3616,6 +3622,15 @@ f_execute(typval_T *argvars, typval_T *rettv)
 	// When working silently: Put it back where it was, since nothing
 	// should have been written.
 	msg_col = save_msg_col;
+}
+
+/*
+ * "execute()" function
+ */
+    static void
+f_execute(typval_T *argvars, typval_T *rettv)
+{
+    execute_common(argvars, rettv, 0);
 }
 
 /*
@@ -4464,7 +4479,7 @@ common_function(typval_T *argvars, typval_T *rettv, int is_funcref)
 	}
 	if (dict_idx > 0 || arg_idx > 0 || arg_pt != NULL || is_funcref)
 	{
-	    partial_T	*pt = (partial_T *)alloc_clear(sizeof(partial_T));
+	    partial_T	*pt = ALLOC_CLEAR_ONE(partial_T);
 
 	    /* result is a VAR_PARTIAL */
 	    if (pt == NULL)
@@ -4483,8 +4498,7 @@ common_function(typval_T *argvars, typval_T *rettv, int is_funcref)
 		    if (list != NULL)
 			lv_len = list->lv_len;
 		    pt->pt_argc = arg_len + lv_len;
-		    pt->pt_argv = (typval_T *)alloc(
-					      sizeof(typval_T) * pt->pt_argc);
+		    pt->pt_argv = ALLOC_MULT(typval_T, pt->pt_argc);
 		    if (pt->pt_argv == NULL)
 		    {
 			vim_free(pt);
@@ -6092,6 +6106,29 @@ f_getwininfo(typval_T *argvars, typval_T *rettv)
 		/* found information about a specific window */
 		return;
 	}
+    }
+}
+
+/*
+ * "win_execute()" function
+ */
+    static void
+f_win_execute(typval_T *argvars, typval_T *rettv)
+{
+    int		id = (int)tv_get_number(argvars);
+    win_T	*wp = win_id2wp(id);
+    win_T	*save_curwin;
+    tabpage_T	*save_curtab;
+
+    if (wp != NULL)
+    {
+	if (switch_win_noblock(&save_curwin, &save_curtab, wp, curtab, TRUE)
+									 == OK)
+	{
+	    check_cursor();
+	    execute_common(argvars, rettv, 1);
+	}
+	restore_win_noblock(save_curwin, save_curtab, TRUE);
     }
 }
 
@@ -9163,8 +9200,7 @@ f_printf(typval_T *argvars, typval_T *rettv)
 f_prompt_setcallback(typval_T *argvars, typval_T *rettv UNUSED)
 {
     buf_T	*buf;
-    char_u	*callback;
-    partial_T	*partial;
+    callback_T	callback;
 
     if (check_secure())
 	return;
@@ -9172,17 +9208,12 @@ f_prompt_setcallback(typval_T *argvars, typval_T *rettv UNUSED)
     if (buf == NULL)
 	return;
 
-    callback = get_callback(&argvars[1], &partial);
-    if (callback == NULL)
+    callback = get_callback(&argvars[1]);
+    if (callback.cb_name == NULL)
 	return;
 
-    free_callback(buf->b_prompt_callback, buf->b_prompt_partial);
-    if (partial == NULL)
-	buf->b_prompt_callback = vim_strsave(callback);
-    else
-	/* pointer into the partial */
-	buf->b_prompt_callback = callback;
-    buf->b_prompt_partial = partial;
+    free_callback(&buf->b_prompt_callback);
+    set_callback(&buf->b_prompt_callback, &callback);
 }
 
 /*
@@ -9192,8 +9223,7 @@ f_prompt_setcallback(typval_T *argvars, typval_T *rettv UNUSED)
 f_prompt_setinterrupt(typval_T *argvars, typval_T *rettv UNUSED)
 {
     buf_T	*buf;
-    char_u	*callback;
-    partial_T	*partial;
+    callback_T	callback;
 
     if (check_secure())
 	return;
@@ -9201,17 +9231,12 @@ f_prompt_setinterrupt(typval_T *argvars, typval_T *rettv UNUSED)
     if (buf == NULL)
 	return;
 
-    callback = get_callback(&argvars[1], &partial);
-    if (callback == NULL)
+    callback = get_callback(&argvars[1]);
+    if (callback.cb_name == NULL)
 	return;
 
-    free_callback(buf->b_prompt_interrupt, buf->b_prompt_int_partial);
-    if (partial == NULL)
-	buf->b_prompt_interrupt = vim_strsave(callback);
-    else
-	/* pointer into the partial */
-	buf->b_prompt_interrupt = callback;
-    buf->b_prompt_int_partial = partial;
+    free_callback(&buf->b_prompt_interrupt);
+    set_callback(&buf->b_prompt_interrupt, &callback);
 }
 
 /*
@@ -9614,8 +9639,7 @@ f_readfile(typval_T *argvars, typval_T *rettv)
 		    long growmin  = (long)((p - start) * 2 + prevlen);
 		    prevsize = grow50pc > growmin ? grow50pc : growmin;
 		}
-		newprev = prev == NULL ? alloc(prevsize)
-						: vim_realloc(prev, prevsize);
+		newprev = vim_realloc(prev, prevsize);
 		if (newprev == NULL)
 		{
 		    do_outofmem_msg((long_u)prevsize);
@@ -11787,7 +11811,7 @@ f_setreg(typval_T *argvars, typval_T *rettv)
 
 	/* First half: use for pointers to result lines; second half: use for
 	 * pointers to allocated copies. */
-	lstval = (char_u **)alloc(sizeof(char_u *) * ((len + 1) * 2));
+	lstval = ALLOC_MULT(char_u *, (len + 1) * 2);
 	if (lstval == NULL)
 	    return;
 	curval = lstval;
@@ -12673,7 +12697,7 @@ do_sort_uniq(typval_T *argvars, typval_T *rettv, int sort)
 	}
 
 	/* Make an array with each entry pointing to an item in the List. */
-	ptrs = (sortItem_T *)alloc(len * sizeof(sortItem_T));
+	ptrs = ALLOC_MULT(sortItem_T, len);
 	if (ptrs == NULL)
 	    goto theend;
 
@@ -14595,42 +14619,104 @@ f_test_settime(typval_T *argvars, typval_T *rettv UNUSED)
 /*
  * Get a callback from "arg".  It can be a Funcref or a function name.
  * When "arg" is zero return an empty string.
- * Return NULL for an invalid argument.
+ * "cb_name" is not allocated.
+ * "cb_name" is set to NULL for an invalid argument.
  */
-    char_u *
-get_callback(typval_T *arg, partial_T **pp)
+    callback_T
+get_callback(typval_T *arg)
 {
+    callback_T res;
+
+    res.cb_free_name = FALSE;
     if (arg->v_type == VAR_PARTIAL && arg->vval.v_partial != NULL)
     {
-	*pp = arg->vval.v_partial;
-	++(*pp)->pt_refcount;
-	return partial_name(*pp);
+	res.cb_partial = arg->vval.v_partial;
+	++res.cb_partial->pt_refcount;
+	res.cb_name = partial_name(res.cb_partial);
     }
-    *pp = NULL;
-    if (arg->v_type == VAR_FUNC || arg->v_type == VAR_STRING)
+    else
     {
-	func_ref(arg->vval.v_string);
-	return arg->vval.v_string;
+	res.cb_partial = NULL;
+	if (arg->v_type == VAR_FUNC || arg->v_type == VAR_STRING)
+	{
+	    // Note that we don't make a copy of the string.
+	    res.cb_name = arg->vval.v_string;
+	    func_ref(res.cb_name);
+	}
+	else if (arg->v_type == VAR_NUMBER && arg->vval.v_number == 0)
+	{
+	    res.cb_name = (char_u *)"";
+	}
+	else
+	{
+	    emsg(_("E921: Invalid callback argument"));
+	    res.cb_name = NULL;
+	}
     }
-    if (arg->v_type == VAR_NUMBER && arg->vval.v_number == 0)
-	return (char_u *)"";
-    emsg(_("E921: Invalid callback argument"));
-    return NULL;
+    return res;
 }
 
 /*
- * Unref/free "callback" and "partial" returned by get_callback().
+ * Copy a callback into a typval_T.
  */
     void
-free_callback(char_u *callback, partial_T *partial)
+put_callback(callback_T *cb, typval_T *tv)
 {
-    if (partial != NULL)
-	partial_unref(partial);
-    else if (callback != NULL)
+    if (cb->cb_partial != NULL)
     {
-	func_unref(callback);
-	vim_free(callback);
+	tv->v_type = VAR_PARTIAL;
+	tv->vval.v_partial = cb->cb_partial;
+	++tv->vval.v_partial->pt_refcount;
     }
+    else
+    {
+	tv->v_type = VAR_FUNC;
+	tv->vval.v_string = vim_strsave(cb->cb_name);
+	func_ref(cb->cb_name);
+    }
+}
+
+/*
+ * Make a copy of "src" into "dest", allocating the function name if needed,
+ * without incrementing the refcount.
+ */
+    void
+set_callback(callback_T *dest, callback_T *src)
+{
+    if (src->cb_partial == NULL)
+    {
+	// just a function name, make a copy
+	dest->cb_name = vim_strsave(src->cb_name);
+	dest->cb_free_name = TRUE;
+    }
+    else
+    {
+	// cb_name is a pointer into cb_partial
+	dest->cb_name = src->cb_name;
+	dest->cb_free_name = FALSE;
+    }
+    dest->cb_partial = src->cb_partial;
+}
+
+/*
+ * Unref/free "callback" returned by get_callback() or set_callback().
+ */
+    void
+free_callback(callback_T *callback)
+{
+    if (callback->cb_partial != NULL)
+    {
+	partial_unref(callback->cb_partial);
+	callback->cb_partial = NULL;
+    }
+    else if (callback->cb_name != NULL)
+	func_unref(callback->cb_name);
+    if (callback->cb_free_name)
+    {
+	vim_free(callback->cb_name);
+	callback->cb_free_name = FALSE;
+    }
+    callback->cb_name = NULL;
 }
 
 #ifdef FEAT_TIMERS
@@ -14687,9 +14773,8 @@ f_timer_start(typval_T *argvars, typval_T *rettv)
     long	msec = (long)tv_get_number(&argvars[0]);
     timer_T	*timer;
     int		repeat = 0;
-    char_u	*callback;
+    callback_T	callback;
     dict_T	*dict;
-    partial_T	*partial;
 
     rettv->vval.v_number = -1;
     if (check_secure())
@@ -14706,21 +14791,16 @@ f_timer_start(typval_T *argvars, typval_T *rettv)
 	    repeat = dict_get_number(dict, (char_u *)"repeat");
     }
 
-    callback = get_callback(&argvars[1], &partial);
-    if (callback == NULL)
+    callback = get_callback(&argvars[1]);
+    if (callback.cb_name == NULL)
 	return;
 
     timer = create_timer(msec, repeat);
     if (timer == NULL)
-	free_callback(callback, partial);
+	free_callback(&callback);
     else
     {
-	if (partial == NULL)
-	    timer->tr_callback = vim_strsave(callback);
-	else
-	    /* pointer into the partial */
-	    timer->tr_callback = callback;
-	timer->tr_partial = partial;
+	set_callback(&timer->tr_callback, &callback);
 	rettv->vval.v_number = (varnumber_T)timer->tr_id;
     }
 }

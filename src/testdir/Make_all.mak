@@ -13,7 +13,6 @@ SCRIPTS_FIRST = \
 
 # Tests that run on all systems.
 SCRIPTS_ALL = \
-	test3.out \
 	test39.out \
 	test42.out \
 	test44.out \
@@ -42,7 +41,6 @@ SCRIPTS_MORE2 = \
 
 # Tests that run on most systems, but not on VMS
 SCRIPTS_MORE4 = \
-	test30.out \
 	test59.out \
 	test72.out \
 

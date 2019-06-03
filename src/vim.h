@@ -614,8 +614,8 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define VALID_TOPLINE	0x80	// w_topline is valid (for cursor position)
 
 // Values for w_popup_flags.
-#define PFL_HIDDEN	1	// popup is not displayed
-#define PFL_REDRAWN	2	// popup was just redrawn
+#define POPF_HIDDEN	1	// popup is not displayed
+#define POPF_HANDLED	2	// popup was just redrawn or filtered
 
 /*
  * Terminal highlighting attribute bits.
@@ -879,10 +879,11 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define SEARCH_PEEK  0x800  /* peek for typed char, cancel search */
 #define SEARCH_COL  0x1000  /* start at specified column instead of zero */
 
-/* Values for find_ident_under_cursor() */
-#define FIND_IDENT	1	/* find identifier (word) */
-#define FIND_STRING	2	/* find any string (WORD) */
-#define FIND_EVAL	4	/* include "->", "[]" and "." */
+// Values for find_ident_under_cursor()
+#define FIND_IDENT	1	// find identifier (word)
+#define FIND_STRING	2	// find any string (WORD)
+#define FIND_EVAL	4	// include "->", "[]" and "."
+#define FIND_NOERROR	8	// no error when no word found
 
 /* Values for file_name_in_line() */
 #define FNAME_MESS	1	/* give error message */
@@ -1545,6 +1546,16 @@ typedef UINT32_TYPEDEF UINT32_T;
 #ifndef R_OK
 # define R_OK 4		/* for systems that don't have R_OK in unistd.h */
 #endif
+
+// Allocate memory for one type and cast the returned pointer to have the
+// compiler check the types.
+#define ALLOC_ONE(type)  (type *)alloc(sizeof(type))
+#define ALLOC_MULT(type, count)  (type *)alloc(sizeof(type) * (count))
+#define ALLOC_CLEAR_ONE(type)  (type *)alloc_clear(sizeof(type))
+#define ALLOC_CLEAR_MULT(type, count)  (type *)alloc_clear(sizeof(type) * (count))
+#define LALLOC_CLEAR_ONE(type)  (type *)lalloc_clear(sizeof(type), FALSE)
+#define LALLOC_CLEAR_MULT(type, count)  (type *)lalloc_clear(sizeof(type) * (count), FALSE)
+#define LALLOC_MULT(type, count)  (type *)lalloc(sizeof(type) * (count), FALSE)
 
 /*
  * defines to avoid typecasts from (char_u *) to (char *) and back

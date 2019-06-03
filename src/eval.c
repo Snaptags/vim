@@ -491,7 +491,7 @@ var_redir_start(char_u *name, int append)
     if (redir_varname == NULL)
 	return FAIL;
 
-    redir_lval = (lval_T *)alloc_clear(sizeof(lval_T));
+    redir_lval = ALLOC_CLEAR_ONE(lval_T);
     if (redir_lval == NULL)
     {
 	var_redir_stop();
@@ -1063,7 +1063,7 @@ eval_expr(char_u *arg, char_u **nextcmd)
 {
     typval_T	*tv;
 
-    tv = (typval_T *)alloc(sizeof(typval_T));
+    tv = ALLOC_ONE(typval_T);
     if (tv != NULL && eval0(arg, tv, nextcmd, TRUE) == FAIL)
 	VIM_CLEAR(tv);
 
@@ -2769,7 +2769,7 @@ eval_for_line(
 
     *errp = TRUE;	/* default: there is an error */
 
-    fi = (forinfo_T *)alloc_clear(sizeof(forinfo_T));
+    fi = ALLOC_CLEAR_ONE(forinfo_T);
     if (fi == NULL)
 	return NULL;
 
@@ -5920,10 +5920,10 @@ set_ref_in_item(
 		dtv.vval.v_channel = job->jv_channel;
 		set_ref_in_item(&dtv, copyID, ht_stack, list_stack);
 	    }
-	    if (job->jv_exit_partial != NULL)
+	    if (job->jv_exit_cb.cb_partial != NULL)
 	    {
 		dtv.v_type = VAR_PARTIAL;
-		dtv.vval.v_partial = job->jv_exit_partial;
+		dtv.vval.v_partial = job->jv_exit_cb.cb_partial;
 		set_ref_in_item(&dtv, copyID, ht_stack, list_stack);
 	    }
 	}
@@ -5946,29 +5946,30 @@ set_ref_in_item(
 		    set_ref_in_item(jq->jq_value, copyID, ht_stack, list_stack);
 		for (cq = ch->ch_part[part].ch_cb_head.cq_next; cq != NULL;
 							     cq = cq->cq_next)
-		    if (cq->cq_partial != NULL)
+		    if (cq->cq_callback.cb_partial != NULL)
 		    {
 			dtv.v_type = VAR_PARTIAL;
-			dtv.vval.v_partial = cq->cq_partial;
+			dtv.vval.v_partial = cq->cq_callback.cb_partial;
 			set_ref_in_item(&dtv, copyID, ht_stack, list_stack);
 		    }
-		if (ch->ch_part[part].ch_partial != NULL)
+		if (ch->ch_part[part].ch_callback.cb_partial != NULL)
 		{
 		    dtv.v_type = VAR_PARTIAL;
-		    dtv.vval.v_partial = ch->ch_part[part].ch_partial;
+		    dtv.vval.v_partial =
+				      ch->ch_part[part].ch_callback.cb_partial;
 		    set_ref_in_item(&dtv, copyID, ht_stack, list_stack);
 		}
 	    }
-	    if (ch->ch_partial != NULL)
+	    if (ch->ch_callback.cb_partial != NULL)
 	    {
 		dtv.v_type = VAR_PARTIAL;
-		dtv.vval.v_partial = ch->ch_partial;
+		dtv.vval.v_partial = ch->ch_callback.cb_partial;
 		set_ref_in_item(&dtv, copyID, ht_stack, list_stack);
 	    }
-	    if (ch->ch_close_partial != NULL)
+	    if (ch->ch_close_cb.cb_partial != NULL)
 	    {
 		dtv.v_type = VAR_PARTIAL;
-		dtv.vval.v_partial = ch->ch_close_partial;
+		dtv.vval.v_partial = ch->ch_close_cb.cb_partial;
 		set_ref_in_item(&dtv, copyID, ht_stack, list_stack);
 	    }
 	}
@@ -7297,7 +7298,7 @@ handle_subscript(
     typval_T *
 alloc_tv(void)
 {
-    return (typval_T *)alloc_clear(sizeof(typval_T));
+    return ALLOC_CLEAR_ONE(typval_T);
 }
 
 /*
@@ -7883,7 +7884,7 @@ new_script_vars(scid_T id)
 	while (ga_scripts.ga_len < id)
 	{
 	    sv = SCRIPT_SV(ga_scripts.ga_len + 1) =
-		(scriptvar_T *)alloc_clear(sizeof(scriptvar_T));
+		ALLOC_CLEAR_ONE(scriptvar_T);
 	    init_var_dict(&sv->sv_dict, &sv->sv_var, VAR_SCOPE);
 	    ++ga_scripts.ga_len;
 	}
@@ -8139,7 +8140,7 @@ set_var(
 	if (!valid_varname(varname))
 	    return;
 
-	v = (dictitem_T *)alloc(sizeof(dictitem_T) + STRLEN(varname));
+	v = alloc(sizeof(dictitem_T) + STRLEN(varname));
 	if (v == NULL)
 	    return;
 	STRCPY(v->di_key, varname);
