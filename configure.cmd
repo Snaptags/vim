@@ -1,8 +1,5 @@
 @echo off
 
-:: Windows SDK Include directory. No quotation marks.
-set SDK_INCLUDE_DIR=C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1\Include
-
 :: Visual Studio directory. Quotation marks, no trailing backslash.
 set VS_DIR="c:\Program Files (x86)\Microsoft Visual Studio\2019\Professional"
 
@@ -37,7 +34,7 @@ set MBYTE=yes
 ::set PYTHON_VER=27
 
 set DYNAMIC_PYTHON3=yes
-set PYTHON3=c:\Users\lam\AppData\Local\Programs\Python\Python37
+set PYTHON3=c:\Python37
 set PYTHON3_VER=37
 
 :: Enable Perl scripting
@@ -46,7 +43,6 @@ set PERL=c:\Strawberry\perl
 set PERL_VER=524
 
 echo "Updating version numbers from git..."
-call c:\Users\lam\AppData\Local\Programs\Python\Python37\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
+call c:\Python37\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
 call %VS_DIR%\VC\Auxiliary\Build\vcvarsall.bat %TOOLCHAIN%
-d:
