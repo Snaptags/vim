@@ -1,4 +1,4 @@
-*eval.txt*	For Vim version 8.1.  Last change: 2019 Jun 04
+*eval.txt*	For Vim version 8.1.  Last change: 2019 Jun 10
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -1504,8 +1504,10 @@ One local buffer variable is predefined:
 					*b:changedtick* *changetick*
 b:changedtick	The total number of changes to the current buffer.  It is
 		incremented for each change.  An undo command is also a change
-		in this case.  This can be used to perform an action only when
-		the buffer has changed.  Example: >
+		in this case.  Resetting 'modified' when writing the buffer is
+		also counted.
+		This can be used to perform an action only when the buffer has
+		changed.  Example: >
 		    :if my_changedtick != b:changedtick
 		    :	let my_changedtick = b:changedtick
 		    :	call My_Update()
@@ -2324,6 +2326,7 @@ extend({expr1}, {expr2} [, {expr3}])
 exp({expr})			Float	exponential of {expr}
 expand({expr} [, {nosuf} [, {list}]])
 				any	expand special keywords in {expr}
+expandcmd({expr})		String	expand {expr} like with `:edit`
 feedkeys({string} [, {mode}])	Number	add key sequence to typeahead buffer
 filereadable({file})		Number	|TRUE| if {file} is a readable file
 filewritable({file})		Number	|TRUE| if {file} is a writable file
@@ -2620,6 +2623,12 @@ sin({expr})			Float	sine of {expr}
 sinh({expr})			Float	hyperbolic sine of {expr}
 sort({list} [, {func} [, {dict}]])
 				List	sort {list}, using {func} to compare
+sound_clear()			none	stop playing all sounds
+sound_playevent({name} [, {callback}])
+				Number	play an event sound
+sound_playfile({path} [, {callback}])
+				Number	play sound file {path}
+sound_stop({id})		none	stop playing sound {id}
 soundfold({word})		String	sound-fold {word}
 spellbadword()			String	badly spelled word at cursor
 spellsuggest({word} [, {max} [, {capital}]])
@@ -4210,6 +4219,14 @@ expand({expr} [, {nosuf} [, {list}]])				*expand()*
 		See |glob()| for finding existing files.  See |system()| for
 		getting the raw output of an external command.
 
+expandcmd({expr})					*expandcmd()*
+		Expand special items in {expr} like what is done for an Ex
+		command such as `:edit`.  This expands special keywords, like
+		with |expand()|, and environment variables, anywhere in
+		{expr}.  Returns the expanded string.
+		Example: >
+			:echo expandcmd('make %<.o')
+<
 extend({expr1}, {expr2} [, {expr3}])			*extend()*
 		{expr1} and {expr2} must be both |Lists| or both
 		|Dictionaries|.
@@ -7343,7 +7360,7 @@ prop_remove({props} [, {lnum} [, {lnum-end}]])
 				not just the first one
 		A property matches when either "id" or "type" matches.
 		If buffer "bufnr" does not exist you get an error message.
-		If buffer 'bufnr" is not loaded then nothing happens.
+		If buffer "bufnr" is not loaded then nothing happens.
 
 		Returns the number of properties that were removed.
 
@@ -8835,6 +8852,48 @@ sort({list} [, {func} [, {dict}]])			*sort()* *E702*
 			   return a:i1 - a:i2
 			endfunc
 <
+sound_clear()						*sound_clear()*
+		Stop playing all sounds.
+		{only available when compiled with the +sound feature}
+
+							*sound_playevent()*
+sound_playevent({name} [, {callback}])
+		Play a sound identified by {name}.  Which event names are
+		supported depends on the system.  Often the XDG sound names
+		are used.  On Ubuntu they may be found in
+		/usr/share/sounds/freedesktop/stereo.  Example: >
+			call sound_playevent('bell')
+
+<		When {callback} is specified it is invoked when the sound is
+		finished.  The first argument is the sound ID, the second
+		argument is the status:
+			0	sound was played to the end
+			1	sound was interrupted
+			2	error occured after sound started
+		Example: >
+		   func Callback(id, status)
+		     echomsg "sound " .. a:id .. " finished with " .. a:status
+		   endfunc
+		   call sound_playevent('bell', 'Callback')
+
+<		Returns the sound ID, which can be passed to `sound_stop()`.
+		Returns zero if the sound could not be played.
+		{only available when compiled with the |+sound| feature}
+
+							*sound_playfile()*
+sound_playfile({path} [, {callback}])
+		Like `sound_playevent()` but play sound file {path}.  {path}
+		must be a full path.  On Ubuntu you may find files to play
+		with this command: >
+		    :!find /usr/share/sounds -type f | grep -v index.theme
+<		{only available when compiled with the |+sound| feature}
+
+
+sound_stop({id})					*sound_stop()*
+		Stop playing sound {id}.  {id} must be previously returned by
+		`sound_playevent()` or `sound_playfile()`.
+		{only available when compiled with the |+sound| feature}
+
 							*soundfold()*
 soundfold({word})
 		Return the sound-folded equivalent of {word}.  Uses the first
@@ -10754,6 +10813,7 @@ scrollbind		Compiled with 'scrollbind' support. (always true)
 showcmd			Compiled with 'showcmd' support.
 signs			Compiled with |:sign| support.
 smartindent		Compiled with 'smartindent' support.
+sound			Compiled with sound support, e.g. `sound_playevent()`
 spell			Compiled with spell checking support |spell|.
 startuptime		Compiled with |--startuptime| support.
 statusline		Compiled with support for 'statusline', 'rulerformat'
@@ -13022,19 +13082,22 @@ Sometimes old syntax of functionality gets in the way of making Vim better.
 When support is taken away this will break older Vim scripts.  To make this
 explicit the |:scriptversion| command can be used.  When a Vim script is not
 compatible with older versions of Vim this will give an explicit error,
-instead of failing in mysterious ways. >
+instead of failing in mysterious ways.
 
+							*scriptversion-1*  >
  :scriptversion 1
 <	This is the original Vim script, same as not using a |:scriptversion|
 	command.  Can be used to go back to old syntax for a range of lines.
 	Test for support with: >
 		has('vimscript-1')
 
+<							*scriptversion-2*  >
  :scriptversion 2
 <	String concatenation with "." is not supported, use ".." instead.
 	This avoids the ambiguity using "." for Dict member access and
 	floating point numbers.  Now ".5" means the number 0.5.
->
+
+							*scriptversion-3*  >
  :scriptversion 3
 <	All |vim-variable|s must be prefixed by "v:".  E.g. "version" doesn't
 	work as |v:version| anymore, it can be used as a normal variable.
@@ -13063,8 +13126,16 @@ missing: >
 	:  echo "You will _never_ see this message"
 	:endif
 
-To execute a command only when the |+eval| feature is disabled requires a trick,
-as this example shows: >
+To execute a command only when the |+eval| feature is disabled can be done in
+two ways.  The simplest is to exit the script (or Vim) prematurely: >
+	if 1
+	   echo "commands executed with +eval"
+	   finish
+	endif
+	args  " command executed without +eval
+
+If you do not want to abort loading the script you can use a trick, as this
+example shows: >
 
 	silent! while 0
 	  set history=111
