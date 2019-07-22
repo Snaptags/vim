@@ -167,11 +167,6 @@ static void win_redr_ruler(win_T *wp, int always, int ignore_pum);
 /* Ugly global: overrule attribute used by screen_char() */
 static int screen_char_attr = 0;
 
-#if defined(FEAT_SYN_HL) && defined(FEAT_RELTIME)
-/* Can limit syntax highlight time to 'redrawtime'. */
-# define SYN_TIME_LIMIT 1
-#endif
-
 #ifdef FEAT_RIGHTLEFT
 # define HAS_RIGHTLEFT(x) x
 #else
@@ -3120,8 +3115,13 @@ get_sign_display_info(
 		{
 		    if (nrcol)
 		    {
-			sprintf((char *)extra, "%*s ", number_width(wp),
-								*pp_extra);
+			int n, width = number_width(wp) - 2;
+
+			for (n = 0; n < width; n++)
+			    extra[n] = ' ';
+			extra[n] = 0;
+			STRCAT(extra, *pp_extra);
+			STRCAT(extra, " ");
 			*pp_extra = extra;
 		    }
 		    *c_extrap = NUL;
@@ -3214,10 +3214,10 @@ win_line(
     int		syntax_attr = 0;	/* attributes desired by syntax */
     int		has_syntax = FALSE;	/* this buffer has syntax highl. */
     int		save_did_emsg;
-    int		eol_hl_off = 0;		/* 1 if highlighted char after EOL */
     int		draw_color_col = FALSE;	/* highlight colorcolumn */
     int		*color_cols = NULL;	/* pointer to according columns array */
 #endif
+    int		eol_hl_off = 0;		/* 1 if highlighted char after EOL */
 #ifdef FEAT_TEXT_PROP
     int		text_prop_count;
     int		text_prop_next = 0;	// next text property to use
@@ -5361,6 +5361,8 @@ win_line(
 			if (wp->w_p_cul && lnum == wp->w_cursor.lnum)
 			    char_attr = hl_combine_attr(char_attr,
 							    HL_ATTR(HLF_CUL));
+			else if (line_attr)
+			    char_attr = hl_combine_attr(char_attr, line_attr);
 		    }
 # endif
 		}
@@ -5552,11 +5554,11 @@ win_line(
 	/*
 	 * At end of the text line or just after the last character.
 	 */
-	if (c == NUL
+	if ((c == NUL
 #if defined(LINE_ATTR)
 		|| did_line_attr == 1
 #endif
-		)
+		) && eol_hl_off == 0)
 	{
 #ifdef FEAT_SEARCH_EXTRA
 	    long prevcol = (long)(ptr - line) - (c == NUL);
@@ -5682,9 +5684,7 @@ win_line(
 		    ++off;
 		}
 		++vcol;
-#ifdef FEAT_SYN_HL
 		eol_hl_off = 1;
-#endif
 	    }
 	}
 
