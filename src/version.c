@@ -778,6 +778,40 @@ static char *(features[]) =
 static int included_patches[] =
 {   /* Add new patch number below this line */
 /**/
+    1746,
+/**/
+    1745,
+/**/
+    1744,
+/**/
+    1743,
+/**/
+    1742,
+/**/
+    1741,
+/**/
+    1740,
+/**/
+    1739,
+/**/
+    1738,
+/**/
+    1737,
+/**/
+    1736,
+/**/
+    1735,
+/**/
+    1734,
+/**/
+    1733,
+/**/
+    1732,
+/**/
+    1731,
+/**/
+    1730,
+/**/
     1729,
 /**/
     1728,
@@ -4337,6 +4371,7 @@ list_in_columns(char_u **items, int size, int current)
     int		i;
     int		ncol;
     int		nrow;
+    int		cur_row = 1;
     int		item_count = 0;
     int		width = 0;
 #ifdef FEAT_SYN_HL
@@ -4367,12 +4402,12 @@ list_in_columns(char_u **items, int size, int current)
 	return;
     }
 
-    /* The rightmost column doesn't need a separator.
-     * Sacrifice it to fit in one more column if possible. */
+    // The rightmost column doesn't need a separator.
+    // Sacrifice it to fit in one more column if possible.
     ncol = (int) (Columns + 1) / width;
     nrow = item_count / ncol + (item_count % ncol ? 1 : 0);
 
-    /* i counts columns then rows.  idx counts rows then columns. */
+    // "i" counts columns then rows.  idx counts rows then columns.
     for (i = 0; !got_int && i < nrow * ncol; ++i)
     {
 	int idx = (i / ncol) + (i % ncol) * nrow;
@@ -4393,19 +4428,15 @@ list_in_columns(char_u **items, int size, int current)
 		msg_putchar(']');
 	    if (last_col)
 	    {
-		if (msg_col > 0)
+		if (msg_col > 0 && cur_row < nrow)
 		    msg_putchar('\n');
+		++cur_row;
 	    }
 	    else
 	    {
 		while (msg_col % width)
 		    msg_putchar(' ');
 	    }
-	}
-	else
-	{
-	    if (msg_col > 0)
-		msg_putchar('\n');
 	}
     }
 }

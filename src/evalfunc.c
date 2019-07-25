@@ -24,10 +24,8 @@
 # include <time.h>	/* for time_t */
 #endif
 
-static char *e_listarg = N_("E686: Argument of %s must be a List");
 static char *e_listblobarg = N_("E899: Argument of %s must be a List or Blob");
 static char *e_stringreq = N_("E928: String required");
-static char *e_invalwindow = N_("E957: Invalid window number");
 
 #ifdef FEAT_FLOAT
 static void f_abs(typval_T *argvars, typval_T *rettv);
@@ -76,7 +74,6 @@ static void f_changenr(typval_T *argvars, typval_T *rettv);
 static void f_char2nr(typval_T *argvars, typval_T *rettv);
 static void f_chdir(typval_T *argvars, typval_T *rettv);
 static void f_cindent(typval_T *argvars, typval_T *rettv);
-static void f_clearmatches(typval_T *argvars, typval_T *rettv);
 static void f_col(typval_T *argvars, typval_T *rettv);
 #if defined(FEAT_INS_EXPAND)
 static void f_complete(typval_T *argvars, typval_T *rettv);
@@ -164,7 +161,6 @@ static void f_getftype(typval_T *argvars, typval_T *rettv);
 static void f_getjumplist(typval_T *argvars, typval_T *rettv);
 static void f_getline(typval_T *argvars, typval_T *rettv);
 static void f_getloclist(typval_T *argvars UNUSED, typval_T *rettv UNUSED);
-static void f_getmatches(typval_T *argvars, typval_T *rettv);
 static void f_getpid(typval_T *argvars, typval_T *rettv);
 static void f_getcurpos(typval_T *argvars, typval_T *rettv);
 static void f_getpos(typval_T *argvars, typval_T *rettv);
@@ -213,10 +209,6 @@ static void f_isnan(typval_T *argvars, typval_T *rettv);
 #endif
 static void f_items(typval_T *argvars, typval_T *rettv);
 static void f_join(typval_T *argvars, typval_T *rettv);
-static void f_js_decode(typval_T *argvars, typval_T *rettv);
-static void f_js_encode(typval_T *argvars, typval_T *rettv);
-static void f_json_decode(typval_T *argvars, typval_T *rettv);
-static void f_json_encode(typval_T *argvars, typval_T *rettv);
 static void f_keys(typval_T *argvars, typval_T *rettv);
 static void f_last_buffer_nr(typval_T *argvars, typval_T *rettv);
 static void f_len(typval_T *argvars, typval_T *rettv);
@@ -238,10 +230,6 @@ static void f_map(typval_T *argvars, typval_T *rettv);
 static void f_maparg(typval_T *argvars, typval_T *rettv);
 static void f_mapcheck(typval_T *argvars, typval_T *rettv);
 static void f_match(typval_T *argvars, typval_T *rettv);
-static void f_matchadd(typval_T *argvars, typval_T *rettv);
-static void f_matchaddpos(typval_T *argvars, typval_T *rettv);
-static void f_matcharg(typval_T *argvars, typval_T *rettv);
-static void f_matchdelete(typval_T *argvars, typval_T *rettv);
 static void f_matchend(typval_T *argvars, typval_T *rettv);
 static void f_matchlist(typval_T *argvars, typval_T *rettv);
 static void f_matchstr(typval_T *argvars, typval_T *rettv);
@@ -325,7 +313,6 @@ static void f_setenv(typval_T *argvars, typval_T *rettv);
 static void f_setfperm(typval_T *argvars, typval_T *rettv);
 static void f_setline(typval_T *argvars, typval_T *rettv);
 static void f_setloclist(typval_T *argvars, typval_T *rettv);
-static void f_setmatches(typval_T *argvars, typval_T *rettv);
 static void f_setpos(typval_T *argvars, typval_T *rettv);
 static void f_setqflist(typval_T *argvars, typval_T *rettv);
 static void f_setreg(typval_T *argvars, typval_T *rettv);
@@ -2202,7 +2189,7 @@ f_cindent(typval_T *argvars UNUSED, typval_T *rettv)
 	rettv->vval.v_number = -1;
 }
 
-    static win_T *
+    win_T *
 get_optional_window(typval_T *argvars, int idx)
 {
     win_T   *win = curwin;
@@ -2217,20 +2204,6 @@ get_optional_window(typval_T *argvars, int idx)
 	}
     }
     return win;
-}
-
-/*
- * "clearmatches()" function
- */
-    static void
-f_clearmatches(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
-{
-#ifdef FEAT_SEARCH_EXTRA
-    win_T   *win = get_optional_window(argvars, 0);
-
-    if (win != NULL)
-	clear_matches(win);
-#endif
 }
 
 /*
@@ -3069,8 +3042,7 @@ f_executable(typval_T *argvars, typval_T *rettv)
     char_u *name = tv_get_string(&argvars[0]);
 
     /* Check in $PATH and also check directly if there is a directory name. */
-    rettv->vval.v_number = mch_can_exe(name, NULL, TRUE)
-		 || (gettail(name) != name && mch_can_exe(name, NULL, FALSE));
+    rettv->vval.v_number = mch_can_exe(name, NULL, TRUE);
 }
 
 static garray_T	redir_execute_ga;
@@ -5285,74 +5257,6 @@ f_getloclist(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 }
 
 /*
- * "getmatches()" function
- */
-    static void
-f_getmatches(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
-{
-#ifdef FEAT_SEARCH_EXTRA
-    dict_T	*dict;
-    matchitem_T	*cur;
-    int		i;
-    win_T	*win = get_optional_window(argvars, 0);
-
-    if (rettv_list_alloc(rettv) == FAIL || win == NULL)
-	return;
-
-    cur = win->w_match_head;
-    while (cur != NULL)
-    {
-	dict = dict_alloc();
-	if (dict == NULL)
-	    return;
-	if (cur->match.regprog == NULL)
-	{
-	    /* match added with matchaddpos() */
-	    for (i = 0; i < MAXPOSMATCH; ++i)
-	    {
-		llpos_T	*llpos;
-		char	buf[30];  // use 30 to avoid compiler warning
-		list_T	*l;
-
-		llpos = &cur->pos.pos[i];
-		if (llpos->lnum == 0)
-		    break;
-		l = list_alloc();
-		if (l == NULL)
-		    break;
-		list_append_number(l, (varnumber_T)llpos->lnum);
-		if (llpos->col > 0)
-		{
-		    list_append_number(l, (varnumber_T)llpos->col);
-		    list_append_number(l, (varnumber_T)llpos->len);
-		}
-		sprintf(buf, "pos%d", i + 1);
-		dict_add_list(dict, buf, l);
-	    }
-	}
-	else
-	{
-	    dict_add_string(dict, "pattern", cur->pattern);
-	}
-	dict_add_string(dict, "group", syn_id2name(cur->hlg_id));
-	dict_add_number(dict, "priority", (long)cur->priority);
-	dict_add_number(dict, "id", (long)cur->id);
-# if defined(FEAT_CONCEAL)
-	if (cur->conceal_char)
-	{
-	    char_u buf[MB_MAXBYTES + 1];
-
-	    buf[(*mb_char2bytes)((int)cur->conceal_char, buf)] = NUL;
-	    dict_add_string(dict, "conceal", (char_u *)&buf);
-	}
-# endif
-	list_append_dict(rettv->vval.v_list, dict);
-	cur = cur->next;
-    }
-#endif
-}
-
-/*
  * "getpid()" function
  */
     static void
@@ -7385,55 +7289,6 @@ f_join(typval_T *argvars, typval_T *rettv)
 }
 
 /*
- * "js_decode()" function
- */
-    static void
-f_js_decode(typval_T *argvars, typval_T *rettv)
-{
-    js_read_T	reader;
-
-    reader.js_buf = tv_get_string(&argvars[0]);
-    reader.js_fill = NULL;
-    reader.js_used = 0;
-    if (json_decode_all(&reader, rettv, JSON_JS) != OK)
-	emsg(_(e_invarg));
-}
-
-/*
- * "js_encode()" function
- */
-    static void
-f_js_encode(typval_T *argvars, typval_T *rettv)
-{
-    rettv->v_type = VAR_STRING;
-    rettv->vval.v_string = json_encode(&argvars[0], JSON_JS);
-}
-
-/*
- * "json_decode()" function
- */
-    static void
-f_json_decode(typval_T *argvars, typval_T *rettv)
-{
-    js_read_T	reader;
-
-    reader.js_buf = tv_get_string(&argvars[0]);
-    reader.js_fill = NULL;
-    reader.js_used = 0;
-    json_decode_all(&reader, rettv, 0);
-}
-
-/*
- * "json_encode()" function
- */
-    static void
-f_json_encode(typval_T *argvars, typval_T *rettv)
-{
-    rettv->v_type = VAR_STRING;
-    rettv->vval.v_string = json_encode(&argvars[0], 0);
-}
-
-/*
  * "keys()" function
  */
     static void
@@ -8069,185 +7924,6 @@ theend:
 f_match(typval_T *argvars, typval_T *rettv)
 {
     find_some_match(argvars, rettv, MATCH_MATCH);
-}
-
-#ifdef FEAT_SEARCH_EXTRA
-    static int
-matchadd_dict_arg(typval_T *tv, char_u **conceal_char, win_T **win)
-{
-    dictitem_T *di;
-
-    if (tv->v_type != VAR_DICT)
-    {
-	emsg(_(e_dictreq));
-	return FAIL;
-    }
-
-    if (dict_find(tv->vval.v_dict, (char_u *)"conceal", -1) != NULL)
-	*conceal_char = dict_get_string(tv->vval.v_dict,
-						   (char_u *)"conceal", FALSE);
-
-    if ((di = dict_find(tv->vval.v_dict, (char_u *)"window", -1)) != NULL)
-    {
-	*win = find_win_by_nr_or_id(&di->di_tv);
-	if (*win == NULL)
-	{
-	    emsg(_(e_invalwindow));
-	    return FAIL;
-	}
-    }
-
-    return OK;
-}
-#endif
-
-/*
- * "matchadd()" function
- */
-    static void
-f_matchadd(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
-{
-#ifdef FEAT_SEARCH_EXTRA
-    char_u	buf[NUMBUFLEN];
-    char_u	*grp = tv_get_string_buf_chk(&argvars[0], buf);	/* group */
-    char_u	*pat = tv_get_string_buf_chk(&argvars[1], buf);	/* pattern */
-    int		prio = 10;	/* default priority */
-    int		id = -1;
-    int		error = FALSE;
-    char_u	*conceal_char = NULL;
-    win_T	*win = curwin;
-
-    rettv->vval.v_number = -1;
-
-    if (grp == NULL || pat == NULL)
-	return;
-    if (argvars[2].v_type != VAR_UNKNOWN)
-    {
-	prio = (int)tv_get_number_chk(&argvars[2], &error);
-	if (argvars[3].v_type != VAR_UNKNOWN)
-	{
-	    id = (int)tv_get_number_chk(&argvars[3], &error);
-	    if (argvars[4].v_type != VAR_UNKNOWN
-		&& matchadd_dict_arg(&argvars[4], &conceal_char, &win) == FAIL)
-		return;
-	}
-    }
-    if (error == TRUE)
-	return;
-    if (id >= 1 && id <= 3)
-    {
-	semsg(_("E798: ID is reserved for \":match\": %d"), id);
-	return;
-    }
-
-    rettv->vval.v_number = match_add(win, grp, pat, prio, id, NULL,
-								conceal_char);
-#endif
-}
-
-/*
- * "matchaddpos()" function
- */
-    static void
-f_matchaddpos(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
-{
-#ifdef FEAT_SEARCH_EXTRA
-    char_u	buf[NUMBUFLEN];
-    char_u	*group;
-    int		prio = 10;
-    int		id = -1;
-    int		error = FALSE;
-    list_T	*l;
-    char_u	*conceal_char = NULL;
-    win_T	*win = curwin;
-
-    rettv->vval.v_number = -1;
-
-    group = tv_get_string_buf_chk(&argvars[0], buf);
-    if (group == NULL)
-	return;
-
-    if (argvars[1].v_type != VAR_LIST)
-    {
-	semsg(_(e_listarg), "matchaddpos()");
-	return;
-    }
-    l = argvars[1].vval.v_list;
-    if (l == NULL)
-	return;
-
-    if (argvars[2].v_type != VAR_UNKNOWN)
-    {
-	prio = (int)tv_get_number_chk(&argvars[2], &error);
-	if (argvars[3].v_type != VAR_UNKNOWN)
-	{
-	    id = (int)tv_get_number_chk(&argvars[3], &error);
-
-	    if (argvars[4].v_type != VAR_UNKNOWN
-		&& matchadd_dict_arg(&argvars[4], &conceal_char, &win) == FAIL)
-		return;
-	}
-    }
-    if (error == TRUE)
-	return;
-
-    /* id == 3 is ok because matchaddpos() is supposed to substitute :3match */
-    if (id == 1 || id == 2)
-    {
-	semsg(_("E798: ID is reserved for \":match\": %d"), id);
-	return;
-    }
-
-    rettv->vval.v_number = match_add(win, group, NULL, prio, id, l,
-								conceal_char);
-#endif
-}
-
-/*
- * "matcharg()" function
- */
-    static void
-f_matcharg(typval_T *argvars UNUSED, typval_T *rettv)
-{
-    if (rettv_list_alloc(rettv) == OK)
-    {
-#ifdef FEAT_SEARCH_EXTRA
-	int	    id = (int)tv_get_number(&argvars[0]);
-	matchitem_T *m;
-
-	if (id >= 1 && id <= 3)
-	{
-	    if ((m = (matchitem_T *)get_match(curwin, id)) != NULL)
-	    {
-		list_append_string(rettv->vval.v_list,
-						syn_id2name(m->hlg_id), -1);
-		list_append_string(rettv->vval.v_list, m->pattern, -1);
-	    }
-	    else
-	    {
-		list_append_string(rettv->vval.v_list, NULL, -1);
-		list_append_string(rettv->vval.v_list, NULL, -1);
-	    }
-	}
-#endif
-    }
-}
-
-/*
- * "matchdelete()" function
- */
-    static void
-f_matchdelete(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
-{
-#ifdef FEAT_SEARCH_EXTRA
-    win_T   *win = get_optional_window(argvars, 1);
-
-    if (win == NULL)
-	rettv->vval.v_number = -1;
-    else
-	rettv->vval.v_number = match_delete(win,
-				       (int)tv_get_number(&argvars[0]), TRUE);
-#endif
 }
 
 /*
@@ -11046,120 +10722,6 @@ f_setloclist(typval_T *argvars, typval_T *rettv)
     win = find_win_by_nr_or_id(&argvars[0]);
     if (win != NULL)
 	set_qf_ll_list(win, &argvars[1], &argvars[2], &argvars[3], rettv);
-}
-
-/*
- * "setmatches()" function
- */
-    static void
-f_setmatches(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
-{
-#ifdef FEAT_SEARCH_EXTRA
-    list_T	*l;
-    listitem_T	*li;
-    dict_T	*d;
-    list_T	*s = NULL;
-    win_T	*win = get_optional_window(argvars, 1);
-
-    rettv->vval.v_number = -1;
-    if (argvars[0].v_type != VAR_LIST)
-    {
-	emsg(_(e_listreq));
-	return;
-    }
-    if (win == NULL)
-	return;
-
-    if ((l = argvars[0].vval.v_list) != NULL)
-    {
-	/* To some extent make sure that we are dealing with a list from
-	 * "getmatches()". */
-	li = l->lv_first;
-	while (li != NULL)
-	{
-	    if (li->li_tv.v_type != VAR_DICT
-		    || (d = li->li_tv.vval.v_dict) == NULL)
-	    {
-		emsg(_(e_invarg));
-		return;
-	    }
-	    if (!(dict_find(d, (char_u *)"group", -1) != NULL
-			&& (dict_find(d, (char_u *)"pattern", -1) != NULL
-			    || dict_find(d, (char_u *)"pos1", -1) != NULL)
-			&& dict_find(d, (char_u *)"priority", -1) != NULL
-			&& dict_find(d, (char_u *)"id", -1) != NULL))
-	    {
-		emsg(_(e_invarg));
-		return;
-	    }
-	    li = li->li_next;
-	}
-
-	clear_matches(win);
-	li = l->lv_first;
-	while (li != NULL)
-	{
-	    int		i = 0;
-	    char	buf[30];  // use 30 to avoid compiler warning
-	    dictitem_T  *di;
-	    char_u	*group;
-	    int		priority;
-	    int		id;
-	    char_u	*conceal;
-
-	    d = li->li_tv.vval.v_dict;
-	    if (dict_find(d, (char_u *)"pattern", -1) == NULL)
-	    {
-		if (s == NULL)
-		{
-		    s = list_alloc();
-		    if (s == NULL)
-			return;
-		}
-
-		/* match from matchaddpos() */
-		for (i = 1; i < 9; i++)
-		{
-		    sprintf((char *)buf, (char *)"pos%d", i);
-		    if ((di = dict_find(d, (char_u *)buf, -1)) != NULL)
-		    {
-			if (di->di_tv.v_type != VAR_LIST)
-			    return;
-
-			list_append_tv(s, &di->di_tv);
-			s->lv_refcount++;
-		    }
-		    else
-			break;
-		}
-	    }
-
-	    group = dict_get_string(d, (char_u *)"group", TRUE);
-	    priority = (int)dict_get_number(d, (char_u *)"priority");
-	    id = (int)dict_get_number(d, (char_u *)"id");
-	    conceal = dict_find(d, (char_u *)"conceal", -1) != NULL
-			      ? dict_get_string(d, (char_u *)"conceal", TRUE)
-			      : NULL;
-	    if (i == 0)
-	    {
-		match_add(win, group,
-		    dict_get_string(d, (char_u *)"pattern", FALSE),
-		    priority, id, NULL, conceal);
-	    }
-	    else
-	    {
-		match_add(win, group, NULL, priority, id, s, conceal);
-		list_unref(s);
-		s = NULL;
-	    }
-	    vim_free(group);
-	    vim_free(conceal);
-
-	    li = li->li_next;
-	}
-	rettv->vval.v_number = 0;
-    }
-#endif
 }
 
 /*
