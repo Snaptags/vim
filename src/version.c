@@ -778,6 +778,60 @@ static char *(features[]) =
 static int included_patches[] =
 {   /* Add new patch number below this line */
 /**/
+    1773,
+/**/
+    1772,
+/**/
+    1771,
+/**/
+    1770,
+/**/
+    1769,
+/**/
+    1768,
+/**/
+    1767,
+/**/
+    1766,
+/**/
+    1765,
+/**/
+    1764,
+/**/
+    1763,
+/**/
+    1762,
+/**/
+    1761,
+/**/
+    1760,
+/**/
+    1759,
+/**/
+    1758,
+/**/
+    1757,
+/**/
+    1756,
+/**/
+    1755,
+/**/
+    1754,
+/**/
+    1753,
+/**/
+    1752,
+/**/
+    1751,
+/**/
+    1750,
+/**/
+    1749,
+/**/
+    1748,
+/**/
+    1747,
+/**/
     1746,
 /**/
     1745,
@@ -4392,11 +4446,11 @@ list_in_columns(char_u **items, int size, int current)
 
     if (Columns < width)
     {
-	/* Not enough screen columns - show one per line */
+	// Not enough screen columns - show one per line
 	for (i = 0; i < item_count; ++i)
 	{
 	    version_msg_wrap(items[i], i == current);
-	    if (msg_col > 0)
+	    if (msg_col > 0 && i < item_count - 1)
 		msg_putchar('\n');
 	}
 	return;
@@ -4407,7 +4461,7 @@ list_in_columns(char_u **items, int size, int current)
     ncol = (int) (Columns + 1) / width;
     nrow = item_count / ncol + (item_count % ncol ? 1 : 0);
 
-    // "i" counts columns then rows.  idx counts rows then columns.
+    // "i" counts columns then rows.  "idx" counts rows then columns.
     for (i = 0; !got_int && i < nrow * ncol; ++i)
     {
 	int idx = (i / ncol) + (i % ncol) * nrow;
@@ -4436,6 +4490,16 @@ list_in_columns(char_u **items, int size, int current)
 	    {
 		while (msg_col % width)
 		    msg_putchar(' ');
+	    }
+	}
+	else
+	{
+	    // this row is out of items, thus at the end of the row
+	    if (msg_col > 0)
+	    {
+		if (cur_row < nrow)
+		    msg_putchar('\n');
+		++cur_row;
 	    }
 	}
     }
@@ -4628,6 +4692,8 @@ list_version(void)
     version_msg(_("  Features included (+) or not (-):\n"));
 
     list_features();
+    if (msg_col > 0)
+	msg_putchar('\n');
 
 #ifdef SYS_VIMRC_FILE
     version_msg(_("   system vimrc file: \""));
