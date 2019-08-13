@@ -5127,7 +5127,8 @@ dozet:
 		    if (ptr == NULL && (len = find_ident_under_cursor(&ptr,
 							    FIND_IDENT)) == 0)
 			return;
-		    spell_add_word(ptr, len, nchar == 'w' || nchar == 'W',
+		    spell_add_word(ptr, len, nchar == 'w' || nchar == 'W'
+					      ? SPELL_ADD_BAD : SPELL_ADD_GOOD,
 					    (nchar == 'G' || nchar == 'W')
 						       ? 0 : (int)cap->count1,
 					    undo);
@@ -5736,11 +5737,11 @@ nv_ident(cmdarg_T *cap)
 		    ? vim_iswordp(mb_prevptr(ml_get_curline(), ptr))
 		    : vim_iswordc(ptr[-1])))
 	    STRCAT(buf, "\\>");
-#ifdef FEAT_CMDHIST
-	/* put pattern in search history */
+
+	// put pattern in search history
 	init_history();
 	add_to_history(HIST_SEARCH, buf, TRUE, NUL);
-#endif
+
 	(void)normal_search(cap, cmdchar == '*' ? '/' : '?', buf, 0);
     }
     else
