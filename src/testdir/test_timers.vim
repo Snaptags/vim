@@ -152,7 +152,7 @@ func StopTimer1(timer)
   let g:timer2 = timer_start(10, 'StopTimer2')
   " avoid maxfuncdepth error
   call timer_pause(g:timer1, 1)
-  sleep 40m
+  sleep 20m
 endfunc
 
 func StopTimer2(timer)
@@ -160,9 +160,18 @@ func StopTimer2(timer)
 endfunc
 
 func Test_timer_stop_in_callback()
-  let g:timer1 = timer_start(10, 'StopTimer1')
-  sleep 40m
   call assert_equal(0, len(timer_info()))
+  let g:timer1 = timer_start(10, 'StopTimer1')
+  let slept = 0
+  for i in range(10)
+    if len(timer_info()) == 0
+      break
+    endif
+    sleep 10m
+    let slept += 10
+  endfor
+  " This should take only 30 msec, but on Mac it's often longer
+  call assert_inrange(0, 50, slept)
 endfunc
 
 func StopTimerAll(timer)
@@ -170,12 +179,18 @@ func StopTimerAll(timer)
 endfunc
 
 func Test_timer_stop_all_in_callback()
-  let g:timer1 = timer_start(10, 'StopTimerAll')
-  let info = timer_info()
-  call assert_equal(1, len(info))
-  sleep 40m
-  let info = timer_info()
-  call assert_equal(0, len(info))
+  call assert_equal(0, len(timer_info()))
+  call timer_start(10, 'StopTimerAll')
+  call assert_equal(1, len(timer_info()))
+  let slept = 0
+  for i in range(10)
+    if len(timer_info()) == 0
+      break
+    endif
+    sleep 10m
+    let slept += 10
+  endfor
+  call assert_inrange(0, 30, slept)
 endfunc
 
 func FeedkeysCb(timer)

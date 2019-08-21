@@ -12,8 +12,6 @@
  */
 #include "vim.h"
 
-#if defined(FEAT_INS_EXPAND) || defined(PROTO)
-
 static pumitem_T *pum_array = NULL;	/* items of displayed pum */
 static int pum_size;			/* nr of items in "pum_array" */
 static int pum_selected;		/* index of selected item or -1 */
@@ -634,10 +632,16 @@ pum_redraw(void)
  * must be recomputed.
  */
     static int
-pum_set_selected(int n, int repeat)
+pum_set_selected(int n, int repeat UNUSED)
 {
     int	    resized = FALSE;
     int	    context = pum_height / 2;
+#ifdef FEAT_QUICKFIX
+    int	    prev_selected = pum_selected;
+#endif
+#ifdef FEAT_TEXT_PROP
+    int	    has_info = FALSE;
+#endif
 
     pum_selected = n;
 
@@ -690,11 +694,14 @@ pum_set_selected(int n, int repeat)
 		pum_first = pum_selected + context - pum_height + 1;
 	    }
 	}
+	// adjust for the number of lines displayed
+	if (pum_first > pum_size - pum_height)
+	    pum_first = pum_size - pum_height;
 
 #if defined(FEAT_QUICKFIX)
 	/*
 	 * Show extra info in the preview window if there is something and
-	 * 'completeopt' contains "preview".
+	 * 'completeopt' contains "preview" or "popup".
 	 * Skip this when tried twice already.
 	 * Skip this also when there is not much room.
 	 * NOTE: Be very careful not to sync undo!
@@ -707,43 +714,72 @@ pum_set_selected(int n, int repeat)
 	    win_T	*curwin_save = curwin;
 	    tabpage_T   *curtab_save = curtab;
 	    int		res = OK;
+# ifdef FEAT_TEXT_PROP
+	    int		use_popup = strstr((char *)p_cot, "popup") != NULL;
+# else
+#  define use_popup 0
+# endif
+	    has_info = TRUE;
 
-	    /* Open a preview window.  3 lines by default.  Prefer
-	     * 'previewheight' if set and smaller. */
+	    // Open a preview window.  3 lines by default.  Prefer
+	    // 'previewheight' if set and smaller.
 	    g_do_tagpreview = 3;
 	    if (p_pvh > 0 && p_pvh < g_do_tagpreview)
 		g_do_tagpreview = p_pvh;
 	    ++RedrawingDisabled;
-	    /* Prevent undo sync here, if an autocommand syncs undo weird
-	     * things can happen to the undo tree. */
+	    // Prevent undo sync here, if an autocommand syncs undo weird
+	    // things can happen to the undo tree.
 	    ++no_u_sync;
-	    resized = prepare_tagpreview(FALSE);
+	    resized = prepare_tagpreview(FALSE, FALSE, use_popup);
 	    --no_u_sync;
 	    --RedrawingDisabled;
 	    g_do_tagpreview = 0;
 
-	    if (curwin->w_p_pvw)
+	    if (curwin->w_p_pvw
+# ifdef FEAT_TEXT_PROP
+		    || (curwin->w_popup_flags & POPF_INFO)
+# endif
+		    )
 	    {
+# ifdef FEAT_TEXT_PROP
+		if (use_popup)
+		{
+		    int col = pum_col + pum_width + 1;
+		    int row = pum_row + pum_selected - pum_first + 1;
+
+		    if (Columns - col < 20 && Columns - col < pum_col)
+		    {
+			col = pum_col - 1;
+			curwin->w_popup_pos = POPPOS_TOPRIGHT;
+			curwin->w_maxwidth = pum_col - 1;
+		    }
+		    else
+			curwin->w_maxwidth = Columns - col + 1;
+		    curwin->w_maxwidth -= popup_extra_width(curwin);
+		    row -= popup_top_extra(curwin);
+		    popup_set_wantpos_rowcol(curwin, row, col);
+		}
+# endif
 		if (!resized
 			&& curbuf->b_nwindows == 1
 			&& curbuf->b_fname == NULL
 			&& bt_nofile(curbuf)
 			&& curbuf->b_p_bh[0] == 'w')
 		{
-		    /* Already a "wipeout" buffer, make it empty. */
+		    // Already a "wipeout" buffer, make it empty.
 		    while (!BUFEMPTY())
 			ml_delete((linenr_T)1, FALSE);
 		}
 		else
 		{
-		    /* Don't want to sync undo in the current buffer. */
+		    // Don't want to sync undo in the current buffer.
 		    ++no_u_sync;
 		    res = do_ecmd(0, NULL, NULL, NULL, ECMD_ONE, 0, NULL);
 		    --no_u_sync;
 		    if (res == OK)
 		    {
-			/* Edit a new, empty buffer. Set options for a "wipeout"
-			 * buffer. */
+			// Edit a new, empty buffer. Set options for a "wipeout"
+			// buffer.
 			set_option_value((char_u *)"swf", 0L, NULL, OPT_LOCAL);
 			set_option_value((char_u *)"bt", 0L,
 					       (char_u *)"nofile", OPT_LOCAL);
@@ -774,10 +810,12 @@ pum_set_selected(int n, int repeat)
 			    p = e + 1;
 			}
 		    }
+		    // delete the empty last line
+		    ml_delete(curbuf->b_ml.ml_line_count, FALSE);
 
 		    /* Increase the height of the preview window to show the
 		     * text, but no more than 'previewheight' lines. */
-		    if (repeat == 0)
+		    if (repeat == 0 && !use_popup)
 		    {
 			if (lnum > p_pvh)
 			    lnum = p_pvh;
@@ -790,8 +828,19 @@ pum_set_selected(int n, int repeat)
 
 		    curbuf->b_changed = 0;
 		    curbuf->b_p_ma = FALSE;
-		    curwin->w_cursor.lnum = 1;
+		    if (pum_selected != prev_selected)
+		    {
+# ifdef FEAT_TEXT_PROP
+			curwin->w_firstline = 1;
+# endif
+			curwin->w_topline = 1;
+		    }
+		    else if (curwin->w_topline > curbuf->b_ml.ml_line_count)
+			curwin->w_topline = curbuf->b_ml.ml_line_count;
+		    curwin->w_cursor.lnum = curwin->w_topline;
 		    curwin->w_cursor.col = 0;
+		    if (use_popup && win_valid(curwin_save))
+			redraw_win_later(curwin_save, SOME_VALID);
 
 		    if ((curwin != curwin_save && win_valid(curwin_save))
 			    || (curtab != curtab_save
@@ -844,7 +893,7 @@ pum_set_selected(int n, int repeat)
 		    }
 		}
 	    }
-# ifdef FEAT_TEXT_PROP
+# if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
 	    if (WIN_IS_POPUP(curwin))
 		// can't keep focus in a popup window
 		win_enter(firstwin, TRUE);
@@ -852,6 +901,11 @@ pum_set_selected(int n, int repeat)
 	}
 #endif
     }
+#if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
+    if (!has_info)
+	// close any popup info window
+	popup_close_preview(TRUE);
+#endif
 
     if (!resized)
 	pum_redraw();
@@ -869,6 +923,10 @@ pum_undisplay(void)
     redraw_all_later(NOT_VALID);
     redraw_tabline = TRUE;
     status_redraw_all();
+#if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
+    // close any popup info window
+    popup_close_preview(TRUE);
+#endif
 }
 
 /*
@@ -938,6 +996,7 @@ pum_get_height(void)
     return pum_height;
 }
 
+#if defined(FEAT_EVAL) || defined(PROTO)
 /*
  * Add size information about the pum to "dict".
  */
@@ -953,8 +1012,9 @@ pum_set_event_info(dict_T *dict)
     dict_add_number(dict, "size", pum_size);
     dict_add_special(dict, "scrollbar", pum_scrollbar ? VVAL_TRUE : VVAL_FALSE);
 }
+#endif
 
-# if defined(FEAT_BEVAL_TERM) || defined(FEAT_TERM_POPUP_MENU) || defined(PROTO)
+#if defined(FEAT_BEVAL_TERM) || defined(FEAT_TERM_POPUP_MENU) || defined(PROTO)
     static void
 pum_position_at_mouse(int min_width)
 {
@@ -992,14 +1052,14 @@ pum_position_at_mouse(int min_width)
     pum_window = NULL;
 }
 
-# endif
+#endif
 
-# if defined(FEAT_BEVAL_TERM) || defined(PROTO)
+#if defined(FEAT_BEVAL_TERM) || defined(PROTO)
 static pumitem_T *balloon_array = NULL;
 static int balloon_arraysize;
 
-#define BALLOON_MIN_WIDTH 50
-#define BALLOON_MIN_HEIGHT 10
+# define BALLOON_MIN_WIDTH 50
+# define BALLOON_MIN_HEIGHT 10
 
 typedef struct {
     char_u	*start;
@@ -1216,9 +1276,9 @@ ui_may_remove_balloon(void)
     // cell.
     ui_remove_balloon();
 }
-# endif
+#endif
 
-# if defined(FEAT_TERM_POPUP_MENU) || defined(PROTO)
+#if defined(FEAT_TERM_POPUP_MENU) || defined(PROTO)
 /*
  * Select the pum entry at the mouse position.
  */
@@ -1262,9 +1322,9 @@ pum_show_popupmenu(vimmenu_T *menu)
     vimmenu_T   *mp;
     int		idx = 0;
     pumitem_T	*array;
-#ifdef FEAT_BEVAL_TERM
+# ifdef FEAT_BEVAL_TERM
     int		save_bevalterm = p_bevalterm;
-#endif
+# endif
     int		mode;
 
     pum_undisplay();
@@ -1302,10 +1362,10 @@ pum_show_popupmenu(vimmenu_T *menu)
 
     pum_selected = -1;
     pum_first = 0;
-#  ifdef FEAT_BEVAL_TERM
+# ifdef FEAT_BEVAL_TERM
     p_bevalterm = TRUE;  /* track mouse movement */
     mch_setmouse(TRUE);
-#  endif
+# endif
 
     for (;;)
     {
@@ -1375,10 +1435,10 @@ pum_show_popupmenu(vimmenu_T *menu)
 
     vim_free(array);
     pum_undisplay();
-#  ifdef FEAT_BEVAL_TERM
+# ifdef FEAT_BEVAL_TERM
     p_bevalterm = save_bevalterm;
     mch_setmouse(TRUE);
-#  endif
+# endif
 }
 
     void
@@ -1398,6 +1458,4 @@ pum_make_popup(char_u *path_name, int use_mouse_pos)
     if (menu != NULL)
 	pum_show_popupmenu(menu);
 }
-# endif
-
 #endif
