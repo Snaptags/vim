@@ -1,6 +1,6 @@
 /* popupwin.c */
 int popup_on_border(win_T *wp, int row, int col);
-int popup_on_X_button(win_T *wp, int row, int col);
+int popup_close_if_on_X(win_T *wp, int row, int col);
 void popup_start_drag(win_T *wp, int row, int col);
 void popup_drag(win_T *wp);
 void popup_set_firstline(win_T *wp);
@@ -27,6 +27,7 @@ void f_popup_menu(typval_T *argvars, typval_T *rettv);
 void f_popup_notification(typval_T *argvars, typval_T *rettv);
 void f_popup_close(typval_T *argvars, typval_T *rettv);
 void f_popup_hide(typval_T *argvars, typval_T *rettv);
+void popup_show(win_T *wp);
 void f_popup_show(typval_T *argvars, typval_T *rettv);
 void f_popup_settext(typval_T *argvars, typval_T *rettv);
 void popup_close(int id);
@@ -49,9 +50,12 @@ int set_ref_in_popups(int copyID);
 win_T *popup_find_preview_window(void);
 int popup_is_popup(win_T *wp);
 win_T *popup_find_info_window(void);
-void f_popup_getpreview(typval_T *argvars, typval_T *rettv);
+void f_popup_findinfo(typval_T *argvars, typval_T *rettv);
+void f_popup_findpreview(typval_T *argvars, typval_T *rettv);
 int popup_create_preview_window(int info);
-void popup_close_preview(int info);
+void popup_close_preview(void);
+void popup_hide_info(void);
+int popup_win_closed(win_T *win);
 void popup_set_title(win_T *wp);
 void popup_update_preview_title(void);
 /* vim: set ft=c : */

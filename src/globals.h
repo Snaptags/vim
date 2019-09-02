@@ -191,9 +191,6 @@ EXTERN int	emsg_skip INIT(= 0);	    // don't display errors for
 EXTERN int	emsg_severe INIT(= FALSE);  // use message of next of several
 					    // emsg() calls for throw
 EXTERN int	did_endif INIT(= FALSE);    // just had ":endif"
-EXTERN dict_T	vimvardict;		    // Dictionary with v: variables
-EXTERN dict_T	globvardict;		    // Dictionary with g: variables
-#define globvarht globvardict.dv_hashtab
 #endif
 EXTERN int	did_emsg;		    // set by emsg() when the message
 					    // is displayed or thrown
@@ -1051,6 +1048,9 @@ EXTERN int	maptick INIT(= 0);	// tick for each non-mapped char
 EXTERN int	must_redraw INIT(= 0);	    // type of redraw necessary
 EXTERN int	skip_redraw INIT(= FALSE);  // skip redraw once
 EXTERN int	do_redraw INIT(= FALSE);    // extra redraw once
+#ifdef FEAT_DIFF
+EXTERN int	need_diff_redraw INIT(= 0); // need to call diff_redraw()
+#endif
 
 EXTERN int	need_highlight_changed INIT(= TRUE);
 
@@ -1544,6 +1544,10 @@ EXTERN char e_re_damg[]	INIT(= N_("E43: Damaged match string"));
 EXTERN char e_re_corr[]	INIT(= N_("E44: Corrupted regexp program"));
 EXTERN char e_readonly[]	INIT(= N_("E45: 'readonly' option is set (add ! to override)"));
 #ifdef FEAT_EVAL
+EXTERN char e_undefvar[]	INIT(= N_("E121: Undefined variable: %s"));
+EXTERN char e_letwrong[]	INIT(= N_("E734: Wrong variable type for %s="));
+EXTERN char e_illvar[]		INIT(= N_("E461: Illegal variable name: %s"));
+EXTERN char e_cannot_mod[]	INIT(= N_("E995: Cannot modify existing variable"));
 EXTERN char e_readonlyvar[]	INIT(= N_("E46: Cannot change read-only variable \"%s\""));
 EXTERN char e_readonlysbx[]	INIT(= N_("E794: Cannot set variable in the sandbox: \"%s\""));
 EXTERN char e_emptykey[]	INIT(= N_("E713: Cannot use empty key for Dictionary"));

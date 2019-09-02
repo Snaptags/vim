@@ -34,6 +34,7 @@ debugger.c	| vim script debugger
 diff.c		| diff mode (vimdiff)
 eval.c		| expression evaluation
 evalfunc.c	| built-in functions
+evalvars.c	| vim variables
 fileio.c	| reading and writing files
 findfile.c	| search for files in 'path'
 fold.c		| folding
@@ -55,6 +56,7 @@ popupwin.c	| popup window
 profiler.c	| vim script profiler
 quickfix.c	| quickfix commands (":make", ":cn")
 regexp.c	| pattern matching
+scriptfile.c	| runtime directory handling and sourcing scripts
 screen.c	| updating the windows
 search.c	| pattern searching
 session.c	| sessions and views

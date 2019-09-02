@@ -2522,6 +2522,10 @@ win_close(win_T *win, int free_buf)
 	out_flush();
 #endif
 
+#ifdef FEAT_TEXT_PROP
+    if (popup_win_closed(win) && !win_valid(win))
+	return FAIL;
+#endif
     win_close_buffer(win, free_buf ? DOBUF_UNLOAD : 0, TRUE);
 
     if (only_one_window() && win_valid(win) && win->w_buffer == NULL
@@ -4888,8 +4892,10 @@ win_free(
     win_free_lsize(wp);
 
     for (i = 0; i < wp->w_tagstacklen; ++i)
+    {
 	vim_free(wp->w_tagstack[i].tagname);
-
+	vim_free(wp->w_tagstack[i].user_data);
+    }
     vim_free(wp->w_localdir);
 
     /* Remove the window from the b_wininfo lists, it may happen that the
@@ -4970,7 +4976,7 @@ win_unlisted(win_T *wp)
 win_free_popup(win_T *win)
 {
     if (bt_popup(win->w_buffer))
-	win_close_buffer(win, DOBUF_WIPE, FALSE);
+	win_close_buffer(win, DOBUF_WIPE_REUSE, FALSE);
     else
 	close_buffer(win, win->w_buffer, 0, FALSE);
 # if defined(FEAT_TIMERS)
@@ -6963,6 +6969,109 @@ win_findbuf(typval_T *argvars, list_T *list)
     FOR_ALL_TAB_WINDOWS(tp, wp)
 	    if (wp->w_buffer->b_fnum == bufnr)
 		list_append_number(list, wp->w_id);
+}
+
+/*
+ * Find window specified by "vp" in tabpage "tp".
+ */
+    win_T *
+find_win_by_nr(
+    typval_T	*vp,
+    tabpage_T	*tp)	// NULL for current tab page
+{
+    win_T	*wp;
+    int		nr = (int)tv_get_number_chk(vp, NULL);
+
+    if (nr < 0)
+	return NULL;
+    if (nr == 0)
+	return curwin;
+
+    FOR_ALL_WINDOWS_IN_TAB(tp, wp)
+    {
+	if (nr >= LOWEST_WIN_ID)
+	{
+	    if (wp->w_id == nr)
+		return wp;
+	}
+	else if (--nr <= 0)
+	    break;
+    }
+    if (nr >= LOWEST_WIN_ID)
+    {
+#ifdef FEAT_TEXT_PROP
+	// check tab-local popup windows
+	for (wp = tp->tp_first_popupwin; wp != NULL; wp = wp->w_next)
+	    if (wp->w_id == nr)
+		return wp;
+	// check global popup windows
+	for (wp = first_popupwin; wp != NULL; wp = wp->w_next)
+	    if (wp->w_id == nr)
+		return wp;
+#endif
+	return NULL;
+    }
+    return wp;
+}
+
+/*
+ * Find a window: When using a Window ID in any tab page, when using a number
+ * in the current tab page.
+ */
+    win_T *
+find_win_by_nr_or_id(typval_T *vp)
+{
+    int	nr = (int)tv_get_number_chk(vp, NULL);
+
+    if (nr >= LOWEST_WIN_ID)
+	return win_id2wp(tv_get_number(vp));
+    return find_win_by_nr(vp, NULL);
+}
+
+/*
+ * Find window specified by "wvp" in tabpage "tvp".
+ * Returns the tab page in 'ptp'
+ */
+    win_T *
+find_tabwin(
+    typval_T	*wvp,	// VAR_UNKNOWN for current window
+    typval_T	*tvp,	// VAR_UNKNOWN for current tab page
+    tabpage_T	**ptp)
+{
+    win_T	*wp = NULL;
+    tabpage_T	*tp = NULL;
+    long	n;
+
+    if (wvp->v_type != VAR_UNKNOWN)
+    {
+	if (tvp->v_type != VAR_UNKNOWN)
+	{
+	    n = (long)tv_get_number(tvp);
+	    if (n >= 0)
+		tp = find_tabpage(n);
+	}
+	else
+	    tp = curtab;
+
+	if (tp != NULL)
+	{
+	    wp = find_win_by_nr(wvp, tp);
+	    if (wp == NULL && wvp->v_type == VAR_NUMBER
+						&& wvp->vval.v_number != -1)
+		// A window with the specified number is not found
+		tp = NULL;
+	}
+    }
+    else
+    {
+	wp = curwin;
+	tp = curtab;
+    }
+
+    if (ptp != NULL)
+	*ptp = tp;
+
+    return wp;
 }
 
 /*

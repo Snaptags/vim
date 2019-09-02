@@ -309,12 +309,14 @@ ALL_LIBS = $(LIBS) $(GUI_LIB_DIR) $(GUI_LIB) \
 
 SRC =	arabic.c arglist.c autocmd.c beval.c blob.c blowfish.c buffer.c \
 	change.c charset.c cmdexpand.c cmdhist.c crypt.c crypt_zip.c \
-	debugger.c dict.c diff.c digraph.c edit.c eval.c evalfunc.c ex_cmds.c \
+	debugger.c dict.c diff.c digraph.c edit.c eval.c evalfunc.c \
+	evalvars.c ex_cmds.c \
 	ex_cmds2.c ex_docmd.c ex_eval.c ex_getln.c if_cscope.c if_xcmdsrv.c \
 	fileio.c findfile.c fold.c getchar.c hardcopy.c hashtab.c highlight.c \
 	indent.c insexpand.c json.c list.c main.c map.c mark.c menu.c mbyte.c \
 	memfile.c memline.c message.c misc1.c misc2.c move.c normal.c ops.c \
 	option.c popupmnu.c popupwin.c profiler.c quickfix.c regexp.c \
+	scriptfile.c \
 	search.c session.c sha256.c sign.c spell.c spellfile.c syntax.c tag.c \
 	term.c termlib.c testing.c textprop.c ui.c undo.c usercmd.c \
 	userfunc.c version.c viminfo.c screen.c window.c os_unix.c os_vms.c \
@@ -325,13 +327,15 @@ SRC =	arabic.c arglist.c autocmd.c beval.c blob.c blowfish.c buffer.c \
 OBJ = 	arabic.obj arglist.obj autocmd.obj beval.obj blob.obj blowfish.obj \
 	buffer.obj change.obj charset.obj cmdexpand.obj cmdhist.obj \
 	crypt.obj crypt_zip.obj debugger.obj dict.obj diff.obj digraph.obj \
-	edit.obj eval.obj evalfunc.obj ex_cmds.obj ex_cmds2.obj ex_docmd.obj \
+	edit.obj eval.obj evalfunc.obj evalvars.obj ex_cmds.obj ex_cmds2.obj \
+	ex_docmd.obj \
 	ex_eval.obj ex_getln.obj if_cscope.obj if_xcmdsrv.obj fileio.obj \
 	findfile.obj fold.obj getchar.obj hardcopy.obj hashtab.obj \
 	highlight.obj indent.obj insexpand.obj json.obj list.obj main.obj \
 	map.obj mark.obj menu.obj memfile.obj memline.obj message.obj \
 	misc1.obj misc2.obj move.obj mbyte.obj normal.obj ops.obj option.obj \
 	popupmnu.obj popupwin.obj profiler.obj quickfix.obj regexp.obj \
+	scriptfile.obj \
 	search.obj session.obj sha256.obj sign.obj spell.obj spellfile.obj \
 	syntax.obj tag.obj term.obj termlib.obj testing.obj textprop.obj \
 	ui.obj undo.obj usercmd.obj userfunc.obj screen.obj version.obj \
@@ -567,6 +571,10 @@ evalfunc.obj : evalfunc.c vim.h [.auto]config.h feature.h os_unix.h \
  ascii.h keymap.h term.h macros.h option.h structs.h \
  regexp.h gui.h beval.h [.proto]gui_beval.pro alloc.h ex_cmds.h spell.h \
  proto.h globals.h version.h
+evalvars.obj : evalvars.c vim.h [.auto]config.h feature.h os_unix.h \
+ ascii.h keymap.h term.h macros.h option.h structs.h \
+ regexp.h gui.h beval.h [.proto]gui_beval.pro alloc.h ex_cmds.h spell.h \
+ proto.h globals.h version.h
 ex_cmds.obj : ex_cmds.c vim.h [.auto]config.h feature.h os_unix.h \
  ascii.h keymap.h term.h macros.h structs.h regexp.h \
  gui.h beval.h [.proto]gui_beval.pro option.h ex_cmds.h proto.h \
@@ -721,6 +729,10 @@ quickfix.obj : quickfix.c vim.h [.auto]config.h feature.h os_unix.h \
  gui.h beval.h [.proto]gui_beval.pro option.h ex_cmds.h proto.h \
  globals.h
 regexp.obj : regexp.c vim.h [.auto]config.h feature.h os_unix.h \
+ ascii.h keymap.h term.h macros.h structs.h regexp.h \
+ gui.h beval.h [.proto]gui_beval.pro option.h ex_cmds.h proto.h \
+ globals.h
+scriptfile.obj : scriptfile.c vim.h [.auto]config.h feature.h os_unix.h \
  ascii.h keymap.h term.h macros.h structs.h regexp.h \
  gui.h beval.h [.proto]gui_beval.pro option.h ex_cmds.h proto.h \
  globals.h
