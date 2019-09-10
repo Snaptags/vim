@@ -542,8 +542,15 @@ popup_show_curline(win_T *wp)
 {
     if (wp->w_cursor.lnum < wp->w_topline)
 	wp->w_topline = wp->w_cursor.lnum;
-    else if (wp->w_cursor.lnum >= wp->w_botline)
+    else if (wp->w_cursor.lnum >= wp->w_botline
+					  && (curwin->w_valid & VALID_BOTLINE))
+    {
 	wp->w_topline = wp->w_cursor.lnum - wp->w_height + 1;
+	if (wp->w_topline < 1)
+	    wp->w_topline = 1;
+	else if (wp->w_topline > wp->w_buffer->b_ml.ml_line_count)
+	    wp->w_topline = wp->w_buffer->b_ml.ml_line_count;
+    }
 
     // Don't use "firstline" now.
     wp->w_firstline = 0;
@@ -593,6 +600,7 @@ popup_highlight_curline(win_T *wp)
     }
     else
 	sign_undefine_by_name(sign_name, FALSE);
+    wp->w_popup_last_curline = wp->w_cursor.lnum;
 }
 
 /*
@@ -845,6 +853,15 @@ apply_general_options(win_T *wp, dict_T *dict)
 	    wp->w_popup_flags &= ~POPF_MAPPING;
     }
 
+    str = dict_get_string(dict, (char_u *)"filtermode", FALSE);
+    if (str != NULL)
+    {
+	if (STRCMP(str, "a") == 0)
+	    wp->w_filter_mode = MODE_ALL;
+	else
+	    wp->w_filter_mode = mode_str2flags(str);
+    }
+
     di = dict_find(dict, (char_u *)"callback", -1);
     if (di != NULL)
     {
@@ -1050,6 +1067,11 @@ popup_adjust_position(win_T *wp)
     wp->w_popup_leftoff = 0;
     wp->w_popup_rightoff = 0;
 
+    // May need to update the "cursorline" highlighting, which may also change
+    // "topline"
+    if (wp->w_popup_last_curline != wp->w_cursor.lnum)
+	popup_highlight_curline(wp);
+
     // If no line was specified default to vertical centering.
     if (wantline == 0)
 	center_vert = TRUE;
@@ -1150,7 +1172,9 @@ popup_adjust_position(win_T *wp)
     // start at the desired first line
     if (wp->w_firstline > 0)
 	wp->w_topline = wp->w_firstline;
-    if (wp->w_topline > wp->w_buffer->b_ml.ml_line_count)
+    if (wp->w_topline < 1)
+	wp->w_topline = 1;
+    else if (wp->w_topline > wp->w_buffer->b_ml.ml_line_count)
 	wp->w_topline = wp->w_buffer->b_ml.ml_line_count;
 
     // Compute width based on longest text line and the 'wrap' option.
@@ -1851,6 +1875,7 @@ popup_create(typval_T *argvars, typval_T *rettv, create_type_T type)
 	wp->w_border_char[i] = 0;
     wp->w_want_scrollbar = 1;
     wp->w_popup_fixed = 0;
+    wp->w_filter_mode = MODE_ALL;
 
     if (d != NULL)
 	// Deal with options.
@@ -2768,6 +2793,8 @@ popup_do_filter(int c)
     int		res = FALSE;
     win_T	*wp;
     int		save_KeyTyped = KeyTyped;
+    int		state;
+    int		was_must_redraw = must_redraw;
 
     if (recursive)
 	return FALSE;
@@ -2785,10 +2812,14 @@ popup_do_filter(int c)
 	    res = TRUE;
     }
 
+    state = get_real_state();
     while (!res && (wp = find_next_popup(FALSE)) != NULL)
-	if (wp->w_filter_cb.cb_name != NULL)
+	if (wp->w_filter_cb.cb_name != NULL
+		&& (wp->w_filter_mode & state) != 0)
 	    res = invoke_popup_filter(wp, c);
 
+    if (must_redraw > was_must_redraw)
+	redraw_after_callback(FALSE);
     recursive = FALSE;
     KeyTyped = save_KeyTyped;
     return res;
@@ -2982,6 +3013,7 @@ check_popup_unhidden(win_T *wp)
  * Return TRUE if popup_adjust_position() needs to be called for "wp".
  * That is when the buffer in the popup was changed, or the popup is following
  * a textprop and the referenced buffer was changed.
+ * Or when the cursor line changed and "cursorline" is set.
  */
     static int
 popup_need_position_adjust(win_T *wp)
@@ -2991,7 +3023,9 @@ popup_need_position_adjust(win_T *wp)
     if (win_valid(wp->w_popup_prop_win))
 	return wp->w_popup_prop_changedtick
 				!= CHANGEDTICK(wp->w_popup_prop_win->w_buffer)
-		|| wp->w_popup_prop_topline != wp->w_popup_prop_win->w_topline;
+		|| wp->w_popup_prop_topline != wp->w_popup_prop_win->w_topline
+		|| ((wp->w_popup_flags & POPF_CURSORLINE)
+			&& wp->w_cursor.lnum != wp->w_popup_last_curline);
     return FALSE;
 }
 

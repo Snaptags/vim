@@ -4468,8 +4468,10 @@ enc_locale(void)
 
     if (acp == 1200)
 	STRCPY(buf, "ucs-2le");
-    else if (acp == 1252)	    /* cp1252 is used as latin1 */
+    else if (acp == 1252)	    // cp1252 is used as latin1
 	STRCPY(buf, "latin1");
+    else if (acp == 65001)
+	STRCPY(buf, "utf-8");
     else
 	sprintf(buf, "cp%ld", acp);
 
@@ -6497,6 +6499,18 @@ im_set_position(int row UNUSED, int col UNUSED)
 
 #endif /* FEAT_XIM */
 
+#if defined(FEAT_EVAL) || defined(PROTO)
+/*
+ * "getimstatus()" function
+ */
+    void
+f_getimstatus(typval_T *argvars UNUSED, typval_T *rettv)
+{
+# if defined(HAVE_INPUT_METHOD)
+    rettv->vval.v_number = im_get_status();
+# endif
+}
+#endif
 
 /*
  * Setup "vcp" for conversion from "from" to "to".
