@@ -73,6 +73,8 @@ extern int _stricoll(char *a, char *b);
 # include "dict.pro"
 # include "diff.pro"
 # include "digraph.pro"
+# include "drawline.pro"
+# include "drawscreen.pro"
 # include "edit.pro"
 # include "eval.pro"
 # include "evalbuffer.pro"
@@ -173,11 +175,13 @@ char_u *vim_strpbrk(char_u *s, char_u *charset);
 /* Use our own qsort(), don't define the prototype when not used. */
 void qsort(void *base, size_t elm_count, size_t elm_size, int (*cmp)(const void *, const void *));
 #endif
+# include "mouse.pro"
 # include "move.pro"
 # include "mbyte.pro"
 # include "normal.pro"
 # include "ops.pro"
 # include "option.pro"
+# include "optionstr.pro"
 # include "popupmnu.pro"
 # if defined(FEAT_PROFILE) || defined(FEAT_RELTIME)
 # include "profiler.pro"

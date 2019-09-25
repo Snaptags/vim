@@ -924,9 +924,7 @@ getcmdline_int(
 	im_set_active(TRUE);
 #endif
 
-#ifdef FEAT_MOUSE
     setmouse();
-#endif
 #ifdef CURSOR_SHAPE
     ui_cursor_shape();		/* may show different cursor shape */
 #endif
@@ -970,6 +968,9 @@ getcmdline_int(
 	did_emsg = FALSE;	/* There can't really be a reason why an error
 				   that occurs while typing a command should
 				   cause the command not to be executed. */
+
+	// Trigger SafeState if nothing is pending.
+	may_trigger_safestate(xpc.xp_numfiles <= 0);
 
 	cursorcmd();		/* set the cursor on the right spot */
 
@@ -2386,9 +2387,7 @@ returncmd:
 	im_save_status(b_im_ptr);
     im_set_active(FALSE);
 #endif
-#ifdef FEAT_MOUSE
     setmouse();
-#endif
 #ifdef CURSOR_SHAPE
     ui_cursor_shape();		/* may show different cursor shape */
 #endif
@@ -3755,7 +3754,7 @@ ccheck_abbr(int c)
  * Returns the result in allocated memory.
  */
     char_u *
-vim_strsave_fnameescape(char_u *fname, int shell)
+vim_strsave_fnameescape(char_u *fname, int shell UNUSED)
 {
     char_u	*p;
 #ifdef BACKSLASH_IN_FILENAME
@@ -4157,9 +4156,7 @@ open_cmdwin(void)
     exmode_active = 0;
 
     State = NORMAL;
-# ifdef FEAT_MOUSE
     setmouse();
-# endif
 
     // Trigger CmdwinEnter autocommands.
     trigger_cmd_autocmd(cmdwin_type, EVENT_CMDWINENTER);
@@ -4287,9 +4284,7 @@ open_cmdwin(void)
 # endif
 
     State = save_State;
-# ifdef FEAT_MOUSE
     setmouse();
-# endif
 
     return cmdwin_result;
 }

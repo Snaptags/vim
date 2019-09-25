@@ -1593,6 +1593,8 @@ BASIC_SRC = \
 	dict.c \
 	diff.c \
 	digraph.c \
+	drawline.c \
+	drawscreen.c \
 	edit.c \
 	eval.c \
 	evalbuffer.c \
@@ -1627,11 +1629,13 @@ BASIC_SRC = \
 	message.c \
 	misc1.c \
 	misc2.c \
+	mouse.c \
 	move.c \
 	mbyte.c \
 	normal.c \
 	ops.c \
 	option.c \
+	optionstr.c \
 	os_unix.c \
 	auto/pathdef.c \
 	popupmnu.c \
@@ -1726,6 +1730,8 @@ OBJ_COMMON = \
 	objects/dict.o \
 	objects/diff.o \
 	objects/digraph.o \
+	objects/drawline.o \
+	objects/drawscreen.o \
 	objects/edit.o \
 	objects/eval.o \
 	objects/evalbuffer.o \
@@ -1757,11 +1763,13 @@ OBJ_COMMON = \
 	objects/menu.o \
 	objects/misc1.o \
 	objects/misc2.o \
+	objects/mouse.o \
 	objects/move.o \
 	objects/mbyte.o \
 	objects/normal.o \
 	objects/ops.o \
 	objects/option.o \
+	objects/optionstr.o \
 	objects/os_unix.o \
 	objects/pathdef.o \
 	objects/popupmnu.o \
@@ -1872,6 +1880,8 @@ PRO_AUTO = \
 	dict.pro \
 	diff.pro \
 	digraph.pro \
+	drawline.pro \
+	drawscreen.pro \
 	edit.pro \
 	eval.pro \
 	evalbuffer.pro \
@@ -1913,10 +1923,12 @@ PRO_AUTO = \
 	message.pro \
 	misc1.pro \
 	misc2.pro \
+	mouse.pro \
 	move.pro \
 	normal.pro \
 	ops.pro \
 	option.pro \
+	optionstr.pro \
 	os_mac_conv.pro \
 	os_unix.pro \
 	popupmnu.pro \
@@ -3080,6 +3092,12 @@ objects/diff.o: diff.c $(XDIFF_INCL)
 objects/digraph.o: digraph.c
 	$(CCC) -o $@ digraph.c
 
+objects/drawline.o: drawline.c
+	$(CCC) -o $@ drawline.c
+
+objects/drawscreen.o: drawscreen.c
+	$(CCC) -o $@ drawscreen.c
+
 objects/edit.o: edit.c
 	$(CCC) -o $@ edit.c
 
@@ -3272,6 +3290,9 @@ objects/misc1.o: misc1.c
 objects/misc2.o: misc2.c
 	$(CCC) -o $@ misc2.c
 
+objects/mouse.o: mouse.c
+	$(CCC) -o $@ mouse.c
+
 objects/move.o: move.c
 	$(CCC) -o $@ move.c
 
@@ -3284,8 +3305,11 @@ objects/normal.o: normal.c
 objects/ops.o: ops.c
 	$(CCC) -o $@ ops.c
 
-objects/option.o: option.c
+objects/option.o: option.c optiondefs.h
 	$(CCC_NF) $(LUA_CFLAGS) $(PERL_CFLAGS) $(PYTHON_CFLAGS) $(PYTHON3_CFLAGS) $(RUBY_CFLAGS) $(TCL_CFLAGS) $(ALL_CFLAGS) -o $@ option.c
+
+objects/optionstr.o: optionstr.c
+	$(CCC_NF) $(LUA_CFLAGS) $(PERL_CFLAGS) $(PYTHON_CFLAGS) $(PYTHON3_CFLAGS) $(RUBY_CFLAGS) $(TCL_CFLAGS) $(ALL_CFLAGS) -o $@ optionstr.c
 
 objects/os_beos.o: os_beos.c
 	$(CCC) -o $@ os_beos.c
@@ -3412,8 +3436,8 @@ objects/encoding.o: libvterm/src/encoding.c $(TERM_DEPS)
 objects/keyboard.o: libvterm/src/keyboard.c $(TERM_DEPS)
 	$(CCCTERM) -o $@ libvterm/src/keyboard.c
 
-objects/mouse.o: libvterm/src/mouse.c $(TERM_DEPS)
-	$(CCCTERM) -o $@ libvterm/src/mouse.c
+objects/termmouse.o: libvterm/src/termmouse.c $(TERM_DEPS)
+	$(CCCTERM) -o $@ libvterm/src/termmouse.c
 
 objects/parser.o: libvterm/src/parser.c $(TERM_DEPS)
 	$(CCCTERM) -o $@ libvterm/src/parser.c
@@ -3607,6 +3631,14 @@ objects/digraph.o: digraph.c vim.h protodef.h auto/config.h feature.h os_unix.h 
  auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
  proto.h globals.h
+objects/drawline.o: drawline.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
+ proto.h globals.h
+objects/drawscreen.o: drawscreen.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
+ proto.h globals.h
 objects/edit.o: edit.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
@@ -3743,6 +3775,10 @@ objects/misc2.o: misc2.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
  proto.h globals.h
+objects/mouse.o: mouse.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
+ proto.h globals.h
 objects/move.o: move.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
@@ -3760,6 +3796,10 @@ objects/ops.o: ops.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
  proto.h globals.h
 objects/option.o: option.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
+ proto.h globals.h optiondefs.h
+objects/optionstr.o: optionstr.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h term.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h alloc.h ex_cmds.h spell.h \
  proto.h globals.h
@@ -4033,7 +4073,7 @@ objects/encoding.o: libvterm/src/encoding.c libvterm/src/vterm_internal.h \
 objects/keyboard.o: libvterm/src/keyboard.c libvterm/src/vterm_internal.h \
  libvterm/include/vterm.h libvterm/include/vterm_keycodes.h \
  libvterm/src/utf8.h
-objects/mouse.o: libvterm/src/mouse.c libvterm/src/vterm_internal.h \
+objects/termmouse.o: libvterm/src/termmouse.c libvterm/src/vterm_internal.h \
  libvterm/include/vterm.h libvterm/include/vterm_keycodes.h \
  libvterm/src/utf8.h
 objects/parser.o: libvterm/src/parser.c libvterm/src/vterm_internal.h \

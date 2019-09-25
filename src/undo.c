@@ -775,7 +775,7 @@ u_compute_hash(char_u *hash)
  * When "reading" is FALSE use the first name where the directory exists.
  * Returns NULL when there is no place to write or no file to read.
  */
-    char_u *
+    static char_u *
 u_get_undo_file_name(char_u *buf_ffname, int reading)
 {
     char_u	*dirp;
@@ -1784,7 +1784,7 @@ theend:
  * "hash[UNDO_HASH_SIZE]" must be the hash value of the buffer text.
  */
     void
-u_read_undo(char_u *name, char_u *hash, char_u *orig_name)
+u_read_undo(char_u *name, char_u *hash, char_u *orig_name UNUSED)
 {
     char_u	*file_name;
     FILE	*fp;
@@ -3590,7 +3590,7 @@ curbufIsChanged(void)
  * For undotree(): Append the list of undo blocks at "first_uhp" to "list".
  * Recursive.
  */
-    void
+    static void
 u_eval_tree(u_header_T *first_uhp, list_T *list)
 {
     u_header_T  *uhp = first_uhp;
