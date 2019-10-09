@@ -1762,35 +1762,46 @@ make_filter_cmd(
 	STRCAT(buf, itmp);
     }
 #else
-    /*
-     * For shells that don't understand braces around commands, at least allow
-     * the use of commands in a pipe.
-     */
-    STRCPY(buf, cmd);
-    if (itmp != NULL)
+    // For shells that don't understand braces around commands, at least allow
+    // the use of commands in a pipe.
+    if (*p_sxe != NUL && *p_sxq == '(')
     {
-	char_u	*p;
-
-	/*
-	 * If there is a pipe, we have to put the '<' in front of it.
-	 * Don't do this when 'shellquote' is not empty, otherwise the
-	 * redirection would be inside the quotes.
-	 */
-	if (*p_shq == NUL)
+	if (itmp != NULL || otmp != NULL)
+	    vim_snprintf((char *)buf, len, "(%s)", (char *)cmd);
+	else
+	    STRCPY(buf, cmd);
+	if (itmp != NULL)
 	{
-	    p = find_pipe(buf);
-	    if (p != NULL)
-		*p = NUL;
+	    STRCAT(buf, " < ");
+	    STRCAT(buf, itmp);
 	}
-	STRCAT(buf, " <");	/* " < " causes problems on Amiga */
-	STRCAT(buf, itmp);
-	if (*p_shq == NUL)
+    }
+    else
+    {
+	STRCPY(buf, cmd);
+	if (itmp != NULL)
 	{
-	    p = find_pipe(cmd);
-	    if (p != NULL)
+	    char_u	*p;
+
+	    // If there is a pipe, we have to put the '<' in front of it.
+	    // Don't do this when 'shellquote' is not empty, otherwise the
+	    // redirection would be inside the quotes.
+	    if (*p_shq == NUL)
 	    {
-		STRCAT(buf, " ");   /* insert a space before the '|' for DOS */
-		STRCAT(buf, p);
+		p = find_pipe(buf);
+		if (p != NULL)
+		    *p = NUL;
+	    }
+	    STRCAT(buf, " <");	// " < " causes problems on Amiga
+	    STRCAT(buf, itmp);
+	    if (*p_shq == NUL)
+	    {
+		p = find_pipe(cmd);
+		if (p != NULL)
+		{
+		    STRCAT(buf, " ");  // insert a space before the '|' for DOS
+		    STRCAT(buf, p);
+		}
 	    }
 	}
     }
@@ -1819,18 +1830,20 @@ append_redir(
     char_u	*end;
 
     end = buf + STRLEN(buf);
-    /* find "%s" */
+    // find "%s"
     for (p = opt; (p = vim_strchr(p, '%')) != NULL; ++p)
     {
-	if (p[1] == 's') /* found %s */
+	if (p[1] == 's') // found %s
 	    break;
-	if (p[1] == '%') /* skip %% */
+	if (p[1] == '%') // skip %%
 	    ++p;
     }
     if (p != NULL)
     {
-	*end = ' '; /* not really needed? Not with sh, ksh or bash */
-	vim_snprintf((char *)end + 1, (size_t)(buflen - (end + 1 - buf)),
+#ifdef MSWIN
+	*end++ = ' '; // not really needed? Not with sh, ksh or bash
+#endif
+	vim_snprintf((char *)end, (size_t)(buflen - (end - buf)),
 						  (char *)opt, (char *)fname);
     }
     else
@@ -1838,7 +1851,7 @@ append_redir(
 #ifdef FEAT_QUICKFIX
 		" %s %s",
 #else
-		" %s%s",	/* " > %s" causes problems on Amiga */
+		" %s%s",	// " > %s" causes problems on Amiga
 #endif
 		(char *)opt, (char *)fname);
 }
@@ -5534,12 +5547,22 @@ find_help_tags(
     if (STRNICMP(arg, "expr-", 5) == 0)
     {
 	// When the string starting with "expr-" and containing '?' and matches
-	// the table, it is taken literally.  Otherwise '?' is recognized as a
-	// wildcard.
+	// the table, it is taken literally (but ~ is escaped).  Otherwise '?'
+	// is recognized as a wildcard.
 	for (i = (int)(sizeof(expr_table) / sizeof(char *)); --i >= 0; )
 	    if (STRCMP(arg + 5, expr_table[i]) == 0)
 	    {
-		STRCPY(d, arg);
+		int si = 0, di = 0;
+
+		for (;;)
+		{
+		    if (arg[si] == '~')
+			d[di++] = '\\';
+		    d[di++] = arg[si];
+		    if (arg[si] == NUL)
+			break;
+		    ++si;
+		}
 		break;
 	    }
     }

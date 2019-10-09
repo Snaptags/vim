@@ -1296,11 +1296,11 @@ free_typebuf(void)
     if (typebuf.tb_buf == typebuf_init)
 	internal_error("Free typebuf 1");
     else
-	vim_free(typebuf.tb_buf);
+	VIM_CLEAR(typebuf.tb_buf);
     if (typebuf.tb_noremap == noremapbuf_init)
 	internal_error("Free typebuf 2");
     else
-	vim_free(typebuf.tb_noremap);
+	VIM_CLEAR(typebuf.tb_noremap);
 }
 
 /*
@@ -1791,7 +1791,11 @@ vgetc(void)
 #endif
 #ifdef FEAT_TEXT_PROP
     if (popup_do_filter(c))
+    {
+	if (c == Ctrl_C)
+	    got_int = FALSE;  // avoid looping
 	c = K_IGNORE;
+    }
 #endif
 
     // Need to process the character before we know it's safe to do something
@@ -2250,7 +2254,7 @@ handle_mapping(
 		    char_u *p2 = mb_unescape(&p1);
 
 		    if (has_mbyte && p2 != NULL
-					&& MB_BYTE2LEN(tb_c1) > MB_PTR2LEN(p2))
+					&& MB_BYTE2LEN(tb_c1) > mb_ptr2len(p2))
 			mlen = 0;
 		}
 

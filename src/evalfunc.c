@@ -787,6 +787,7 @@ static funcentry_T global_functions[] =
 # if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
     {"term_setansicolors", 2, 2, FEARG_1, f_term_setansicolors},
 # endif
+    {"term_setapi",	2, 2, FEARG_1,	  f_term_setapi},
     {"term_setkill",	2, 2, FEARG_1,	  f_term_setkill},
     {"term_setrestore",	2, 2, FEARG_1,	  f_term_setrestore},
     {"term_setsize",	3, 3, FEARG_1,	  f_term_setsize},
@@ -2212,8 +2213,7 @@ f_expand(typval_T *argvars, typval_T *rettv)
 	{
 	    if (rettv_list_alloc(rettv) != FAIL && result != NULL)
 		list_append_string(rettv->vval.v_list, result, -1);
-	    else
-		vim_free(result);
+	    vim_free(result);
 	}
 	else
 	    rettv->vval.v_string = result;
@@ -3314,9 +3314,7 @@ f_has(typval_T *argvars, typval_T *rettv)
 #endif
 	"cmdline_compl",
 	"cmdline_hist",
-#ifdef FEAT_COMMENTS
 	"comments",
-#endif
 #ifdef FEAT_CONCEAL
 	"conceal",
 #endif
@@ -6456,7 +6454,7 @@ f_setcharsearch(typval_T *argvars, typval_T *rettv UNUSED)
 	    }
 	    else
 		set_last_csearch(PTR2CHAR(csearch),
-						csearch, MB_PTR2LEN(csearch));
+						csearch, mb_ptr2len(csearch));
 	}
 
 	di = dict_find(d, (char_u *)"forward", -1);
