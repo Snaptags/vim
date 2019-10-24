@@ -912,6 +912,8 @@ static struct builtin_term builtin_termcaps[] =
     {(int)KS_TE,	IF_EB("\033[2J\033[?47l\0338",
 				  ESC_STR "[2J" ESC_STR_nc "[?47l" ESC_STR_nc "8")},
 #  endif
+    {(int)KS_CTI,	IF_EB("\033[>4;2m", ESC_STR_nc "[>4;2m")},
+    {(int)KS_CTE,	IF_EB("\033[>4;m", ESC_STR_nc "[>4;m")},
     {(int)KS_CIS,	IF_EB("\033]1;", ESC_STR "]1;")},
     {(int)KS_CIE,	"\007"},
     {(int)KS_TS,	IF_EB("\033]2;", ESC_STR "]2;")},
@@ -1624,6 +1626,7 @@ get_term_entries(int *height, int *width)
 			{KS_CM, "cm"}, {KS_SR, "sr"},
 			{KS_CRI,"RI"}, {KS_VB, "vb"}, {KS_KS, "ks"},
 			{KS_KE, "ke"}, {KS_TI, "ti"}, {KS_TE, "te"},
+			{KS_CTI, "TI"}, {KS_CTE, "TE"},
 			{KS_BC, "bc"}, {KS_CSB,"Sb"}, {KS_CSF,"Sf"},
 			{KS_CAB,"AB"}, {KS_CAF,"AF"}, {KS_LE, "le"},
 			{KS_ND, "nd"}, {KS_OP, "op"}, {KS_CRV, "RV"},
@@ -1956,10 +1959,12 @@ set_termname(char_u *term)
 #if defined(UNIX) || defined(VMS)
     term_is_xterm = vim_is_xterm(term);
 #endif
+#ifdef FEAT_TERMRESPONSE
+    is_not_xterm = FALSE;
+    is_mac_terminal = FALSE;
+#endif
 
-#ifdef FEAT_MOUSE
-# if defined(UNIX) || defined(VMS)
-#  ifdef FEAT_MOUSE_TTY
+#if defined(UNIX) || defined(VMS)
     /*
      * For Unix, set the 'ttymouse' option to the type of mouse to be used.
      * The termcode for the mouse is added as a side effect in option.c.
@@ -1967,7 +1972,7 @@ set_termname(char_u *term)
     {
 	char_u	*p = (char_u *)"";
 
-#  ifdef FEAT_MOUSE_XTERM
+# ifdef FEAT_MOUSE_XTERM
 	if (use_xterm_like_mouse(term))
 	{
 	    if (use_xterm_mouse())
@@ -1975,7 +1980,7 @@ set_termname(char_u *term)
 	    else
 		p = (char_u *)"xterm";
 	}
-#  endif
+# endif
 	if (p != NULL)
 	{
 	    set_option_value((char_u *)"ttym", 0L, p, 0);
@@ -1984,17 +1989,15 @@ set_termname(char_u *term)
 	    reset_option_was_set((char_u *)"ttym");
 	}
 	if (p == NULL
-#   ifdef FEAT_GUI
+#  ifdef FEAT_GUI
 		|| gui.in_use
-#   endif
+#  endif
 		)
 	    check_mouse_termcode();	/* set mouse termcode anyway */
     }
-#  endif
-# else
+#else
     set_mouse_termcode(KS_MOUSE, (char_u *)"\233M");
-# endif
-#endif	/* FEAT_MOUSE */
+#endif
 
 #ifdef USE_TERM_CONSOLE
     /* DEFAULT_TERM indicates that it is the machine console. */
@@ -2560,8 +2563,6 @@ out_char_nf(unsigned c)
 	out_flush();
 }
 
-#if defined(FEAT_TITLE) || defined(FEAT_MOUSE_TTY) || defined(FEAT_GUI) \
-    || defined(FEAT_TERMRESPONSE) || defined(PROTO)
 /*
  * A never-padding out_str.
  * use this whenever you don't want to run the string through tputs.
@@ -2585,7 +2586,6 @@ out_str_nf(char_u *s)
     if (p_wd)
 	out_flush();
 }
-#endif
 
 /*
  * A conditional-flushing out_str, mainly for visualbell.
@@ -3146,9 +3146,6 @@ get_long_from_buf(char_u *buf, long_u *val)
 }
 #endif
 
-#if defined(FEAT_GUI) \
-    || (defined(FEAT_MOUSE) && (!defined(UNIX) || defined(FEAT_MOUSE_XTERM) \
-		|| defined(FEAT_MOUSE_GPM) || defined(FEAT_SYSMOUSE)))
 /*
  * Read the next num_bytes bytes from buf, and store them in bytes.  Assume
  * that buf has been through inchar().	Returns the actual number of bytes used
@@ -3186,7 +3183,6 @@ get_bytes_from_buf(char_u *buf, char_u *bytes, int num_bytes)
     }
     return len;
 }
-#endif
 
 /*
  * Check if the new shell size is valid, correct it if it's too small or way
@@ -3431,10 +3427,8 @@ settmode(int tmode)
 		check_for_codes_from_term();
 	    }
 #endif
-#ifdef FEAT_MOUSE_TTY
 	    if (tmode != TMODE_RAW)
 		mch_setmouse(FALSE);	// switch mouse off
-#endif
 	    if (termcap_active)
 	    {
 		if (tmode != TMODE_RAW)
@@ -3462,6 +3456,7 @@ starttermcap(void)
     if (full_screen && !termcap_active)
     {
 	out_str(T_TI);			/* start termcap mode */
+	out_str(T_CTI);			/* start "raw" mode */
 	out_str(T_KS);			/* start "keypad transmit" mode */
 	out_str(T_BE);			/* enable bracketed paste mode */
 	out_flush();
@@ -3517,6 +3512,7 @@ stoptermcap(void)
 	out_flush();
 	termcap_active = FALSE;
 	cursor_on();			/* just in case it is still off */
+	out_str(T_CTE);			/* stop "raw" mode */
 	out_str(T_TE);			/* stop termcap mode */
 	screen_start();			/* don't know where cursor is now */
 	out_flush();
@@ -4199,6 +4195,99 @@ is_mouse_topline(win_T *wp)
 #endif
 
 /*
+ * Put "string[new_slen]" in typebuf, or in "buf[bufsize]" if "buf" is not NULL.
+ * Remove "slen" bytes.
+ * Returns FAIL for error.
+ */
+    static int
+put_string_in_typebuf(
+	int	offset,
+	int	slen,
+	char_u	*string,
+	int	new_slen,
+	char_u	*buf,
+	int	bufsize,
+	int	*buflen)
+{
+    int		extra = new_slen - slen;
+
+    string[new_slen] = NUL;
+    if (buf == NULL)
+    {
+	if (extra < 0)
+	    // remove matched chars, taking care of noremap
+	    del_typebuf(-extra, offset);
+	else if (extra > 0)
+	    // insert the extra space we need
+	    ins_typebuf(string + slen, REMAP_YES, offset, FALSE, FALSE);
+
+	// Careful: del_typebuf() and ins_typebuf() may have reallocated
+	// typebuf.tb_buf[]!
+	mch_memmove(typebuf.tb_buf + typebuf.tb_off + offset, string,
+							     (size_t)new_slen);
+    }
+    else
+    {
+	if (extra < 0)
+	    // remove matched characters
+	    mch_memmove(buf + offset, buf + offset - extra,
+					   (size_t)(*buflen + offset + extra));
+	else if (extra > 0)
+	{
+	    // Insert the extra space we need.  If there is insufficient
+	    // space return -1.
+	    if (*buflen + extra + new_slen >= bufsize)
+		return FAIL;
+	    mch_memmove(buf + offset + extra, buf + offset,
+						   (size_t)(*buflen - offset));
+	}
+	mch_memmove(buf + offset, string, (size_t)new_slen);
+	*buflen = *buflen + extra + new_slen;
+    }
+    return OK;
+}
+
+/*
+ * Decode a modifier number as xterm provides it into MOD_MASK bits.
+ */
+    static int
+decode_modifiers(int n)
+{
+    int	    code = n - 1;
+    int	    modifiers = 0;
+
+    if (code & 1)
+	modifiers |= MOD_MASK_SHIFT;
+    if (code & 2)
+	modifiers |= MOD_MASK_ALT;
+    if (code & 4)
+	modifiers |= MOD_MASK_CTRL;
+    if (code & 8)
+	modifiers |= MOD_MASK_META;
+    return modifiers;
+}
+
+    static int
+modifiers2keycode(int modifiers, int *key, char_u *string)
+{
+    int new_slen = 0;
+
+    if (modifiers != 0)
+    {
+	// Some keys have the modifier included.  Need to handle that here to
+	// make mappings work.
+	*key = simplify_key(*key, &modifiers);
+	if (modifiers != 0)
+	{
+	    string[new_slen++] = K_SPECIAL;
+	    string[new_slen++] = (int)KS_MODIFIER;
+	    string[new_slen++] = modifiers;
+	}
+    }
+    return new_slen;
+}
+
+/*
  * Check if typebuf.tb_buf[] contains a terminal key code.
  * Check from typebuf.tb_buf[typebuf.tb_off] to typebuf.tb_buf[typebuf.tb_off
  * + max_offset].
@@ -4229,8 +4318,7 @@ check_termcode(
     int		modifiers;
     char_u	*modifiers_start = NULL;
     int		key;
-    int		new_slen;
-    int		extra;
+    int		new_slen;   // Length of what will replace the termcode
     char_u	string[MAX_KEY_CODE_LEN + 1];
     int		i, j;
     int		idx = 0;
@@ -4401,16 +4489,9 @@ check_termcode(
 
 			    modifiers_start = tp + slen - 2;
 
-			    /* Match!  Convert modifier bits. */
-			    n = atoi((char *)modifiers_start) - 1;
-			    if (n & 1)
-				modifiers |= MOD_MASK_SHIFT;
-			    if (n & 2)
-				modifiers |= MOD_MASK_ALT;
-			    if (n & 4)
-				modifiers |= MOD_MASK_CTRL;
-			    if (n & 8)
-				modifiers |= MOD_MASK_META;
+			    // Match!  Convert modifier bits.
+			    n = atoi((char *)modifiers_start);
+			    modifiers |= decode_modifiers(n);
 
 			    slen = j;
 			}
@@ -4570,8 +4651,8 @@ not_enough:
 		    if (tp[0] == CSI)
 			switch_to_8bit();
 
-		    // rxvt sends its version number: "20703" is 2.7.3.
 		    // Screen sends 40500.
+		    // rxvt sends its version number: "20703" is 2.7.3.
 		    // Ignore it for when the user has set 'term' to xterm,
 		    // even though it's an rxvt.
 		    if (version > 20000)
@@ -4582,6 +4663,7 @@ not_enough:
 			int need_flush = FALSE;
 			int is_iterm2 = FALSE;
 			int is_mintty = FALSE;
+			int is_screen = FALSE;
 
 			// mintty 2.9.5 sends 77;20905;0c.
 			// (77 is ASCII 'M' for mintty.)
@@ -4627,14 +4709,21 @@ not_enough:
 				is_not_xterm = TRUE;
 			}
 
+			// screen sends 83;40500;0 83 is 'S' in ASCII.
+			if (arg[0] == 83)
+			    is_screen = TRUE;
+
 			// Only set 'ttymouse' automatically if it was not set
 			// by the user already.
 			if (!option_was_set((char_u *)"ttym"))
 			{
 			    // Xterm version 277 supports SGR.  Also support
-			    // Terminal.app, iTerm2 and mintty.
-			    if (version >= 277 || is_iterm2 || is_mac_terminal
-				    || is_mintty)
+			    // Terminal.app, iTerm2, mintty, and screen 4.7+.
+			    if ((!is_screen && version >= 277)
+				    || is_iterm2
+				    || is_mac_terminal
+				    || is_mintty
+				    || (is_screen && arg[1] >= 40700))
 				set_option_value((char_u *)"ttym", 0L,
 							  (char_u *)"sgr", 0);
 			    // if xterm version >= 95 use mouse dragging
@@ -4751,9 +4840,49 @@ not_enough:
 			winpos_status.tr_progress = STATUS_GOT;
 		}
 
-		// TODO: key with modifier:
+		// Key with modifier:
 		//	{lead}27;{modifier};{key}~
 		//	{lead}{key};{modifier}u
+		else if ((arg[0] == 27 && argc == 3 && trail == '~')
+			|| (argc == 2 && trail == 'u'))
+		{
+		    seenModifyOtherKeys = TRUE;
+		    if (trail == 'u')
+			key = arg[0];
+		    else
+			key = arg[2];
+
+		    modifiers = decode_modifiers(arg[1]);
+
+		    // Some keys already have Shift included, pass them as
+		    // normal keys.  Not when Ctrl is also used, because <C-H>
+		    // and <C-S-H> are different.
+		    if (modifiers == MOD_MASK_SHIFT
+			    && ((key >= '@' && key <= 'Z')
+				|| key == '^' || key == '_'
+				|| (key >= '{' && key <= '~')))
+			modifiers = 0;
+
+		    // When used with Ctrl we always make a letter upper case,
+		    // so that mapping <C-H> and <C-h> are the same.  Typing
+		    // <C-S-H> also uses "H" but modifier is different.
+		    if ((modifiers & MOD_MASK_CTRL) && ASCII_ISALPHA(key))
+			key = TOUPPER_ASC(key);
+
+		    // insert modifiers with KS_MODIFIER
+		    new_slen = modifiers2keycode(modifiers, &key, string);
+		    slen = csi_len;
+
+		    if (has_mbyte)
+			new_slen += (*mb_char2bytes)(key, string + new_slen);
+		    else
+			string[new_slen++] = key;
+
+		    if (put_string_in_typebuf(offset, slen, string, new_slen,
+						 buf, bufsize, buflen) == FAIL)
+			return -1;
+		    return len + new_slen - slen + offset;
+		}
 
 		// else: Unknown CSI sequence.  We could drop it, but then the
 		// user can't create a map for it.
@@ -4952,8 +5081,7 @@ not_enough:
 
 	/* We only get here when we have a complete termcode match */
 
-#ifdef FEAT_MOUSE
-# ifdef FEAT_GUI
+#ifdef FEAT_GUI
 	/*
 	 * Only in the GUI: Fetch the pointer coordinates of the scroll event
 	 * so that we know which window to scroll later.
@@ -4977,29 +5105,29 @@ not_enough:
 	    slen += num_bytes;
 	}
 	else
-# endif
+#endif
 	/*
 	 * If it is a mouse click, get the coordinates.
 	 */
 	if (key_name[0] == KS_MOUSE
-# ifdef FEAT_MOUSE_GPM
+#ifdef FEAT_MOUSE_GPM
 		|| key_name[0] == KS_GPM_MOUSE
-# endif
-# ifdef FEAT_MOUSE_JSB
+#endif
+#ifdef FEAT_MOUSE_JSB
 		|| key_name[0] == KS_JSBTERM_MOUSE
-# endif
-# ifdef FEAT_MOUSE_NET
+#endif
+#ifdef FEAT_MOUSE_NET
 		|| key_name[0] == KS_NETTERM_MOUSE
-# endif
-# ifdef FEAT_MOUSE_DEC
+#endif
+#ifdef FEAT_MOUSE_DEC
 		|| key_name[0] == KS_DEC_MOUSE
-# endif
-# ifdef FEAT_MOUSE_PTERM
+#endif
+#ifdef FEAT_MOUSE_PTERM
 		|| key_name[0] == KS_PTERM_MOUSE
-# endif
-# ifdef FEAT_MOUSE_URXVT
+#endif
+#ifdef FEAT_MOUSE_URXVT
 		|| key_name[0] == KS_URXVT_MOUSE
-# endif
+#endif
 		|| key_name[0] == KS_SGR_MOUSE
 		|| key_name[0] == KS_SGR_MOUSE_RELEASE)
 	{
@@ -5007,7 +5135,6 @@ not_enough:
 							     &modifiers) == -1)
 		return -1;
 	}
-#endif /* FEAT_MOUSE */
 
 #ifdef FEAT_GUI
 	/*
@@ -5138,19 +5265,7 @@ not_enough:
 	/*
 	 * Add any modifier codes to our string.
 	 */
-	new_slen = 0;		/* Length of what will replace the termcode */
-	if (modifiers != 0)
-	{
-	    /* Some keys have the modifier included.  Need to handle that here
-	     * to make mappings work. */
-	    key = simplify_key(key, &modifiers);
-	    if (modifiers != 0)
-	    {
-		string[new_slen++] = K_SPECIAL;
-		string[new_slen++] = (int)KS_MODIFIER;
-		string[new_slen++] = modifiers;
-	    }
-	}
+	new_slen = modifiers2keycode(modifiers, &key, string);
 
 	/* Finally, add the special key code to our string */
 	key_name[0] = KEY2TERMCAP0(key);
@@ -5176,43 +5291,10 @@ not_enough:
 	    string[new_slen++] = key_name[0];
 	    string[new_slen++] = key_name[1];
 	}
-	string[new_slen] = NUL;
-	extra = new_slen - slen;
-	if (buf == NULL)
-	{
-	    if (extra < 0)
-		/* remove matched chars, taking care of noremap */
-		del_typebuf(-extra, offset);
-	    else if (extra > 0)
-		/* insert the extra space we need */
-		ins_typebuf(string + slen, REMAP_YES, offset, FALSE, FALSE);
-
-	    /*
-	     * Careful: del_typebuf() and ins_typebuf() may have reallocated
-	     * typebuf.tb_buf[]!
-	     */
-	    mch_memmove(typebuf.tb_buf + typebuf.tb_off + offset, string,
-							    (size_t)new_slen);
-	}
-	else
-	{
-	    if (extra < 0)
-		/* remove matched characters */
-		mch_memmove(buf + offset, buf + offset - extra,
-					   (size_t)(*buflen + offset + extra));
-	    else if (extra > 0)
-	    {
-		/* Insert the extra space we need.  If there is insufficient
-		 * space return -1. */
-		if (*buflen + extra + new_slen >= bufsize)
-		    return -1;
-		mch_memmove(buf + offset + extra, buf + offset,
-						   (size_t)(*buflen - offset));
-	    }
-	    mch_memmove(buf + offset, string, (size_t)new_slen);
-	    *buflen = *buflen + extra + new_slen;
-	}
-	return retval == 0 ? (len + extra + offset) : retval;
+	if (put_string_in_typebuf(offset, slen, string, new_slen,
+						 buf, bufsize, buflen) == FAIL)
+	    return -1;
+	return retval == 0 ? (len + new_slen - slen + offset) : retval;
     }
 
 #ifdef FEAT_TERMRESPONSE
@@ -5265,18 +5347,26 @@ term_get_bg_color(char_u *r, char_u *g, char_u *b)
  * pointer to it is returned. If something fails *bufp is set to NULL and from
  * is returned.
  *
- * CTRL-V characters are removed.  When "from_part" is TRUE, a trailing CTRL-V
- * is included, otherwise it is removed (for ":map xx ^V", maps xx to
- * nothing).  When 'cpoptions' does not contain 'B', a backslash can be used
- * instead of a CTRL-V.
+ * CTRL-V characters are removed.  When "flags" has REPTERM_FROM_PART, a
+ * trailing CTRL-V is included, otherwise it is removed (for ":map xx ^V", maps
+ * xx to nothing).  When 'cpoptions' does not contain 'B', a backslash can be
+ * used instead of a CTRL-V.
+ *
+ * Flags:
+ *  REPTERM_FROM_PART	see above
+ *  REPTERM_DO_LT	also translate <lt>
+ *  REPTERM_SPECIAL	always accept <key> notation
+ *  REPTERM_NO_SIMPLIFY	do not simplify <C-H> to 0x08 and set 8th bit for <A-x>
+ *
+ * "did_simplify" is set when some <C-H> or <A-x> code was simplified, unless
+ * it is NULL.
  */
     char_u *
 replace_termcodes(
     char_u	*from,
     char_u	**bufp,
-    int		from_part,
-    int		do_lt,		/* also translate <lt> */
-    int		special)	/* always accept <key> notation */
+    int		flags,
+    int		*did_simplify)
 {
     int		i;
     int		slen;
@@ -5289,7 +5379,8 @@ replace_termcodes(
     char_u	*result;	/* buffer for resulting string */
 
     do_backslash = (vim_strchr(p_cpo, CPO_BSLASH) == NULL);
-    do_special = (vim_strchr(p_cpo, CPO_SPECI) == NULL) || special;
+    do_special = (vim_strchr(p_cpo, CPO_SPECI) == NULL)
+						  || (flags & REPTERM_SPECIAL);
     do_key_code = (vim_strchr(p_cpo, CPO_KEYCODE) == NULL);
 
     /*
@@ -5308,7 +5399,7 @@ replace_termcodes(
     /*
      * Check for #n at start only: function key n
      */
-    if (from_part && src[0] == '#' && VIM_ISDIGIT(src[1]))  /* function key */
+    if ((flags & REPTERM_FROM_PART) && src[0] == '#' && VIM_ISDIGIT(src[1]))
     {
 	result[dlen++] = K_SPECIAL;
 	result[dlen++] = 'k';
@@ -5328,7 +5419,8 @@ replace_termcodes(
 	 * If 'cpoptions' does not contain '<', check for special key codes,
 	 * like "<C-S-LeftMouse>"
 	 */
-	if (do_special && (do_lt || STRNCMP(src, "<lt>", 4) != 0))
+	if (do_special && ((flags & REPTERM_DO_LT)
+					      || STRNCMP(src, "<lt>", 4) != 0))
 	{
 #ifdef FEAT_EVAL
 	    /*
@@ -5354,7 +5446,8 @@ replace_termcodes(
 	    }
 #endif
 
-	    slen = trans_special(&src, result + dlen, TRUE, FALSE);
+	    slen = trans_special(&src, result + dlen, TRUE, FALSE,
+			     (flags & REPTERM_NO_SIMPLIFY) == 0, did_simplify);
 	    if (slen)
 	    {
 		dlen += slen;
@@ -5434,7 +5527,7 @@ replace_termcodes(
 	    ++src;				/* skip CTRL-V or backslash */
 	    if (*src == NUL)
 	    {
-		if (from_part)
+		if (flags & REPTERM_FROM_PART)
 		    result[dlen++] = key;
 		break;
 	    }
