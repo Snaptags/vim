@@ -12,6 +12,7 @@ func Test_simple_popup()
 	call setline(1, range(1, 100))
 	hi PopupColor1 ctermbg=lightblue
 	hi PopupColor2 ctermbg=lightcyan
+	hi EndOfBuffer ctermbg=lightgrey
 	hi Comment ctermfg=red
 	call prop_type_add('comment', #{highlight: 'Comment'})
 	let winid = popup_create('hello there', #{line: 3, col: 11, minwidth: 20, highlight: 'PopupColor1'})
@@ -323,6 +324,98 @@ func Test_popup_all_corners()
   call delete('XtestPopupCorners')
 endfunc
 
+func Test_popup_nospace()
+  CheckScreendump
+
+  let lines =<< trim END
+	call setline(1, repeat([repeat('-', 60)], 15))
+	set so=0
+
+	" cursor in a line in top half, using "botleft" with popup that
+	" does fit
+	normal 5G2|r@
+	let winid1 = popup_create(['one', 'two'], #{
+	      \ line: 'cursor-1',
+	      \ col: 'cursor',
+	      \ pos: 'botleft',
+	      \ border: [],
+	      \ })
+	" cursor in a line in top half, using "botleft" with popup that
+	" doesn't fit: gets truncated
+	normal 5G9|r#
+	let winid1 = popup_create(['one', 'two', 'tee'], #{
+	      \ line: 'cursor-1',
+	      \ col: 'cursor',
+	      \ pos: 'botleft',
+	      \ posinvert: 0,
+	      \ border: [],
+	      \ })
+	" cursor in a line in top half, using "botleft" with popup that
+	" doesn't fit and 'posinvert' set: flips to below.
+	normal 5G16|r%
+	let winid1 = popup_create(['one', 'two', 'tee'], #{
+	      \ line: 'cursor-1',
+	      \ col: 'cursor',
+	      \ pos: 'botleft',
+	      \ border: [],
+	      \ })
+	" cursor in a line in bottom half, using "botleft" with popup that
+	" doesn't fit: does not flip.
+	normal 8G23|r*
+	let winid1 = popup_create(['aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff'], #{
+	      \ line: 'cursor-1',
+	      \ col: 'cursor',
+	      \ pos: 'botleft',
+	      \ border: [],
+	      \ })
+
+	" cursor in a line in bottom half, using "topleft" with popup that
+	" does fit
+	normal 8G30|r@
+	let winid1 = popup_create(['one', 'two'], #{
+	      \ line: 'cursor+1',
+	      \ col: 'cursor',
+	      \ pos: 'topleft',
+	      \ border: [],
+	      \ })
+	" cursor in a line in top half, using "topleft" with popup that
+	" doesn't fit: truncated
+	normal 8G37|r#
+	let winid1 = popup_create(['one', 'two', 'tee'], #{
+	      \ line: 'cursor+1',
+	      \ col: 'cursor',
+	      \ pos: 'topleft',
+	      \ posinvert: 0,
+	      \ border: [],
+	      \ })
+	" cursor in a line in top half, using "topleft" with popup that
+	" doesn't fit and "posinvert" set: flips to above.
+	normal 8G44|r%
+	let winid1 = popup_create(['one', 'two', 'tee', 'fou', 'fiv'], #{
+	      \ line: 'cursor+1',
+	      \ col: 'cursor',
+	      \ pos: 'topleft',
+	      \ border: [],
+	      \ })
+	" cursor in a line in top half, using "topleft" with popup that
+	" doesn't fit: does not flip.
+	normal 5G51|r*
+	let winid1 = popup_create(['aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff'], #{
+	      \ line: 'cursor+1',
+	      \ col: 'cursor',
+	      \ pos: 'topleft',
+	      \ border: [],
+	      \ })
+  END
+  call writefile(lines, 'XtestPopupNospace')
+  let buf = RunVimInTerminal('-S XtestPopupNospace', #{rows: 12})
+  call VerifyScreenDump(buf, 'Test_popupwin_nospace', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('XtestPopupNospace')
+endfunc
+
 func Test_popup_firstline()
   CheckScreendump
 
@@ -586,6 +679,7 @@ func Test_popup_with_mask()
 	    \], #{
 	    \ line: 1,
 	    \ col: 10,
+	    \ posinvert: 0,
 	    \ wrap: 0,
 	    \ fixed: 1,
 	    \ zindex: 90,
@@ -604,6 +698,7 @@ func Test_popup_with_mask()
 	    \], #{
 	    \ line: 7,
 	    \ col: 10,
+	    \ posinvert: 0,
 	    \ wrap: 0,
 	    \ fixed: 1,
 	    \ close: 'button',
@@ -1198,6 +1293,42 @@ func Test_popup_atcursor()
   call popup_close(winid)
 
   bwipe!
+endfunc
+
+func Test_popup_atcursor_pos()
+  CheckScreendump
+
+  let lines =<< trim END
+	call setline(1, repeat([repeat('-', 60)], 15))
+	set so=0
+
+	normal 9G3|r#
+	let winid1 = popup_atcursor(['first', 'second'], #{
+	      \ moved: [0, 0, 0],
+	      \ })
+	normal 9G21|r&
+	let winid1 = popup_atcursor(['FIrsT', 'SEcoND'], #{
+	      \ pos: 'botright',
+	      \ moved: [0, 0, 0],
+	      \ })
+	normal 3G27|r%
+	let winid1 = popup_atcursor(['fiRSt', 'seCOnd'], #{
+	      \ pos: 'topleft',
+	      \ moved: [0, 0, 0],
+	      \ })
+	normal 3G45|r@
+	let winid1 = popup_atcursor(['First', 'SeconD'], #{
+	      \ pos: 'topright',
+	      \ moved: [0, 0, 0],
+	      \ })
+  END
+  call writefile(lines, 'XtestPopupAtcursorPos')
+  let buf = RunVimInTerminal('-S XtestPopupAtcursorPos', #{rows: 12})
+  call VerifyScreenDump(buf, 'Test_popupwin_atcursor_pos', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('XtestPopupAtcursorPos')
 endfunc
 
 func Test_popup_beval()
@@ -2072,6 +2203,47 @@ func Test_popupwin_filter_mode()
   delfunc MyPopupFilter
 endfunc
 
+func Test_popupwin_filter_mouse()
+  func MyPopupFilter(winid, c)
+    let g:got_mouse_col = v:mouse_col
+    let g:got_mouse_lnum = v:mouse_lnum
+    let g:got_mouse_winid = v:mouse_winid
+    return 0
+  endfunc
+
+  let winid = popup_create(['short', 'long line that will wrap', 'short'], #{
+	\ line: 4,
+	\ col: 8,
+	\ maxwidth: 12,
+	\ filter: 'MyPopupFilter',
+	\ })
+  redraw
+  call test_setmouse(4, 8)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal(1, g:got_mouse_col)
+  call assert_equal(1, g:got_mouse_lnum)
+  call assert_equal(winid, g:got_mouse_winid)
+
+  call test_setmouse(5, 8)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal(1, g:got_mouse_col)
+  call assert_equal(2, g:got_mouse_lnum)
+
+  call test_setmouse(6, 8)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal(13, g:got_mouse_col)
+  call assert_equal(2, g:got_mouse_lnum)
+
+  call test_setmouse(7, 20)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call assert_equal(13, g:got_mouse_col)
+  call assert_equal(3, g:got_mouse_lnum)
+  call assert_equal(winid, g:got_mouse_winid)
+
+  call popup_close(winid)
+  delfunc MyPopupFilter
+endfunc
+
 func Test_popupwin_with_buffer()
   call writefile(['some text', 'in a buffer'], 'XsomeFile')
   let buf = bufadd('XsomeFile')
@@ -2443,6 +2615,23 @@ func Test_popup_cursorline()
   call StopVimInTerminal(buf)
 
   call delete('XtestPopupCursorLine')
+
+  " ---------
+  " Use current buffer for popupmenu
+  " ---------
+  let lines =<< trim END
+    call setline(1, ['one', 'two', 'three'])
+    let winid = popup_create(bufnr('%'), #{
+	  \ cursorline : 1,
+	  \ })
+    call win_execute(winid, "2")
+  END
+  call writefile(lines, 'XtestPopupCursorLine')
+  let buf = RunVimInTerminal('-S XtestPopupCursorLine', #{rows: 10})
+  call VerifyScreenDump(buf, 'Test_popupwin_cursorline_8', {})
+  call StopVimInTerminal(buf)
+
+  call delete('XtestPopupCursorLine')
 endfunc
 
 func Test_previewpopup()
@@ -2758,6 +2947,40 @@ func Test_popupwin_cancel()
   call assert_equal({}, popup_getpos(win1))
   call assert_equal({}, popup_getpos(win2))
   call assert_equal({}, popup_getpos(win3))
+endfunc
+
+func Test_popupwin_filter_redraw()
+  " Create two popups with a filter that closes the popup when typing "0".
+  " Both popups should close, even though the redraw also calls
+  " popup_reset_handled()
+
+  func CloseFilter(winid, key)
+    if a:key == '0'
+      call popup_close(a:winid)
+      redraw
+    endif
+    return 0  " pass the key
+  endfunc
+
+  let id1 = popup_create('first one', #{
+	\ line: 1,
+	\ col: 1,
+	\ filter: 'CloseFilter',
+	\ })
+  let id2 = popup_create('second one', #{
+	\ line: 9,
+	\ col: 1,
+	\ filter: 'CloseFilter',
+	\ })
+  call assert_equal(1, popup_getpos(id1).line)
+  call assert_equal(9, popup_getpos(id2).line)
+
+  call feedkeys('0', 'xt')
+  call assert_equal({}, popup_getpos(id1))
+  call assert_equal({}, popup_getpos(id2))
+
+  call popup_clear()
+  delfunc CloseFilter
 endfunc
 
 " vim: shiftwidth=2 sts=2
