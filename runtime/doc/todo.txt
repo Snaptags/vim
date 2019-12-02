@@ -1,4 +1,4 @@
-*todo.txt*      For Vim version 8.1.  Last change: 2019 Nov 13
+*todo.txt*      For Vim version 8.1.  Last change: 2019 Nov 30
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -38,40 +38,21 @@ browser use: https://github.com/vim/vim/issues/1234
 							*known-bugs*
 -------------------- Known bugs and current work -----------------------
 
-Add a function to fetch the mouse_lnum and mouse_col values?  Can be used in a
-mapping.  Remove setting v:mouse_lnum etc. from the popup filter, the values
-are wrong.
-
-Problem with cursor in wrong position: #5214
-
-Don't use javascriptreact but javascript.jsx?  #4830
-Although there is a good argument against using ".jsx".
-
-Update libvterm on github, rename termscreen.c back to screen.c.
-
-
 Popup windows:
 - Use popup (or popup menu) for command line completion
 - Implement flip option
 - Make redrawing more efficient and avoid flicker:
     - put popup menu also in popup_mask?
 - Any other commands to disable in a popup window?
-  Use ERROR_IF_POPUP_WINDOW for more commands.
-- Figure out the size and position better.
-    if wrapping splits a double-wide character
-    if wrapping inserts indent
-- When drawing on top half a double-wide character, display ">" or "<" in the
-  incomplete cell.
+  Use ERROR_IF_POPUP_WINDOW for these.
+- Figure out the size and position better if wrapping inserts indent
 
 Text properties:
 - Implement prop_find() issue #4970
-- Adjusting column/length when inserting text
 - Text properties spanning more than one line
-- See remakrs at top of src/textprop.c
+- See remarks at top of src/textprop.c
 
 'incsearch' with :s: 
-- Get E20 when using command history to get "'<,'>s/a/b" and no Visual area
-  was set. (issue #3837)
 - :s/foo  using CTRL-G moves to another line, should not happen, or use the
   correct line (it uses the last but one line) (Lifepillar, Aug 18, #3345)
 - :s@pat/tern@ doesn't include "/" in the pattern. (Takahiro Yoshihara, #3637)
@@ -145,20 +126,14 @@ Motif: Build on Ubuntu can't enter any text in dialog text fields.
 Patch to properly break CJK lines: Anton Kochkov, #3875
 Flag in 'formatoptions' is not used in the tests.
 
-Remove check for cmd_silent when calling search_stat()? (Gary Johnson)
-
 undo result wrong: Masato Nishihata, #4798
 
 Undo puts cursor in wrong line after "cG<Esc>" undo.
 
 Sound: support on Mac?  Or does libcanberra work there?
 
-Patch to user manual: #5098.  Comments by DC Slagel:
-- semicolon use should be OK.
-- Keep capital after colon.
-
-Patch to fix session file when using multiple tabs. (Jason Franklin, 2019 May
-20)
+Patch to fix session file when using multiple tab pages. (Jason Franklin, 2019
+May 20)
 Also put :argadd commands at the start for all buffers, so that their order
 remains equal?  Then %argdel to clean it up.  Do try this with 'hidden' set.
 Also #4994: window-local options not always restored, related to using :badd.
@@ -179,13 +154,6 @@ Adding "10" to 'spellsuggest' causes spell suggestions to become very slow.
 goes to any buffer, and then :bnext skips help buffers, since they are
 unlisted. (#4478)
 
-When 'selection' is "exclusive" then using vi' on the second ' does not select
-anything. (#5183)
-Patch from Christian: 
-https://github.com/chrisbra/vim/commit/7482d1d389e7db97e247f8b509003e5ec27427a9
-When using exclusive selection and vi" that fails, cursor moves to the left.
-Cursor should not move. (#4024)
-
 Enable 'termbidi' if $VTE_VERSION >= 5703 ?
 
 Universal solution to detect if t_RS is working, using cursor position.
@@ -194,12 +162,12 @@ Koichi Iwamoto, #2126
 The :syntax cchar value can only be a single character.  It would be useful to
 support combining characters. (Charles Campbell)  Also #4687
 
-Patch: New value "uselast" for 'switchbuf'. (Lemonboy, 2017 Apr 23, #1652)
-
 Include Haiku port. (Adrien Destugues, Siarzhuk Zharski, 2013 Oct 24)
 It can replace the BeOS code, which is likely not used anymore.
 Now on github: #1856.  Updated Oct 2017
 Got permission to include this under the Vim license.
+
+Result of synID() sometimes wrong in help files. (#5252)
 
 Problem showing a line if the number column width changes when using "o".
 (Mateusz Morusiewicz, #4245)
@@ -207,24 +175,14 @@ Problem showing a line if the number column width changes when using "o".
 When using :packadd for a replacement language plugin, it is loaded after the
 default one.  #4698
 
-Patch to remove FORTIFY_SOURCE also from CPPFLAGS. (Benedikt Morbach, #2786)
-
-Patch from Namsh to allow building with both XIM and hangulin. (2019 Aug 29)
-
 When using :packadd files under "later" are not used, which is inconsistent
 with packages under "start". (xtal8, #1994)
 
 Modeless selection doesn't work in gvim. (#4783)
 Caused by patch 8.1.1534.
 
-Patch to add random number generator. (Hong Xu, 2010 Nov 8, update Nov 10)
-Alternative from Christian Brabandt. (2010 Sep 19)
-New one from Yasuhiro Matsumoto, #1277.
-
 Visual highlight not removed when 'dipslay' is "lastline" and line doesn't
 fit. (Kevin Lawler, #4457)
-
-Patch to add interrupt(). (Yasuhiro Matsumoto, #2834)
 
 Patch to add per-tabpage and per-window previous directory: "lcd -" and "tcd
 -". (Yegappan Lakshmanan, #4362)
@@ -258,7 +216,7 @@ Add a WindowScrolled event.  Trigger around the same time as CursorMoved.
 Can be used to update highlighting. #3127  #5181
 
 Patch for Template string: #4491.  New pull: #4634
-Have another look at the implementation: Is the code worth it?
+Implementation is too inefficient, avoid using lambda.
 
 Incorrect formatting with autoindent. (Sebastian Gniazdowski, #4909)
 
@@ -578,9 +536,6 @@ How would we know that the status line needs to be updated?
 
 Adjust windows installer explanation of behavior. (scootergrisen, #3310)
 
-Set g:actual_curbuf when evaluating 'statusline', not just with an expression.
-(Daniel Hahler, 2018 Aug 8, #3299)
-
 Update for xim-input-style help (Tony Mechelynck, 2019 Jan 10).
 Feedback from someone who uses this?
 
@@ -682,9 +637,6 @@ is a match, remove entries for the buffer from marks, jumplist, etc.  To be
 used for git temp files.
 
 Cursor in wrong position when line wraps. (#2540)
-
-Patch to parse ":line" in tags file and use it for search. (Daniel Hahler,
-#2546)  Fixes #1057.  Missing a test.
 
 Setting 'columns' in a BufEnter autocommand causes a second tab width to
 behave strangely, as if there is a gap and a vertical window separator.

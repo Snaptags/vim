@@ -304,7 +304,7 @@ has_compl_option(int dict_opt)
 #ifdef FEAT_EVAL
 	    if (!get_vim_var_nr(VV_TESTING))
 #endif
-		ui_delay(2000L, FALSE);
+		ui_delay(2004L, FALSE);
 	}
 	return FALSE;
     }
@@ -1811,7 +1811,7 @@ ins_compl_prep(int c)
 	    || c == K_MOUSELEFT || c == K_MOUSERIGHT)
 	return retval;
 
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
     // Ignore mouse events in a popup window
     if (is_mouse_key(c))
     {

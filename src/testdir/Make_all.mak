@@ -154,6 +154,7 @@ NEW_TESTS = \
 	test_increment \
 	test_increment_dbcs \
 	test_ins_complete \
+	test_interrupt \
 	test_job_fails \
 	test_join \
 	test_json \
@@ -210,6 +211,7 @@ NEW_TESTS = \
 	test_pyx3 \
 	test_quickfix \
 	test_quotestar \
+	test_random \
 	test_recover \
 	test_regex_char_classes \
 	test_regexp_latin \
@@ -361,6 +363,7 @@ NEW_TESTS_RES = \
 	test_increment.res \
 	test_increment_dbcs.res \
 	test_ins_complete.res \
+	test_interrupt.res \
 	test_job_fails.res \
 	test_json.res \
 	test_jumplist.res \
@@ -401,6 +404,7 @@ NEW_TESTS_RES = \
 	test_pyx3.res \
 	test_quickfix.res \
 	test_quotestar.res \
+	test_random.res \
 	test_regex_char_classes.res \
 	test_registers.res \
 	test_restricted.res \

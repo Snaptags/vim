@@ -206,14 +206,15 @@ op_shift(oparg_T *oap, int curs_top, int amount)
 	msg((char *)IObuff);
     }
 
-    /*
-     * Set "'[" and "']" marks.
-     */
-    curbuf->b_op_start = oap->start;
-    curbuf->b_op_end.lnum = oap->end.lnum;
-    curbuf->b_op_end.col = (colnr_T)STRLEN(ml_get(oap->end.lnum));
-    if (curbuf->b_op_end.col > 0)
-	--curbuf->b_op_end.col;
+    if (!cmdmod.lockmarks)
+    {
+	// Set "'[" and "']" marks.
+	curbuf->b_op_start = oap->start;
+	curbuf->b_op_end.lnum = oap->end.lnum;
+	curbuf->b_op_end.col = (colnr_T)STRLEN(ml_get(oap->end.lnum));
+	if (curbuf->b_op_end.col > 0)
+	    --curbuf->b_op_end.col;
+    }
 }
 
 /*
@@ -827,7 +828,7 @@ op_delete(oparg_T *oap)
 	    /* replace the line */
 	    ml_replace(lnum, newp, FALSE);
 
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
 	    if (curbuf->b_has_textprop && n != 0)
 		adjust_prop_columns(lnum, bd.textcol, -n, 0);
 #endif
@@ -981,14 +982,17 @@ op_delete(oparg_T *oap)
     msgmore(curbuf->b_ml.ml_line_count - old_lcount);
 
 setmarks:
-    if (oap->block_mode)
+    if (!cmdmod.lockmarks)
     {
-	curbuf->b_op_end.lnum = oap->end.lnum;
-	curbuf->b_op_end.col = oap->start.col;
+	if (oap->block_mode)
+	{
+	    curbuf->b_op_end.lnum = oap->end.lnum;
+	    curbuf->b_op_end.col = oap->start.col;
+	}
+	else
+	    curbuf->b_op_end = oap->start;
+	curbuf->b_op_start = oap->start;
     }
-    else
-	curbuf->b_op_end = oap->start;
-    curbuf->b_op_start = oap->start;
 
     return OK;
 }
@@ -1252,9 +1256,12 @@ op_replace(oparg_T *oap, int c)
     check_cursor();
     changed_lines(oap->start.lnum, oap->start.col, oap->end.lnum + 1, 0L);
 
-    /* Set "'[" and "']" marks. */
-    curbuf->b_op_start = oap->start;
-    curbuf->b_op_end = oap->end;
+    if (!cmdmod.lockmarks)
+    {
+	/* Set "'[" and "']" marks. */
+	curbuf->b_op_start = oap->start;
+	curbuf->b_op_end = oap->end;
+    }
 
     return OK;
 }
@@ -1362,11 +1369,12 @@ op_tilde(oparg_T *oap)
 	/* No change: need to remove the Visual selection */
 	redraw_curbuf_later(INVERTED);
 
-    /*
-     * Set '[ and '] marks.
-     */
-    curbuf->b_op_start = oap->start;
-    curbuf->b_op_end = oap->end;
+    if (!cmdmod.lockmarks)
+    {
+	// Set '[ and '] marks.
+	curbuf->b_op_start = oap->start;
+	curbuf->b_op_end = oap->end;
+    }
 
     if (oap->line_count > p_report)
 	smsg(NGETTEXT("%ld line changed", "%ld lines changed",
@@ -1940,7 +1948,7 @@ do_join(
     int		remove_comments = (use_formatoptions == TRUE)
 				  && has_format_option(FO_REMOVE_COMS);
     int		prev_was_comment;
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
     textprop_T	**prop_lines = NULL;
     int		*prop_lengths = NULL;
 #endif
@@ -1973,7 +1981,7 @@ do_join(
     for (t = 0; t < count; ++t)
     {
 	curr = curr_start = ml_get((linenr_T)(curwin->w_cursor.lnum + t));
-	if (t == 0 && setmark)
+	if (t == 0 && setmark && !cmdmod.lockmarks)
 	{
 	    /* Set the '[ mark. */
 	    curwin->w_buffer->b_op_start.lnum = curwin->w_cursor.lnum;
@@ -2064,7 +2072,7 @@ do_join(
     cend = newp + sumsize;
     *cend = 0;
 
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
     // We need to move properties of the lines that are going to be deleted to
     // the new long one.
     if (curbuf->b_has_textprop && !text_prop_frozen)
@@ -2106,7 +2114,7 @@ do_join(
 			 (long)(cend - newp - spaces_removed), spaces_removed);
 	if (t == 0)
 	    break;
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
 	if (prop_lines != NULL)
 	    adjust_props_for_join(curwin->w_cursor.lnum + t,
 				      prop_lines + t - 1, prop_lengths + t - 1,
@@ -2121,7 +2129,7 @@ do_join(
 	currsize = (int)STRLEN(curr);
     }
 
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
     if (prop_lines != NULL)
 	join_prop_lines(curwin->w_cursor.lnum, newp,
 					      prop_lines, prop_lengths, count);
@@ -2129,7 +2137,7 @@ do_join(
 #endif
 	ml_replace(curwin->w_cursor.lnum, newp, FALSE);
 
-    if (setmark)
+    if (setmark && !cmdmod.lockmarks)
     {
 	/* Set the '] mark. */
 	curwin->w_buffer->b_op_end.lnum = curwin->w_cursor.lnum;
@@ -2268,8 +2276,9 @@ op_format(
 	/* When there is no change: need to remove the Visual selection */
 	redraw_curbuf_later(INVERTED);
 
-    /* Set '[ mark at the start of the formatted area */
-    curbuf->b_op_start = oap->start;
+    if (!cmdmod.lockmarks)
+	/* Set '[ mark at the start of the formatted area */
+	curbuf->b_op_start = oap->start;
 
     /* For "gw" remember the cursor position and put it back below (adjusted
      * for joined and split lines). */
@@ -2289,8 +2298,9 @@ op_format(
     old_line_count = curbuf->b_ml.ml_line_count - old_line_count;
     msgmore(old_line_count);
 
-    /* put '] mark on the end of the formatted area */
-    curbuf->b_op_end = curwin->w_cursor;
+    if (!cmdmod.lockmarks)
+	/* put '] mark on the end of the formatted area */
+	curbuf->b_op_end = curwin->w_cursor;
 
     if (keep_cursor)
     {
@@ -2984,7 +2994,7 @@ op_addsub(
 
 	/* Set '[ mark if something changed. Keep the last end
 	 * position from do_addsub(). */
-	if (change_cnt > 0)
+	if (change_cnt > 0 && !cmdmod.lockmarks)
 	    curbuf->b_op_start = startpos;
 
 	if (change_cnt > p_report)
@@ -3384,7 +3394,7 @@ do_addsub(
 	    --curwin->w_cursor.col;
     }
 
-    if (did_change)
+    if (did_change && !cmdmod.lockmarks)
     {
 	/* set the '[ and '] marks */
 	curbuf->b_op_start = startpos;
@@ -3905,6 +3915,8 @@ op_function(oparg_T *oap UNUSED)
 #ifdef FEAT_EVAL
     typval_T	argv[2];
     int		save_virtual_op = virtual_op;
+    pos_T	orig_start = curbuf->b_op_start;
+    pos_T	orig_end = curbuf->b_op_end;
 
     if (*p_opfunc == NUL)
 	emsg(_("E774: 'operatorfunc' is empty"));
@@ -3933,6 +3945,11 @@ op_function(oparg_T *oap UNUSED)
 	(void)call_func_retnr(p_opfunc, 1, argv);
 
 	virtual_op = save_virtual_op;
+	if (cmdmod.lockmarks)
+	{
+	    curbuf->b_op_start = orig_start;
+	    curbuf->b_op_end = orig_end;
+	}
     }
 #else
     emsg(_("E775: Eval feature not available"));

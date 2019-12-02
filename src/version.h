@@ -24,7 +24,7 @@
 #define VIM_VERSION_BUILD_STR		"2300"
 #define VIM_VERSION_PATCHLEVEL		 0
 #define VIM_VERSION_PATCHLEVEL_STR	"0"
-/* Used by MacOS port should be one of: development, alpha, beta, final */
+// Used by MacOS port should be one of: development, alpha, beta, final
 #define VIM_VERSION_RELEASE		final
 
 /*

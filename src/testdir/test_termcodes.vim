@@ -674,8 +674,11 @@ func Test_term_mouse_drag_to_move_tab()
         \              'Tab page 2',
         \              '    Xtab1'], a, msg)
 
-    " brief sleep to avoid causing a double-click
-    sleep 20m
+    " Click elsewhere so that click in next iteration is not
+    " interpreted as unwanted double-click.
+    call MouseLeftClick(row, 11)
+    call MouseLeftRelease(row, 11)
+
     %bwipe!
   endfor
 
@@ -693,23 +696,15 @@ func Test_term_mouse_double_click_to_create_tab()
   call test_override('no_query_mouse', 1)
   " Set 'mousetime' to a small value, so that double-click works but we don't
   " have to wait long to avoid a triple-click.
-  set mouse=a term=xterm mousetime=100
+  set mouse=a term=xterm mousetime=200
   let row = 1
   let col = 10
 
-  let round = 0
   for ttymouse_val in s:ttymouse_values + s:ttymouse_dec
     let msg = 'ttymouse=' .. ttymouse_val
     exe 'set ttymouse=' .. ttymouse_val
     e Xtab1
     tabnew Xtab2
-
-    if round > 0
-      " We need to sleep, or else the first MouseLeftClick() will be
-      " interpreted as a spurious triple-click.
-      sleep 100m
-    endif
-    let round += 1
 
     let a = split(execute(':tabs'), "\n")
     call assert_equal(['Tab page 1',
@@ -734,6 +729,11 @@ func Test_term_mouse_double_click_to_create_tab()
         \              'Tab page 3',
         \              '    Xtab2'], a, msg)
 
+    " Click elsewhere so that click in next iteration is not
+    " interpreted as unwanted double click.
+    call MouseLeftClick(row, col + 1)
+    call MouseLeftRelease(row, col + 1)
+
     %bwipe!
   endfor
 
@@ -742,6 +742,83 @@ func Test_term_mouse_double_click_to_create_tab()
   let &ttymouse = save_ttymouse
   call test_override('no_query_mouse', 0)
   set mousetime&
+endfunc
+
+" Test double/triple/quadruple click in normal mode to visually select.
+func Test_term_mouse_multiple_clicks_to_visually_select()
+  let save_mouse = &mouse
+  let save_term = &term
+  let save_ttymouse = &ttymouse
+  call test_override('no_query_mouse', 1)
+  set mouse=a term=xterm mousetime=200
+  new
+
+  for ttymouse_val in s:ttymouse_values + s:ttymouse_dec
+    let msg = 'ttymouse=' .. ttymouse_val
+    exe 'set ttymouse=' .. ttymouse_val
+    call setline(1, ['foo [foo bar] foo', 'foo'])
+
+    " Double-click on word should visually select the word.
+    call MouseLeftClick(1, 2)
+    call assert_equal(0, getcharmod(), msg)
+    call MouseLeftRelease(1, 2)
+    call MouseLeftClick(1, 2)
+    call assert_equal(32, getcharmod(), msg) " double-click
+    call MouseLeftRelease(1, 2)
+    call assert_equal('v', mode(), msg)
+    norm! r1
+    call assert_equal(['111 [foo bar] foo', 'foo'], getline(1, '$'), msg)
+
+    " Double-click on opening square bracket should visually
+    " select the whole [foo bar].
+    call MouseLeftClick(1, 5)
+    call assert_equal(0, getcharmod(), msg)
+    call MouseLeftRelease(1, 5)
+    call MouseLeftClick(1, 5)
+    call assert_equal(32, getcharmod(), msg) " double-click
+    call MouseLeftRelease(1, 5)
+    call assert_equal('v', mode(), msg)
+    norm! r2
+    call assert_equal(['111 222222222 foo', 'foo'], getline(1, '$'), msg)
+
+    " Triple-click should visually select the whole line.
+    call MouseLeftClick(1, 3)
+    call assert_equal(0, getcharmod(), msg)
+    call MouseLeftRelease(1, 3)
+    call MouseLeftClick(1, 3)
+    call assert_equal(32, getcharmod(), msg) " double-click
+    call MouseLeftRelease(1, 3)
+    call MouseLeftClick(1, 3)
+    call assert_equal(64, getcharmod(), msg) " triple-click
+    call MouseLeftRelease(1, 3)
+    call assert_equal('V', mode(), msg)
+    norm! r3
+    call assert_equal(['33333333333333333', 'foo'], getline(1, '$'), msg)
+
+    " Quadruple-click should start visual block select.
+    call MouseLeftClick(1, 2)
+    call assert_equal(0, getcharmod(), msg)
+    call MouseLeftRelease(1, 2)
+    call MouseLeftClick(1, 2)
+    call assert_equal(32, getcharmod(), msg) " double-click
+    call MouseLeftRelease(1, 2)
+    call MouseLeftClick(1, 2)
+    call assert_equal(64, getcharmod(), msg) " triple-click
+    call MouseLeftRelease(1, 2)
+    call MouseLeftClick(1, 2)
+    call assert_equal(96, getcharmod(), msg) " quadruple-click
+    call MouseLeftRelease(1, 2)
+    call assert_equal("\<c-v>", mode(), msg)
+    norm! r4
+    call assert_equal(['34333333333333333', 'foo'], getline(1, '$'), msg)
+  endfor
+
+  let &mouse = save_mouse
+  let &term = save_term
+  let &ttymouse = save_ttymouse
+  set mousetime&
+  call test_override('no_query_mouse', 0)
+  bwipe!
 endfunc
 
 func Test_xterm_mouse_click_in_fold_columns()
@@ -1115,6 +1192,14 @@ func RunTest_modifyOtherKeys(func)
   call feedkeys('a' .. a:func('X', 9) .. "\<Esc>", 'Lx!')
   call assert_equal("Ø", getline(1))
 
+  " Ctrl-6 is Ctrl-^
+  split aaa
+  edit bbb
+  call feedkeys(a:func('6', 5), 'Lx!')
+  call assert_equal("aaa", bufname())
+  bwipe aaa
+  bwipe bbb
+
   bwipe!
   set timeoutlen&
 endfunc
@@ -1122,6 +1207,27 @@ endfunc
 func Test_modifyOtherKeys_basic()
   call RunTest_modifyOtherKeys(function('GetEscCodeCSI27'))
   call RunTest_modifyOtherKeys(function('GetEscCodeCSIu'))
+endfunc
+
+func Test_modifyOtherKeys_no_mapping()
+  set timeoutlen=10
+
+  let @a = 'aaa'
+  call feedkeys(":let x = '" .. GetEscCodeCSI27('R', 5) .. GetEscCodeCSI27('R', 5) .. "a'\<CR>", 'Lx!')
+  call assert_equal("let x = 'aaa'", @:)
+
+  new
+  call feedkeys("a" .. GetEscCodeCSI27('R', 5) .. GetEscCodeCSI27('R', 5) .. "a\<Esc>", 'Lx!')
+  call assert_equal("aaa", getline(1))
+  bwipe!
+
+  new
+  call feedkeys("axx\<CR>yy" .. GetEscCodeCSI27('G', 5) .. GetEscCodeCSI27('K', 5) .. "a\<Esc>", 'Lx!')
+  call assert_equal("axx", getline(1))
+  call assert_equal("yy", getline(2))
+  bwipe!
+
+  set timeoutlen&
 endfunc
 
 func RunTest_mapping_shift(key, func)
@@ -1242,4 +1348,49 @@ endfunc
 func Test_mapping_works_with_shift_ctrl_alt()
   call RunTest_mapping_works_with_mods(function('GetEscCodeCSI27'), 'C-S-A', 8)
   call RunTest_mapping_works_with_mods(function('GetEscCodeCSIu'), 'C-S-A', 8)
+endfunc
+
+func Test_insert_literal()
+  set timeoutlen=10
+  new
+  " CTRL-V CTRL-X inserts a ^X
+  call feedkeys('a' .. GetEscCodeCSIu('V', '5') .. GetEscCodeCSIu('X', '5') .. "\<Esc>", 'Lx!')
+  call assert_equal("\<C-X>", getline(1))
+
+  call setline(1, '')
+  call feedkeys('a' .. GetEscCodeCSI27('V', '5') .. GetEscCodeCSI27('X', '5') .. "\<Esc>", 'Lx!')
+  call assert_equal("\<C-X>", getline(1))
+
+  " CTRL-SHIFT-V CTRL-X inserts escape sequencd
+  call setline(1, '')
+  call feedkeys('a' .. GetEscCodeCSIu('V', '6') .. GetEscCodeCSIu('X', '5') .. "\<Esc>", 'Lx!')
+  call assert_equal("\<Esc>[88;5u", getline(1))
+
+  call setline(1, '')
+  call feedkeys('a' .. GetEscCodeCSI27('V', '6') .. GetEscCodeCSI27('X', '5') .. "\<Esc>", 'Lx!')
+  call assert_equal("\<Esc>[27;5;88~", getline(1))
+
+  bwipe!
+  set timeoutlen&
+endfunc
+
+func Test_cmdline_literal()
+  set timeoutlen=10
+
+  " CTRL-V CTRL-Y inserts a ^Y
+  call feedkeys(':' .. GetEscCodeCSIu('V', '5') .. GetEscCodeCSIu('Y', '5') .. "\<C-B>\"\<CR>", 'Lx!')
+  call assert_equal("\"\<C-Y>", @:)
+
+  call feedkeys(':' .. GetEscCodeCSI27('V', '5') .. GetEscCodeCSI27('Y', '5') .. "\<C-B>\"\<CR>", 'Lx!')
+  call assert_equal("\"\<C-Y>", @:)
+
+  " CTRL-SHIFT-V CTRL-Y inserts escape sequencd
+  call feedkeys(':' .. GetEscCodeCSIu('V', '6') .. GetEscCodeCSIu('Y', '5') .. "\<C-B>\"\<CR>", 'Lx!')
+  call assert_equal("\"\<Esc>[89;5u", @:)
+
+  call setline(1, '')
+  call feedkeys(':' .. GetEscCodeCSI27('V', '6') .. GetEscCodeCSI27('Y', '5') .. "\<C-B>\"\<CR>", 'Lx!')
+  call assert_equal("\"\<Esc>[27;5;89~", @:)
+
+  set timeoutlen&
 endfunc

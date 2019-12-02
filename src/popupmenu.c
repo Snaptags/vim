@@ -429,7 +429,7 @@ pum_redraw(void)
 						    / (pum_size - pum_height);
     }
 
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
     // The popup menu is drawn over popup menus with zindex under
     // POPUPMENU_ZINDEX.
     screen_zindex = POPUPMENU_ZINDEX;
@@ -616,19 +616,19 @@ pum_redraw(void)
 	++row;
     }
 
-#ifdef FEAT_TEXT_PROP
+#ifdef FEAT_PROP_POPUP
     screen_zindex = 0;
 #endif
 }
 
-#if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
+#if (defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)) || defined(PROTO)
 /*
  * Position the info popup relative to the popup menu item.
  */
     void
 pum_position_info_popup(win_T *wp)
 {
-    int col = pum_col + pum_width + 1;
+    int col = pum_col + pum_width + pum_scrollbar + 1;
     int row = pum_row;
     int botpos = POPPOS_BOTLEFT;
 
@@ -683,7 +683,7 @@ pum_set_selected(int n, int repeat UNUSED)
 #ifdef FEAT_QUICKFIX
     int	    prev_selected = pum_selected;
 #endif
-#ifdef FEAT_TEXT_PROP
+#if defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)
     int	    has_info = FALSE;
 #endif
 
@@ -745,7 +745,7 @@ pum_set_selected(int n, int repeat UNUSED)
 #if defined(FEAT_QUICKFIX)
 	/*
 	 * Show extra info in the preview window if there is something and
-	 * 'completeopt' contains "preview" or "popup".
+	 * 'completeopt' contains "preview" or "popup" or "popuphidden".
 	 * Skip this when tried twice already.
 	 * Skip this also when there is not much room.
 	 * NOTE: Be very careful not to sync undo!
@@ -758,12 +758,12 @@ pum_set_selected(int n, int repeat UNUSED)
 	    win_T	*curwin_save = curwin;
 	    tabpage_T   *curtab_save = curtab;
 	    int		res = OK;
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 	    use_popup_T	use_popup;
 # else
-#  define use_popup POPUP_NONE
+#  define use_popup USEPOPUP_NONE
 # endif
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 	    has_info = TRUE;
 	    if (strstr((char *)p_cot, "popuphidden") != NULL)
 		use_popup = USEPOPUP_HIDDEN;
@@ -787,7 +787,7 @@ pum_set_selected(int n, int repeat UNUSED)
 	    g_do_tagpreview = 0;
 
 	    if (curwin->w_p_pvw
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 		    || (curwin->w_popup_flags & POPF_INFO)
 # endif
 		    )
@@ -862,7 +862,7 @@ pum_set_selected(int n, int repeat UNUSED)
 		    curbuf->b_p_ma = FALSE;
 		    if (pum_selected != prev_selected)
 		    {
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 			curwin->w_firstline = 1;
 # endif
 			curwin->w_topline = 1;
@@ -871,7 +871,7 @@ pum_set_selected(int n, int repeat UNUSED)
 			curwin->w_topline = curbuf->b_ml.ml_line_count;
 		    curwin->w_cursor.lnum = curwin->w_topline;
 		    curwin->w_cursor.col = 0;
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 		    if (use_popup != USEPOPUP_NONE)
 		    {
 			pum_position_info_popup(curwin);
@@ -916,13 +916,13 @@ pum_set_selected(int n, int repeat UNUSED)
 
 			if (!resized && win_valid(curwin_save))
 			{
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 			    win_T *wp = curwin;
 # endif
 			    ++no_u_sync;
 			    win_enter(curwin_save, TRUE);
 			    --no_u_sync;
-# ifdef FEAT_TEXT_PROP
+# ifdef FEAT_PROP_POPUP
 			    if (use_popup == USEPOPUP_HIDDEN && win_valid(wp))
 				popup_hide(wp);
 # endif
@@ -937,7 +937,7 @@ pum_set_selected(int n, int repeat UNUSED)
 		    }
 		}
 	    }
-# if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
+# if defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)
 	    if (WIN_IS_POPUP(curwin))
 		// can't keep focus in a popup window
 		win_enter(firstwin, TRUE);
@@ -945,7 +945,7 @@ pum_set_selected(int n, int repeat UNUSED)
 	}
 #endif
     }
-#if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
+#if defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)
     if (!has_info)
 	// hide any popup info window
 	popup_hide_info();
@@ -967,7 +967,7 @@ pum_undisplay(void)
     redraw_all_later(NOT_VALID);
     redraw_tabline = TRUE;
     status_redraw_all();
-#if defined(FEAT_TEXT_PROP) && defined(FEAT_QUICKFIX)
+#if defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)
     // hide any popup info window
     popup_hide_info();
 #endif
@@ -1209,42 +1209,46 @@ split_message(char_u *mesg, pumitem_T **array)
 	int	cells;
 
 	item = ((balpart_T *)ga.ga_data) + item_idx;
-	for (skip = 0; skip < item->bytelen; skip += thislen)
-	{
-	    if (split_long_items && item->cells >= BALLOON_MIN_WIDTH)
+	if (item->bytelen == 0)
+	    (*array)[line++].pum_text = vim_strsave((char_u *)"");
+	else
+	    for (skip = 0; skip < item->bytelen; skip += thislen)
 	    {
-		cells = item->indent * 2;
-		for (p = item->start + skip; p < item->start + item->bytelen;
+		if (split_long_items && item->cells >= BALLOON_MIN_WIDTH)
+		{
+		    cells = item->indent * 2;
+		    for (p = item->start + skip;
+			    p < item->start + item->bytelen;
 							    p += mb_ptr2len(p))
-		    if ((cells += ptr2cells(p)) > BALLOON_MIN_WIDTH)
+			if ((cells += ptr2cells(p)) > BALLOON_MIN_WIDTH)
+			    break;
+		    thislen = p - (item->start + skip);
+		}
+		else
+		    thislen = item->bytelen;
+
+		// put indent at the start
+		p = alloc(thislen + item->indent * 2 + 1);
+		if (p == NULL)
+		{
+		    for (line = 0; line <= height - 1; ++line)
+			vim_free((*array)[line].pum_text);
+		    vim_free(*array);
+		    goto failed;
+		}
+		for (ind = 0; ind < item->indent * 2; ++ind)
+		    p[ind] = ' ';
+
+		// exclude spaces at the end of the string
+		for (copylen = thislen; copylen > 0; --copylen)
+		    if (item->start[skip + copylen - 1] != ' ')
 			break;
-		thislen = p - (item->start + skip);
+
+		vim_strncpy(p + ind, item->start + skip, copylen);
+		(*array)[line].pum_text = p;
+		item->indent = 0;  /* wrapped line has no indent */
+		++line;
 	    }
-	    else
-		thislen = item->bytelen;
-
-	    // put indent at the start
-	    p = alloc(thislen + item->indent * 2 + 1);
-	    if (p == NULL)
-	    {
-		for (line = 0; line <= height - 1; ++line)
-		    vim_free((*array)[line].pum_text);
-		vim_free(*array);
-		goto failed;
-	    }
-	    for (ind = 0; ind < item->indent * 2; ++ind)
-		p[ind] = ' ';
-
-	    // exclude spaces at the end of the string
-	    for (copylen = thislen; copylen > 0; --copylen)
-		if (item->start[skip + copylen - 1] != ' ')
-		    break;
-
-	    vim_strncpy(p + ind, item->start + skip, copylen);
-	    (*array)[line].pum_text = p;
-	    item->indent = 0;  /* wrapped line has no indent */
-	    ++line;
-	}
     }
     ga_clear(&ga);
     return height;

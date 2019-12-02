@@ -1175,10 +1175,13 @@ curs_columns(
 	redraw_later(SOME_VALID);
 #endif
 
+    // now w_leftcol is valid, avoid check_cursor_moved() thinking otherwise
+    curwin->w_valid_leftcol = curwin->w_leftcol;
+
     curwin->w_valid |= VALID_WCOL|VALID_WROW|VALID_VIRTCOL;
 }
 
-#if (defined(FEAT_EVAL) || defined(FEAT_TEXT_PROP)) || defined(PROTO)
+#if (defined(FEAT_EVAL) || defined(FEAT_PROP_POPUP)) || defined(PROTO)
 /*
  * Compute the screen position of text character at "pos" in window "wp"
  * The resulting values are one-based, zero when character is not visible.
