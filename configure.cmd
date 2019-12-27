@@ -38,9 +38,9 @@ set PYTHON3=c:\Python37
 set PYTHON3_VER=37
 
 :: Enable Perl scripting
-set DYNAMIC_PERL=yes
-set PERL=c:\Strawberry\524\perl
-set PERL_VER=524
+:: set DYNAMIC_PERL=yes
+:: set PERL=c:\Strawberry\524\perl
+:: set PERL_VER=524
 
 echo "Updating version numbers from git..."
 call c:\Python37\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
