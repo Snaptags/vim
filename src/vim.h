@@ -33,7 +33,7 @@
  * test program.  Other items from configure may also be wrong then!
  */
 # if (VIM_SIZEOF_INT == 0)
-    Error: configure did not run properly.  Check auto/config.log.
+#  error configure did not run properly.  Check auto/config.log.
 # endif
 
 # if (defined(__linux__) && !defined(__ANDROID__)) || defined(__CYGWIN__)
@@ -148,7 +148,7 @@
 #endif
 
 #if VIM_SIZEOF_INT < 4 && !defined(PROTO)
-    Error: Vim only works with 32 bit int or larger
+# error Vim only works with 32 bit int or larger
 #endif
 
 /*
@@ -1303,6 +1303,7 @@ enum auto_event
     EVENT_COLORSCHEMEPRE,	// before loading a colorscheme
     EVENT_COMPLETECHANGED,	// after completion popup menu changed
     EVENT_COMPLETEDONE,		// after finishing insert complete
+    EVENT_COMPLETEDONEPRE,	// idem, before clearing info
     EVENT_CURSORHOLD,		// cursor in same position for a while
     EVENT_CURSORHOLDI,		// idem, in Insert mode
     EVENT_CURSORMOVED,		// cursor was moved
@@ -2150,6 +2151,10 @@ typedef enum {
     USEPOPUP_NORMAL,	// use info popup
     USEPOPUP_HIDDEN	// use info popup initially hidden
 } use_popup_T;
+
+// Flags for assignment functions.
+#define LET_IS_CONST	1   // ":const"
+#define LET_NO_COMMAND	2   // "var = expr" without ":let" or ":const"
 
 #include "ex_cmds.h"	    // Ex command defines
 #include "spell.h"	    // spell checking stuff

@@ -2263,7 +2263,10 @@ channel_get_json(
     while (item != NULL)
     {
 	list_T	    *l = item->jq_value->vval.v_list;
-	typval_T    *tv = &l->lv_first->li_tv;
+	typval_T    *tv;
+
+	range_list_materialize(l);
+	tv = &l->lv_first->li_tv;
 
 	if ((without_callback || !item->jq_no_callback)
 	    && ((id > 0 && tv->v_type == VAR_NUMBER && tv->vval.v_number == id)
@@ -5120,6 +5123,7 @@ get_job_options(typval_T *tv, jobopt_T *opt, int supported, int supported2)
 		    return FAIL;
 		}
 
+		range_list_materialize(item->vval.v_list);
 		li = item->vval.v_list->lv_first;
 		for (; li != NULL && n < 16; li = li->li_next, n++)
 		{
@@ -5526,6 +5530,7 @@ win32_build_cmd(list_T *l, garray_T *gap)
     listitem_T  *li;
     char_u	*s;
 
+    range_list_materialize(l);
     for (li = l->lv_first; li != NULL; li = li->li_next)
     {
 	s = tv_get_string_chk(&li->li_tv);
@@ -5993,7 +5998,7 @@ theend:
 #ifndef USE_ARGV
     vim_free(ga.ga_data);
 #endif
-    if (argv != job->jv_argv)
+    if (argv != NULL && argv != job->jv_argv)
     {
 	for (i = 0; argv[i] != NULL; i++)
 	    vim_free(argv[i]);
