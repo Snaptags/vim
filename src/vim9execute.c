@@ -488,7 +488,7 @@ call_def_function(
 		++ectx.ec_stack.ga_len;
 		break;
 
-	    // load s: variable in vim9script
+	    // load s: variable in Vim9 script
 	    case ISN_LOADSCRIPT:
 		{
 		    scriptitem_T *si =
@@ -507,12 +507,13 @@ call_def_function(
 	    // load s: variable in old script
 	    case ISN_LOADS:
 		{
-		    hashtab_T	*ht = &SCRIPT_VARS(iptr->isn_arg.loads.ls_sid);
-		    char_u	*name = iptr->isn_arg.loads.ls_name;
+		    hashtab_T	*ht = &SCRIPT_VARS(
+					       iptr->isn_arg.loadstore.ls_sid);
+		    char_u	*name = iptr->isn_arg.loadstore.ls_name;
 		    dictitem_T	*di = find_var_in_ht(ht, 0, name, TRUE);
 		    if (di == NULL)
 		    {
-			semsg(_("E121: Undefined variable: s:%s"), name);
+			semsg(_(e_undefvar), name);
 			goto failed;
 		    }
 		    else
@@ -601,7 +602,26 @@ call_def_function(
 		*tv = *STACK_TV_BOT(0);
 		break;
 
-	    // store script-local variable
+	    // store s: variable in old script
+	    case ISN_STORES:
+		{
+		    hashtab_T	*ht = &SCRIPT_VARS(
+					       iptr->isn_arg.loadstore.ls_sid);
+		    char_u	*name = iptr->isn_arg.loadstore.ls_name;
+		    dictitem_T	*di = find_var_in_ht(ht, 0, name, TRUE);
+
+		    if (di == NULL)
+		    {
+			semsg(_(e_undefvar), name);
+			goto failed;
+		    }
+		    --ectx.ec_stack.ga_len;
+		    clear_tv(&di->di_tv);
+		    di->di_tv = *STACK_TV_BOT(0);
+		}
+		break;
+
+	    // store script-local variable in Vim9 script
 	    case ISN_STORESCRIPT:
 		{
 		    scriptitem_T *si = SCRIPT_ITEM(
@@ -646,6 +666,32 @@ call_def_function(
 		    }
 		    clear_tv(tv);
 		}
+		break;
+
+	    // store $ENV
+	    case ISN_STOREENV:
+		--ectx.ec_stack.ga_len;
+		vim_setenv_ext(iptr->isn_arg.string,
+					       tv_get_string(STACK_TV_BOT(0)));
+		break;
+
+	    // store @r
+	    case ISN_STOREREG:
+		{
+		    int	reg = iptr->isn_arg.number;
+
+		    --ectx.ec_stack.ga_len;
+		    write_reg_contents(reg == '@' ? '"' : reg,
+				    tv_get_string(STACK_TV_BOT(0)), -1, FALSE);
+		}
+		break;
+
+	    // store v: variable
+	    case ISN_STOREV:
+		--ectx.ec_stack.ga_len;
+		if (set_vim_var_tv(iptr->isn_arg.number, STACK_TV_BOT(0))
+								       == FAIL)
+		    goto failed;
 		break;
 
 	    // store g: variable
@@ -1502,21 +1548,26 @@ failed:
 ex_disassemble(exarg_T *eap)
 {
 #ifdef DISASSEMBLE
-    ufunc_T	*ufunc = find_func(eap->arg, NULL);
+    char_u	*fname;
+    ufunc_T	*ufunc;
     dfunc_T	*dfunc;
     isn_T	*instr;
     int		current;
     int		line_idx = 0;
     int		prev_current = 0;
 
+    fname = trans_function_name(&eap->arg, FALSE,
+	     TFN_INT | TFN_QUIET | TFN_NO_AUTOLOAD | TFN_NO_DEREF, NULL, NULL);
+    ufunc = find_func(fname, NULL);
+    vim_free(fname);
     if (ufunc == NULL)
     {
-	semsg("Cannot find function %s", eap->arg);
+	semsg("E1061: Cannot find function %s", eap->arg);
 	return;
     }
     if (ufunc->uf_dfunc_idx < 0)
     {
-	semsg("Function %s is not compiled", eap->arg);
+	semsg("E1062: Function %s is not compiled", eap->arg);
 	return;
     }
     if (ufunc->uf_name_exp != NULL)
@@ -1578,7 +1629,8 @@ ex_disassemble(exarg_T *eap)
 		break;
 	    case ISN_LOADS:
 		{
-		    scriptitem_T *si = SCRIPT_ITEM(iptr->isn_arg.loads.ls_sid);
+		    scriptitem_T *si = SCRIPT_ITEM(
+					       iptr->isn_arg.loadstore.ls_sid);
 
 		    smsg("%4d LOADS s:%s from %s", current,
 					    iptr->isn_arg.string, si->sn_name);
@@ -1600,8 +1652,21 @@ ex_disassemble(exarg_T *eap)
 	    case ISN_STORE:
 		smsg("%4d STORE $%lld", current, iptr->isn_arg.number);
 		break;
+	    case ISN_STOREV:
+		smsg("%4d STOREV v:%s", current,
+				       get_vim_var_name(iptr->isn_arg.number));
+		break;
 	    case ISN_STOREG:
-		smsg("%4d STOREG g:%s", current, iptr->isn_arg.string);
+		smsg("%4d STOREG %s", current, iptr->isn_arg.string);
+		break;
+	    case ISN_STORES:
+		{
+		    scriptitem_T *si = SCRIPT_ITEM(
+					       iptr->isn_arg.loadstore.ls_sid);
+
+		    smsg("%4d STORES s:%s in %s", current,
+					    iptr->isn_arg.string, si->sn_name);
+		}
 		break;
 	    case ISN_STORESCRIPT:
 		{
@@ -1618,7 +1683,12 @@ ex_disassemble(exarg_T *eap)
 		smsg("%4d STOREOPT &%s", current,
 					       iptr->isn_arg.storeopt.so_name);
 		break;
-
+	    case ISN_STOREENV:
+		smsg("%4d STOREENV $%s", current, iptr->isn_arg.string);
+		break;
+	    case ISN_STOREREG:
+		smsg("%4d STOREREG @%c", current, iptr->isn_arg.number);
+		break;
 	    case ISN_STORENR:
 		smsg("%4d STORE %lld in $%d", current,
 				iptr->isn_arg.storenr.str_val,

@@ -100,7 +100,6 @@ static void f_getpos(typval_T *argvars, typval_T *rettv);
 static void f_getreg(typval_T *argvars, typval_T *rettv);
 static void f_getregtype(typval_T *argvars, typval_T *rettv);
 static void f_gettagstack(typval_T *argvars, typval_T *rettv);
-static void f_has(typval_T *argvars, typval_T *rettv);
 static void f_haslocaldir(typval_T *argvars, typval_T *rettv);
 static void f_hasmapto(typval_T *argvars, typval_T *rettv);
 static void f_hlID(typval_T *argvars, typval_T *rettv);
@@ -3261,7 +3260,7 @@ f_gettagstack(typval_T *argvars, typval_T *rettv)
 /*
  * "has()" function
  */
-    static void
+    void
 f_has(typval_T *argvars, typval_T *rettv)
 {
     int		i;
@@ -4070,7 +4069,7 @@ f_index(typval_T *argvars, typval_T *rettv)
 	    // Start at specified item.  Use the cached index that list_find()
 	    // sets, so that a negative number also works.
 	    item = list_find(l, (long)tv_get_number_chk(&argvars[2], &error));
-	    idx = l->lv_idx;
+	    idx = l->lv_u.mat.lv_idx;
 	    if (argvars[3].v_type != VAR_UNKNOWN)
 		ic = (int)tv_get_number_chk(&argvars[3], &error);
 	    if (error)
@@ -4678,7 +4677,7 @@ find_some_match(typval_T *argvars, typval_T *rettv, matchtype_T type)
 	    li = list_find(l, start);
 	    if (li == NULL)
 		goto theend;
-	    idx = l->lv_idx;	// use the cached index
+	    idx = l->lv_u.mat.lv_idx;	// use the cached index
 	}
 	else
 	{
@@ -4881,21 +4880,31 @@ max_min(typval_T *argvars, typval_T *rettv, int domax)
 	listitem_T	*li;
 
 	l = argvars[0].vval.v_list;
-	if (l != NULL)
+	if (l != NULL && l->lv_len > 0)
 	{
-	    range_list_materialize(l);
-	    li = l->lv_first;
-	    if (li != NULL)
+	    if (l->lv_first == &range_list_item)
 	    {
-		n = tv_get_number_chk(&li->li_tv, &error);
-		for (;;)
+		if ((l->lv_u.nonmat.lv_stride > 0) ^ domax)
+		    n = l->lv_u.nonmat.lv_start;
+		else
+		    n = l->lv_u.nonmat.lv_start + (l->lv_len - 1)
+						    * l->lv_u.nonmat.lv_stride;
+	    }
+	    else
+	    {
+		li = l->lv_first;
+		if (li != NULL)
 		{
-		    li = li->li_next;
-		    if (li == NULL)
-			break;
-		    i = tv_get_number_chk(&li->li_tv, &error);
-		    if (domax ? i > n : i < n)
-			n = i;
+		    n = tv_get_number_chk(&li->li_tv, &error);
+		    for (;;)
+		    {
+			li = li->li_next;
+			if (li == NULL)
+			    break;
+			i = tv_get_number_chk(&li->li_tv, &error);
+			if (domax ? i > n : i < n)
+			    n = i;
+		    }
 		}
 	    }
 	}
@@ -5330,9 +5339,9 @@ f_range(typval_T *argvars, typval_T *rettv)
 	// works with ":for".  If used otherwise range_list_materialize() must
 	// be called.
 	list->lv_first = &range_list_item;
-	list->lv_start = start;
-	list->lv_end = end;
-	list->lv_stride = stride;
+	list->lv_u.nonmat.lv_start = start;
+	list->lv_u.nonmat.lv_end = end;
+	list->lv_u.nonmat.lv_stride = stride;
 	list->lv_len = (end - start) / stride + 1;
     }
 }
@@ -5345,15 +5354,15 @@ range_list_materialize(list_T *list)
 {
     if (list->lv_first == &range_list_item)
     {
-	varnumber_T start = list->lv_start;
-	varnumber_T end = list->lv_end;
-	int	    stride = list->lv_stride;
+	varnumber_T start = list->lv_u.nonmat.lv_start;
+	varnumber_T end = list->lv_u.nonmat.lv_end;
+	int	    stride = list->lv_u.nonmat.lv_stride;
 	varnumber_T i;
 
 	list->lv_first = NULL;
-	list->lv_last = NULL;
+	list->lv_u.mat.lv_last = NULL;
 	list->lv_len = 0;
-	list->lv_idx_item = NULL;
+	list->lv_u.mat.lv_idx_item = NULL;
 	for (i = start; stride > 0 ? i <= end : i >= end; i += stride)
 	    if (list_append_number(list, (varnumber_T)i) == FAIL)
 		break;

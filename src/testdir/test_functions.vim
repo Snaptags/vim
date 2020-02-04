@@ -28,12 +28,14 @@ func Test_empty()
   call assert_equal(0, empty(1))
   call assert_equal(0, empty(-1))
 
-  call assert_equal(1, empty(0.0))
-  call assert_equal(1, empty(-0.0))
-  call assert_equal(0, empty(1.0))
-  call assert_equal(0, empty(-1.0))
-  call assert_equal(0, empty(1.0/0.0))
-  call assert_equal(0, empty(0.0/0.0))
+  if has('float')
+    call assert_equal(1, empty(0.0))
+    call assert_equal(1, empty(-0.0))
+    call assert_equal(0, empty(1.0))
+    call assert_equal(0, empty(-1.0))
+    call assert_equal(0, empty(1.0/0.0))
+    call assert_equal(0, empty(0.0/0.0))
+  endif
 
   call assert_equal(1, empty([]))
   call assert_equal(0, empty(['a']))
@@ -116,7 +118,9 @@ func Test_strwidth()
     call assert_fails('call strwidth({->0})', 'E729:')
     call assert_fails('call strwidth([])', 'E730:')
     call assert_fails('call strwidth({})', 'E731:')
-    call assert_fails('call strwidth(1.2)', 'E806:')
+    if has('float')
+      call assert_fails('call strwidth(1.2)', 'E806:')
+    endif
   endfor
 
   set ambiwidth&
@@ -176,7 +180,9 @@ func Test_str2nr()
 
   call assert_fails('call str2nr([])', 'E730:')
   call assert_fails('call str2nr({->2})', 'E729:')
-  call assert_fails('call str2nr(1.2)', 'E806:')
+  if has('float')
+    call assert_fails('call str2nr(1.2)', 'E806:')
+  endif
   call assert_fails('call str2nr(10, [])', 'E474:')
 endfunc
 
@@ -422,7 +428,9 @@ func Test_simplify()
   call assert_fails('call simplify({->0})', 'E729:')
   call assert_fails('call simplify([])', 'E730:')
   call assert_fails('call simplify({})', 'E731:')
-  call assert_fails('call simplify(1.2)', 'E806:')
+  if has('float')
+    call assert_fails('call simplify(1.2)', 'E806:')
+  endif
 endfunc
 
 func Test_pathshorten()
@@ -1955,11 +1963,48 @@ func Test_range()
   call setreg('a', range(3))
   call assert_equal("0\n1\n2\n", getreg('a'))
 
+  " settagstack()
+  call settagstack(1, #{items : range(4)})
+  
+  " sign_define()
+  call assert_fails("call sign_define(range(5))", "E715:")
+  call assert_fails("call sign_placelist(range(5))", "E715:")
+
+  " sign_undefine()
+  call assert_fails("call sign_undefine(range(5))", "E908:")
+
+  " sign_unplacelist()
+  call assert_fails("call sign_unplacelist(range(5))", "E715:")
+
   " sort()
   call assert_equal([0, 1, 2, 3, 4, 5], sort(range(5, 0, -1)))
 
+  " 'spellsuggest'
+  func MySuggest()
+    return range(3)
+  endfunc
+  set spell spellsuggest=expr:MySuggest()
+  call assert_equal([], spellsuggest('baord', 3))
+  set nospell spellsuggest&
+
   " string()
   call assert_equal('[0, 1, 2, 3, 4]', string(range(5)))
+
+  " taglist() with 'tagfunc'
+  func TagFunc(pattern, flags, info)
+    return range(10)
+  endfunc
+  set tagfunc=TagFunc
+  call assert_fails("call taglist('asdf')", 'E987:')
+  set tagfunc=
+  
+  " term_start()
+  if has('terminal') && has('termguicolors')
+    call assert_fails('call term_start(range(3, 4))', 'E474:')
+    let g:terminal_ansi_colors = range(16)
+    call assert_fails('call term_start("ls", #{term_finish: "close"})', 'E475:')
+    unlet g:terminal_ansi_colors
+  endif
 
   " type()
   call assert_equal(v:t_list, type(range(5)))

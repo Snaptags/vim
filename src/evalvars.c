@@ -1206,14 +1206,7 @@ ex_let_one(
 		}
 		if (p != NULL)
 		{
-		    vim_setenv(name, p);
-		    if (STRICMP(name, "HOME") == 0)
-			init_homedir();
-		    else if (didset_vim && STRICMP(name, "VIM") == 0)
-			didset_vim = FALSE;
-		    else if (didset_vimruntime
-					&& STRICMP(name, "VIMRUNTIME") == 0)
-			didset_vimruntime = FALSE;
+		    vim_setenv_ext(name, p);
 		    arg_end = arg;
 		}
 		name[len] = c1;
@@ -1967,6 +1960,24 @@ get_vim_var_tv(int idx)
 }
 
 /*
+ * Set v: variable to "tv".  Only accepts the same type.
+ * Takes over the value of "tv".
+ */
+    int
+set_vim_var_tv(int idx, typval_T *tv)
+{
+    if (vimvars[idx].vv_type != tv->v_type)
+    {
+	emsg(_("E1063: type mismatch for v: variable"));
+	clear_tv(tv);
+	return FAIL;
+    }
+    clear_tv(&vimvars[idx].vv_di.di_tv);
+    vimvars[idx].vv_di.di_tv = *tv;
+    return OK;
+}
+
+/*
  * Get number v: variable value.
  */
     varnumber_T
@@ -2128,7 +2139,7 @@ set_argv_var(char **argv, int argc)
     {
 	if (list_append_string(l, (char_u *)argv[i], -1) == FAIL)
 	    getout(1);
-	l->lv_last->li_tv.v_lock = VAR_FIXED;
+	l->lv_u.mat.lv_last->li_tv.v_lock = VAR_FIXED;
     }
     set_vim_var_list(VV_ARGV, l);
 }
@@ -2285,7 +2296,7 @@ get_var_tv(
 
     if (tv == NULL && current_sctx.sc_version == SCRIPT_VERSION_VIM9)
     {
-	imported_T *import = find_imported(name, NULL);
+	imported_T *import = find_imported(name, 0, NULL);
 
 	// imported variable from another script
 	if (import != NULL)
@@ -2461,7 +2472,7 @@ lookup_scriptvar(char_u *name, size_t len, cctx_T *dummy UNUSED)
     res = HASHITEM_EMPTY(hi) ? -1 : 1;
 
     // if not script-local, then perhaps imported
-    if (res == -1 && find_imported(p, NULL) != NULL)
+    if (res == -1 && find_imported(p, 0, NULL) != NULL)
 	res = 1;
 
     if (p != buffer)
