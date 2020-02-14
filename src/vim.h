@@ -18,7 +18,7 @@
 #endif
 
 #ifdef MSWIN
-# include "vimio.h"
+# include <io.h>
 #endif
 
 // ============ the header file puzzle: order matters =========
@@ -117,12 +117,6 @@
 # if defined(FEAT_DIRECTX)
 #  define FEAT_RENDER_OPTIONS
 # endif
-#endif
-
-// Visual Studio 2005 has 'deprecated' many of the standard CRT functions
-#if _MSC_VER >= 1400
-# define _CRT_SECURE_NO_DEPRECATE
-# define _CRT_NONSTDC_NO_DEPRECATE
 #endif
 
 /*
@@ -1128,20 +1122,6 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define VIMINFO_VERSION_WITH_HISTORY 2
 #define VIMINFO_VERSION_WITH_REGISTERS 3
 #define VIMINFO_VERSION_WITH_MARKS 4
-
-typedef enum {
-    BVAL_NR,
-    BVAL_STRING,
-    BVAL_EMPTY
-} btype_T;
-
-typedef struct {
-    btype_T	bv_type;
-    long	bv_nr;
-    char_u	*bv_string;
-    int		bv_len;		// length of bv_string
-    int		bv_allocated;	// bv_string was allocated
-} bval_T;
 
 /*
  * Values for do_tag().
