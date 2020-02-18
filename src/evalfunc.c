@@ -60,6 +60,7 @@ static void f_debugbreak(typval_T *argvars, typval_T *rettv);
 #endif
 static void f_deepcopy(typval_T *argvars, typval_T *rettv);
 static void f_did_filetype(typval_T *argvars, typval_T *rettv);
+static void f_echoraw(typval_T *argvars, typval_T *rettv);
 static void f_empty(typval_T *argvars, typval_T *rettv);
 static void f_environ(typval_T *argvars, typval_T *rettv);
 static void f_escape(typval_T *argvars, typval_T *rettv);
@@ -86,7 +87,6 @@ static void f_garbagecollect(typval_T *argvars, typval_T *rettv);
 static void f_get(typval_T *argvars, typval_T *rettv);
 static void f_getchangelist(typval_T *argvars, typval_T *rettv);
 static void f_getcharsearch(typval_T *argvars, typval_T *rettv);
-static void f_getcmdwintype(typval_T *argvars, typval_T *rettv);
 static void f_getenv(typval_T *argvars, typval_T *rettv);
 static void f_getfontname(typval_T *argvars, typval_T *rettv);
 static void f_getjumplist(typval_T *argvars, typval_T *rettv);
@@ -395,6 +395,7 @@ static funcentry_T global_functions[] =
     {"did_filetype",	0, 0, 0,	  &t_number,	f_did_filetype},
     {"diff_filler",	1, 1, FEARG_1,	  &t_number,	f_diff_filler},
     {"diff_hlID",	2, 2, FEARG_1,	  &t_number,	f_diff_hlID},
+    {"echoraw",		1, 1, FEARG_1,	  &t_number,	f_echoraw},
     {"empty",		1, 1, FEARG_1,	  &t_number,	f_empty},
     {"environ",		0, 0, 0,	  &t_dict_string, f_environ},
     {"escape",		2, 2, FEARG_1,	  &t_string,	f_escape},
@@ -845,6 +846,7 @@ static funcentry_T global_functions[] =
     {"win_execute",	2, 3, FEARG_2,	  &t_string,	f_win_execute},
     {"win_findbuf",	1, 1, FEARG_1,	  &t_list_number, f_win_findbuf},
     {"win_getid",	0, 2, FEARG_1,	  &t_number,	f_win_getid},
+    {"win_gettype",	0, 1, FEARG_1,    &t_string,	f_win_gettype},
     {"win_gotoid",	1, 1, FEARG_1,	  &t_number,	f_win_gotoid},
     {"win_id2tabwin",	1, 1, FEARG_1,	  &t_list_number, f_win_id2tabwin},
     {"win_id2win",	1, 1, FEARG_1,	  &t_number,	f_win_id2win},
@@ -1811,6 +1813,21 @@ f_deepcopy(typval_T *argvars, typval_T *rettv)
 f_did_filetype(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 {
     rettv->vval.v_number = did_filetype;
+}
+
+/*
+ * "echoraw({expr})" function
+ */
+    static void
+f_echoraw(typval_T *argvars, typval_T *rettv UNUSED)
+{
+    char_u *str = tv_get_string_chk(&argvars[0]);
+
+    if (str != NULL && *str != NUL)
+    {
+	out_str(str);
+	out_flush();
+    }
 }
 
 /*
@@ -2920,24 +2937,6 @@ f_getcharsearch(typval_T *argvars UNUSED, typval_T *rettv)
 }
 
 /*
- * "getcmdwintype()" function
- */
-    static void
-f_getcmdwintype(typval_T *argvars UNUSED, typval_T *rettv)
-{
-    rettv->v_type = VAR_STRING;
-    rettv->vval.v_string = NULL;
-#ifdef FEAT_CMDWIN
-    rettv->vval.v_string = alloc(2);
-    if (rettv->vval.v_string != NULL)
-    {
-	rettv->vval.v_string[0] = cmdwin_type;
-	rettv->vval.v_string[1] = NUL;
-    }
-#endif
-}
-
-/*
  * "getenv()" function
  */
     static void
@@ -3546,9 +3545,7 @@ f_has(typval_T *argvars, typval_T *rettv)
 	"mzscheme",
 #endif
 #endif
-#ifdef FEAT_NUM64
 	"num64",
-#endif
 #ifdef FEAT_OLE
 	"ole",
 #endif

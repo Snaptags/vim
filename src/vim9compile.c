@@ -2330,6 +2330,9 @@ compile_subscript(
 	}
 	else if (**arg == '[')
 	{
+	    garray_T	*stack;
+	    type_T	**typep;
+
 	    // list index: list[123]
 	    // TODO: more arguments
 	    // TODO: dict member  dict['name']
@@ -2346,6 +2349,14 @@ compile_subscript(
 
 	    if (generate_instr_drop(cctx, ISN_INDEX, 1) == FAIL)
 		return FAIL;
+	    stack = &cctx->ctx_type_stack;
+	    typep = ((type_T **)stack->ga_data) + stack->ga_len - 1;
+	    if ((*typep)->tt_type != VAR_LIST && *typep != &t_any)
+	    {
+		emsg(_(e_listreq));
+		return FAIL;
+	    }
+	    *typep = (*typep)->tt_member;
 	}
 	else if (**arg == '.' && (*arg)[1] != '.')
 	{
@@ -3312,7 +3323,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
     if (oplen == 3 && !heredoc && dest != dest_global
 	    && type->tt_type != VAR_STRING && type->tt_type != VAR_UNKNOWN)
     {
-	emsg("E1019: Can only concatenate to string");
+	emsg(_("E1019: Can only concatenate to string"));
 	goto theend;
     }
 
@@ -4735,7 +4746,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type)
 	    }
 	    else
 	    {
-		emsg("E1025: using } outside of a block scope");
+		emsg(_("E1025: using } outside of a block scope"));
 		goto erret;
 	    }
 	    if (line != NULL)
@@ -4995,7 +5006,7 @@ erret:
 	if (errormsg != NULL)
 	    emsg(errormsg);
 	else if (called_emsg == called_emsg_before)
-	    emsg("E1028: compile_def_function failed");
+	    emsg(_("E1028: compile_def_function failed"));
 
 	// don't execute this function body
 	ufunc->uf_lines.ga_len = 0;
