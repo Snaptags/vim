@@ -18,16 +18,16 @@
 // Values that change for a new release.
 #define VIM_VERSION_MAJOR		8
 #define VIM_VERSION_MINOR		2
-#define VIM_VERSION_BUILD		0273
+#define VIM_VERSION_BUILD		0314
 #define VIM_VERSION_BUILD_BCD		0x11b
-#define VIM_VERSION_DATE_ONLY	"2020 Feb 18"
+#define VIM_VERSION_DATE_ONLY	"2020 Feb 25"
 
 // Values based on the above
 #define VIM_VERSION_MAJOR_STR		"8"
 #define VIM_VERSION_MINOR_STR		"2"
 #define VIM_VERSION_100	    (VIM_VERSION_MAJOR * 100 + VIM_VERSION_MINOR)
 
-#define VIM_VERSION_BUILD_STR		"0273"
+#define VIM_VERSION_BUILD_STR		"0314"
 #ifndef VIM_VERSION_PATCHLEVEL
 # define VIM_VERSION_PATCHLEVEL		0
 #endif
