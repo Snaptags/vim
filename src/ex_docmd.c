@@ -1647,6 +1647,9 @@ do_one_cmd(
     int		save_reg_executing = reg_executing;
     int		ni;			// set when Not Implemented
     char_u	*cmd;
+#ifdef FEAT_EVAL
+    int		starts_with_colon;
+#endif
 
     vim_memset(&ea, 0, sizeof(ea));
     ea.line1 = 1;
@@ -1689,6 +1692,7 @@ do_one_cmd(
     ea.cookie = cookie;
 #ifdef FEAT_EVAL
     ea.cstack = cstack;
+    starts_with_colon = *skipwhite(ea.cmd) == ':';
 #endif
     if (parse_command_modifiers(&ea, &errormsg, FALSE) == FAIL)
 	goto doend;
@@ -1713,7 +1717,7 @@ do_one_cmd(
 	ea.cmd = skipwhite(ea.cmd + 1);
 
 #ifdef FEAT_EVAL
-    if (current_sctx.sc_version == SCRIPT_VERSION_VIM9)
+    if (current_sctx.sc_version == SCRIPT_VERSION_VIM9 && !starts_with_colon)
 	p = find_ex_command(&ea, NULL, lookup_scriptvar, NULL);
     else
 #endif
@@ -3146,8 +3150,9 @@ find_ex_command(
      * Recognize a Vim9 script function/method call and assignment:
      * "lvar = value", "lvar(arg)", "[1, 2 3]->Func()"
      */
-    if (lookup != NULL && (p = to_name_const_end(eap->cmd)) > eap->cmd
-								  && *p != NUL)
+    p = eap->cmd;
+    if (lookup != NULL && (*p == '('
+	       || ((p = to_name_const_end(eap->cmd)) > eap->cmd && *p != NUL)))
     {
 	int oplen;
 	int heredoc;
@@ -3156,6 +3161,7 @@ find_ex_command(
 	// "varname[]" is an expression.
 	// "g:varname" is an expression.
 	// "varname->expr" is an expression.
+	// "(..." is an expression.
 	if (*p == '('
 		|| *p == '['
 		|| p[1] == ':'
@@ -3671,7 +3677,7 @@ get_address(
 			curwin->w_cursor.col = 0;
 		    searchcmdlen = 0;
 		    flags = silent ? 0 : SEARCH_HIS | SEARCH_MSG;
-		    if (!do_search(NULL, c, cmd, 1L, flags, NULL))
+		    if (!do_search(NULL, c, c, cmd, 1L, flags, NULL))
 		    {
 			curwin->w_cursor = pos;
 			cmd = NULL;
@@ -6185,9 +6191,11 @@ do_exedit(
 		hold_gui_events = 0;
 #endif
 		must_redraw = CLEAR;
+		pending_exmode_active = TRUE;
 
 		main_loop(FALSE, TRUE);
 
+		pending_exmode_active = FALSE;
 		RedrawingDisabled = rd;
 		no_wait_return = nwr;
 		msg_scroll = ms;
