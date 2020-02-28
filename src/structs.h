@@ -1279,9 +1279,15 @@ typedef long_u hash_T;		// Type for hi_hash
 #else
   typedef long long		varnumber_T;
   typedef unsigned long long	uvarnumber_T;
-# define VARNUM_MIN		LLONG_MIN
-# define VARNUM_MAX		LLONG_MAX
-# define UVARNUM_MAX		ULLONG_MAX
+# ifdef LLONG_MIN
+#  define VARNUM_MIN		LLONG_MIN
+#  define VARNUM_MAX		LLONG_MAX
+#  define UVARNUM_MAX		ULLONG_MAX
+# else
+#  define VARNUM_MIN		LONG_LONG_MIN
+#  define VARNUM_MAX		LONG_LONG_MAX
+#  define UVARNUM_MAX		ULONG_LONG_MAX
+# endif
 #endif
 
 typedef double	float_T;
@@ -3636,6 +3642,13 @@ struct VimMenu
     UINT	id;		    // Id of menu item
     HMENU	submenu_id;	    // If this is submenu, add children here
     HWND	tearoff_handle;	    // hWnd of tearoff if created
+#endif
+#if FEAT_GUI_HAIKU
+    BMenuItem  *id;		    // Id of menu item
+    BMenu  *submenu_id;		    // If this is submenu, add children here
+# ifdef FEAT_TOOLBAR
+    BPictureButton *button;
+# endif
 #endif
 #ifdef FEAT_GUI_MAC
 //  MenuHandle	id;

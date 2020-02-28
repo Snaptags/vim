@@ -1,6 +1,7 @@
 " Test various aspects of the Vim9 script language.
 
 source check.vim
+source view_util.vim
 
 " Check that "lines" inside ":def" results in an "error" message.
 func CheckDefFailure(lines, error)
@@ -37,14 +38,20 @@ def Test_assignment()
   let bool2: bool = false
   assert_equal(v:false, bool2)
 
-  let list1: list<string> = ['sdf', 'asdf']
+  let list1: list<bool> = [false, true, false]
   let list2: list<number> = [1, 2, 3]
+  let list3: list<string> = ['sdf', 'asdf']
+  let list4: list<any> = ['yes', true, 1234]
+  let list5: list<blob> = [0z01, 0z02]
 
   let listS: list<string> = []
   let listN: list<number> = []
 
-  let dict1: dict<string> = #{key: 'value'}
+  let dict1: dict<bool> = #{one: false, two: true}
   let dict2: dict<number> = #{one: 1, two: 2}
+  let dict3: dict<string> = #{key: 'value'}
+  let dict4: dict<any> = #{one: 1, two: '2'}
+  let dict5: dict<blob> = #{one: 0z01, tw: 0z02}
 
   g:newvar = 'new'
   assert_equal('new', g:newvar)
@@ -171,6 +178,15 @@ func Test_call_default_args_from_func()
   call assert_fails('call MyDefaultArgs("one", "two")', 'E118:')
 endfunc
 
+func TakesOneArg(arg)
+  echo a:arg
+endfunc
+
+def Test_call_wrong_arg_count()
+  call CheckDefFailure(['TakesOneArg()'], 'E119:')
+  call CheckDefFailure(['TakesOneArg(11, 22)'], 'E118:')
+enddef
+
 " Default arg and varargs
 def MyDefVarargs(one: string, two = 'foo', ...rest: list<string>): string
   let res = one .. ',' .. two
@@ -187,15 +203,27 @@ def Test_call_def_varargs()
   assert_equal('one,two,three', MyDefVarargs('one', 'two', 'three'))
 enddef
 
+def Test_call_func_defined_later()
+  call assert_equal('one', DefinedLater('one'))
+  call assert_fails('call NotDefined("one")', 'E117:')
+enddef
 
-"def Test_call_func_defined_later()
-"  call assert_equal('one', DefineLater('one'))
-"  call assert_fails('call NotDefined("one")', 'E99:')
-"enddef
-
-func DefineLater(arg)
+func DefinedLater(arg)
   return a:arg
 endfunc
+
+def FuncWithForwardCall()
+  return DefinedEvenLater("yes")
+enddef
+
+def DefinedEvenLater(arg: string): string
+  return arg
+enddef
+
+def Test_error_in_nested_function()
+  " Error in called function requires unwinding the call stack.
+  assert_fails('call FuncWithForwardCall()', 'E1029')
+enddef
 
 def Test_return_type_wrong()
   CheckScriptFailure(['def Func(): number', 'return "a"', 'enddef'], 'expected number but got string')
@@ -684,6 +712,34 @@ def Test_substitute_cmd()
   source Xvim9lines
 
   delete('Xvim9lines')
+enddef
+
+def Test_execute_cmd()
+  new
+  setline(1, 'default')
+  execute 'call setline(1, "execute-string")'
+  assert_equal('execute-string', getline(1))
+  let cmd1 = 'call setline(1,'
+  let cmd2 = '"execute-var")'
+  execute cmd1 cmd2
+  assert_equal('execute-var', getline(1))
+  execute cmd1 cmd2 '|call setline(1, "execute-var-string")'
+  assert_equal('execute-var-string', getline(1))
+  let cmd_first = 'call '
+  let cmd_last = 'setline(1, "execute-var-var")'
+  execute cmd_first .. cmd_last
+  assert_equal('execute-var-var', getline(1))
+  bwipe!
+enddef
+
+def Test_echo_cmd()
+  echo 'something'
+  assert_match('^something$', Screenline(&lines))
+
+  let str1 = 'some'
+  let str2 = 'more'
+  echo str1 str2
+  assert_match('^some more$', Screenline(&lines))
 enddef
 
 
