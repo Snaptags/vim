@@ -473,18 +473,25 @@ func Test_cmdline_paste()
   endtry
   call assert_equal("Xtestfile", bufname("%"))
 
-  " Use an invalid expression for <C-\>e
-  call assert_beeps('call feedkeys(":\<C-\>einvalid\<CR>", "tx")')
-
   " Try to paste an invalid register using <C-R>
   call feedkeys(":\"one\<C-R>\<C-X>two\<CR>", 'xt')
   call assert_equal('"onetwo', @:)
 
+  " Test for pasting register containing CTRL-H using CTRL-R and CTRL-R CTRL-R
   let @a = "xy\<C-H>z"
   call feedkeys(":\"\<C-R>a\<CR>", 'xt')
   call assert_equal('"xz', @:)
+  call feedkeys(":\"\<C-R>\<C-R>a\<CR>", 'xt')
+  call assert_equal("\"xy\<C-H>z", @:)
   call feedkeys(":\"\<C-R>\<C-O>a\<CR>", 'xt')
   call assert_equal("\"xy\<C-H>z", @:)
+
+  " Test for pasting register containing CTRL-V using CTRL-R and CTRL-R CTRL-R
+  let @a = "xy\<C-V>z"
+  call feedkeys(":\"\<C-R>=@a\<CR>\<cr>", 'xt')
+  call assert_equal('"xyz', @:)
+  call feedkeys(":\"\<C-R>\<C-R>=@a\<CR>\<cr>", 'xt')
+  call assert_equal("\"xy\<C-V>z", @:)
 
   call assert_beeps('call feedkeys(":\<C-R>=\<C-R>=\<Esc>", "xt")')
 
@@ -560,6 +567,17 @@ func Test_cmdline_complete_user_cmd()
   call feedkeys(":Foo b\<Tab>\<Home>\"\<cr>", 'tx')
   call assert_equal('"Foo blue', @:)
   delcommand Foo
+endfunc
+
+func s:ScriptLocalFunction()
+  echo 'yes'
+endfunc
+
+func Test_cmdline_complete_user_func()
+  call feedkeys(":func Test_cmdline_complete_user\<Tab>\<Home>\"\<cr>", 'tx')
+  call assert_match('"func Test_cmdline_complete_user', @:)
+  call feedkeys(":func s:ScriptL\<Tab>\<Home>\"\<cr>", 'tx')
+  call assert_match('"func <SNR>\d\+_ScriptLocalFunction', @:)
 endfunc
 
 func Test_cmdline_complete_user_names()
@@ -1176,9 +1194,126 @@ func Test_interrupt_compl()
   set wildmode&
 endfunc
 
+" Test for moving the cursor on the : command line
 func Test_cmdline_edit()
-  call feedkeys(":\"buffer\<Right>\<Home>\<Left>\<CR>", 'xt')
-  call assert_equal("\"buffer", @:)
+  let str = ":one two\<C-U>"
+  let str ..= "one two\<C-W>\<C-W>"
+  let str ..= "four\<BS>\<C-H>\<Del>\<kDel>"
+  let str ..= "\<Left>five\<Right>"
+  let str ..= "\<Home>two "
+  let str ..= "\<C-Left>one "
+  let str ..= "\<C-Right> three"
+  let str ..= "\<End>\<S-Left>four "
+  let str ..= "\<S-Right> six"
+  let str ..= "\<C-B>\"\<C-E> seven\<CR>"
+  call feedkeys(str, 'xt')
+  call assert_equal("\"one two three four five six seven", @:)
+endfunc
+
+" Test for moving the cursor on the / command line in 'rightleft' mode
+func Test_cmdline_edit_rightleft()
+  CheckFeature rightleft
+  set rightleft
+  set rightleftcmd=search
+  let str = "/one two\<C-U>"
+  let str ..= "one two\<C-W>\<C-W>"
+  let str ..= "four\<BS>\<C-H>\<Del>\<kDel>"
+  let str ..= "\<Right>five\<Left>"
+  let str ..= "\<Home>two "
+  let str ..= "\<C-Right>one "
+  let str ..= "\<C-Left> three"
+  let str ..= "\<End>\<S-Right>four "
+  let str ..= "\<S-Left> six"
+  let str ..= "\<C-B>\"\<C-E> seven\<CR>"
+  call assert_fails("call feedkeys(str, 'xt')", 'E486:')
+  call assert_equal("\"one two three four five six seven", @/)
+  set rightleftcmd&
+  set rightleft&
+endfunc
+
+" Test for using <C-\>e in the command line to evaluate an expression
+func Test_cmdline_expr()
+  " Evaluate an expression from the beginning of a command line
+  call feedkeys(":abc\<C-B>\<C-\>e\"\\\"hello\"\<CR>\<CR>", 'xt')
+  call assert_equal('"hello', @:)
+
+  " Use an invalid expression for <C-\>e
+  call assert_beeps('call feedkeys(":\<C-\>einvalid\<CR>", "tx")')
+
+  " Insert literal <CTRL-\> in the command line
+  call feedkeys(":\"e \<C-\>\<C-Y>\<CR>", 'xt')
+  call assert_equal("\"e \<C-\>\<C-Y>", @:)
+endfunc
+
+" Test for 'imcmdline' and 'imsearch'
+" This test doesn't actually test the input method functionality.
+func Test_cmdline_inputmethod()
+  new
+  call setline(1, ['', 'abc', ''])
+  set imcmdline
+
+  call feedkeys(":\"abc\<CR>", 'xt')
+  call assert_equal("\"abc", @:)
+  call feedkeys(":\"\<C-^>abc\<C-^>\<CR>", 'xt')
+  call assert_equal("\"abc", @:)
+  call feedkeys("/abc\<CR>", 'xt')
+  call assert_equal([2, 1], [line('.'), col('.')])
+  call feedkeys("/\<C-^>abc\<C-^>\<CR>", 'xt')
+  call assert_equal([2, 1], [line('.'), col('.')])
+
+  set imsearch=2
+  call cursor(1, 1)
+  call feedkeys("/abc\<CR>", 'xt')
+  call assert_equal([2, 1], [line('.'), col('.')])
+  call cursor(1, 1)
+  call feedkeys("/\<C-^>abc\<C-^>\<CR>", 'xt')
+  call assert_equal([2, 1], [line('.'), col('.')])
+  set imdisable
+  call feedkeys("/\<C-^>abc\<C-^>\<CR>", 'xt')
+  call assert_equal([2, 1], [line('.'), col('.')])
+  set imdisable&
+  set imsearch&
+
+  set imcmdline&
+  %bwipe!
+endfunc
+
+" Test for opening the command-line window when too many windows are present
+func Test_cmdwin_fail_to_open()
+  " Open as many windows as possible
+  for i in range(100)
+    try
+      new
+    catch /E36:/
+      break
+    endtry
+  endfor
+  call assert_beeps('call feedkeys("q:\<CR>", "xt")')
+  only
+endfunc
+
+" Test for recursively getting multiple command line inputs
+func Test_cmdwin_multi_input()
+  call feedkeys(":\<C-R>=input('P: ')\<CR>\"cyan\<CR>\<CR>", 'xt')
+  call assert_equal('"cyan', @:)
+endfunc
+
+" Test for using CTRL-_ in the command line with 'allowrevins'
+func Test_cmdline_revins()
+  CheckNotMSWindows
+  CheckFeature rightleft
+  call feedkeys(":\"abc\<c-_>\<cr>", 'xt')
+  call assert_equal("\"abc\<c-_>", @:)
+  set allowrevins
+  call feedkeys(":\"abc\<c-_>xyz\<c-_>\<CR>", 'xt')
+  call assert_equal('"abcñèæ', @:)
+  set allowrevins&
+endfunc
+
+" Test for typing UTF-8 composing characters in the command line
+func Test_cmdline_composing_chars()
+  call feedkeys(":\"\<C-V>u3046\<C-V>u3099\<CR>", 'xt')
+  call assert_equal('"ゔ', @:)
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

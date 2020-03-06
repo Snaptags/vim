@@ -827,10 +827,10 @@ call_def_function(
 
 	    // store number in local variable
 	    case ISN_STORENR:
-		tv = STACK_TV_VAR(iptr->isn_arg.storenr.str_idx);
+		tv = STACK_TV_VAR(iptr->isn_arg.storenr.stnr_idx);
 		clear_tv(tv);
 		tv->v_type = VAR_NUMBER;
-		tv->vval.v_number = iptr->isn_arg.storenr.str_val;
+		tv->vval.v_number = iptr->isn_arg.storenr.stnr_val;
 		break;
 
 	    // push constant
@@ -840,6 +840,10 @@ call_def_function(
 	    case ISN_PUSHF:
 	    case ISN_PUSHS:
 	    case ISN_PUSHBLOB:
+	    case ISN_PUSHFUNC:
+	    case ISN_PUSHPARTIAL:
+	    case ISN_PUSHCHANNEL:
+	    case ISN_PUSHJOB:
 		if (ga_grow(&ectx.ec_stack, 1) == FAIL)
 		    goto failed;
 		tv = STACK_TV_BOT(0);
@@ -866,6 +870,36 @@ call_def_function(
 #endif
 		    case ISN_PUSHBLOB:
 			blob_copy(iptr->isn_arg.blob, tv);
+			break;
+		    case ISN_PUSHFUNC:
+			tv->v_type = VAR_FUNC;
+			if (iptr->isn_arg.string == NULL)
+			    tv->vval.v_string = NULL;
+			else
+			    tv->vval.v_string =
+					     vim_strsave(iptr->isn_arg.string);
+			break;
+		    case ISN_PUSHPARTIAL:
+			tv->v_type = VAR_PARTIAL;
+			tv->vval.v_partial = iptr->isn_arg.partial;
+			if (tv->vval.v_partial != NULL)
+			    ++tv->vval.v_partial->pt_refcount;
+			break;
+		    case ISN_PUSHCHANNEL:
+#ifdef FEAT_JOB_CHANNEL
+			tv->v_type = VAR_CHANNEL;
+			tv->vval.v_channel = iptr->isn_arg.channel;
+			if (tv->vval.v_channel != NULL)
+			    ++tv->vval.v_channel->ch_refcount;
+#endif
+			break;
+		    case ISN_PUSHJOB:
+#ifdef FEAT_JOB_CHANNEL
+			tv->v_type = VAR_JOB;
+			tv->vval.v_job = iptr->isn_arg.job;
+			if (tv->vval.v_job != NULL)
+			    ++tv->vval.v_job->jv_refcount;
+#endif
 			break;
 		    default:
 			tv->v_type = VAR_STRING;
@@ -1814,8 +1848,8 @@ ex_disassemble(exarg_T *eap)
 		break;
 	    case ISN_STORENR:
 		smsg("%4d STORE %lld in $%d", current,
-				iptr->isn_arg.storenr.str_val,
-				iptr->isn_arg.storenr.str_idx);
+				iptr->isn_arg.storenr.stnr_val,
+				iptr->isn_arg.storenr.stnr_idx);
 		break;
 
 	    // constants
@@ -1845,6 +1879,45 @@ ex_disassemble(exarg_T *eap)
 		    smsg("%4d PUSHBLOB %s", current, r);
 		    vim_free(tofree);
 		}
+		break;
+	    case ISN_PUSHFUNC:
+		{
+		    char *name = (char *)iptr->isn_arg.string;
+
+		    smsg("%4d PUSHFUNC \"%s\"", current,
+					       name == NULL ? "[none]" : name);
+		}
+		break;
+	    case ISN_PUSHPARTIAL:
+		{
+		    partial_T *part = iptr->isn_arg.partial;
+
+		    smsg("%4d PUSHPARTIAL \"%s\"", current,
+			 part == NULL ? "[none]" : (char *)partial_name(part));
+		}
+		break;
+	    case ISN_PUSHCHANNEL:
+#ifdef FEAT_JOB_CHANNEL
+		{
+		    channel_T *channel = iptr->isn_arg.channel;
+
+		    smsg("%4d PUSHCHANNEL %d", current,
+					 channel == NULL ? 0 : channel->ch_id);
+		}
+#endif
+		break;
+	    case ISN_PUSHJOB:
+#ifdef FEAT_JOB_CHANNEL
+		{
+		    typval_T	tv;
+		    char_u	*name;
+
+		    tv.v_type = VAR_JOB;
+		    tv.vval.v_job = iptr->isn_arg.job;
+		    name = tv_get_string(&tv);
+		    smsg("%4d PUSHJOB \"%s\"", current, name);
+		}
+#endif
 		break;
 	    case ISN_PUSHEXC:
 		smsg("%4d PUSH v:exception", current);
