@@ -663,14 +663,16 @@ f_prop_find(typval_T *argvars, typval_T *rettv)
 	    mch_memmove(&prop, text + textlen + i * sizeof(textprop_T),
 			    sizeof(textprop_T));
 
-	    if (dir < 0)
+	    if (lnum == lnum_start)
 	    {
-		if (col < prop.tp_col)
-		    break;
+		if (dir < 0)
+		{
+		    if (col < prop.tp_col)
+			break;
+		}
+		else if (prop.tp_col + prop.tp_len - (prop.tp_len != 0) < col)
+		    continue;
 	    }
-	    else if (prop.tp_col + prop.tp_len - (prop.tp_len != 0) < col)
-		continue;
-
 	    if (prop.tp_id == id || prop.tp_type == type_id)
 	    {
 		// Check if the starting position has text props.
