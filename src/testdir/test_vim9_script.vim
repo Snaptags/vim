@@ -269,6 +269,9 @@ def Test_return_type_wrong()
   CheckScriptFailure(['def Func(): string', 'return 1', 'enddef'], 'expected string but got number')
   CheckScriptFailure(['def Func(): void', 'return "a"', 'enddef'], 'expected void but got string')
   CheckScriptFailure(['def Func()', 'return "a"', 'enddef'], 'expected void but got string')
+
+  CheckScriptFailure(['def Func(): list', 'return []', 'enddef'], 'E1008:')
+  CheckScriptFailure(['def Func(): dict', 'return {}', 'enddef'], 'E1008:')
 enddef
 
 def Test_arg_type_wrong()
@@ -942,6 +945,23 @@ def Test_while_loop()
   assert_equal('1_3_', result)
 enddef
 
+def Test_interrupt_loop()
+  let caught = false
+  let x = 0
+  try
+    while 1
+      x += 1
+      if x == 100
+        feedkeys("\<C-C>", 'Lt')
+      endif
+    endwhile
+  catch
+    caught = true
+    assert_equal(100, x)
+  endtry
+  assert_true(caught, 'should have caught an exception')
+enddef
+
 def Test_substitute_cmd()
   new
   setline(1, 'something')
@@ -963,5 +983,83 @@ def Test_substitute_cmd()
 
   delete('Xvim9lines')
 enddef
+
+def Test_redef_failure()
+  call writefile(['def Func0(): string',  'return "Func0"', 'enddef'], 'Xdef')
+  so Xdef
+  call writefile(['def Func1(): string',  'return "Func1"', 'enddef'], 'Xdef')
+  so Xdef
+  call writefile(['def! Func0(): string', 'enddef'], 'Xdef')
+  call assert_fails('so Xdef', 'E1027:')
+  call writefile(['def Func2(): string',  'return "Func2"', 'enddef'], 'Xdef')
+  so Xdef
+  call delete('Xdef')
+
+  call assert_equal(0, Func0())
+  call assert_equal('Func1', Func1())
+  call assert_equal('Func2', Func2())
+
+  delfunc! Func0
+  delfunc! Func1
+  delfunc! Func2
+enddef
+
+" Test for internal functions returning different types
+func Test_InternalFuncRetType()
+  let lines =<< trim END
+    def RetFloat(): float
+      return ceil(1.456)
+    enddef
+
+    def RetListAny(): list<any>
+      return items({'k' : 'v'})
+    enddef
+
+    def RetListString(): list<string>
+      return split('a:b:c', ':')
+    enddef
+
+    def RetListDictAny(): list<dict<any>>
+      return getbufinfo()
+    enddef
+
+    def RetDictNumber(): dict<number>
+      return wordcount()
+    enddef
+
+    def RetDictString(): dict<string>
+      return environ()
+    enddef
+  END
+  call writefile(lines, 'Xscript')
+  source Xscript
+
+  call assert_equal(2.0, RetFloat())
+  call assert_equal([['k', 'v']], RetListAny())
+  call assert_equal(['a', 'b', 'c'], RetListString())
+  call assert_notequal([], RetListDictAny())
+  call assert_notequal({}, RetDictNumber())
+  call assert_notequal({}, RetDictString())
+  call delete('Xscript')
+endfunc
+
+" Test for passing too many or too few arguments to internal functions
+func Test_internalfunc_arg_error()
+  let l =<< trim END
+    def! FArgErr(): float
+      return ceil(1.1, 2)
+    enddef
+  END
+  call writefile(l, 'Xinvalidarg')
+  call assert_fails('so Xinvalidarg', 'E118:')
+  let l =<< trim END
+    def! FArgErr(): float
+      return ceil()
+    enddef
+  END
+  call writefile(l, 'Xinvalidarg')
+  call assert_fails('so Xinvalidarg', 'E119:')
+  call delete('Xinvalidarg')
+endfunc
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker
