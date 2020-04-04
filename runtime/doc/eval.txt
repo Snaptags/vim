@@ -1,4 +1,4 @@
-*eval.txt*	For Vim version 8.2.  Last change: 2020 Mar 22
+*eval.txt*	For Vim version 8.2.  Last change: 2020 Mar 26
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -2861,6 +2861,7 @@ test_ignore_error({expr})	none	ignore a specific error
 test_null_blob()		Blob	null value for testing
 test_null_channel()		Channel	null value for testing
 test_null_dict()		Dict	null value for testing
+test_null_function()		Funcref	null value for testing
 test_null_job()			Job	null value for testing
 test_null_list()		List	null value for testing
 test_null_partial()		Funcref	null value for testing
@@ -5841,8 +5842,10 @@ has({feature} [, {check}])
 		When {check} is present and not zero: The result is a Number,
 		which is 1 if the feature {feature} could ever be supported,
 		zero otherwise.  This is useful to check for a typo in
-		{feature}.  Keep in mind that an older Vim version will not
-		know about a feature added later.
+		{feature} and to detect dead code.  Keep in mind that an older
+		Vim version will not know about a feature added later and
+		features that have been abandoned will not be know by the
+		current Vim version.
 
 		Also see |exists()|.
 
@@ -6822,6 +6825,7 @@ maparg({name} [, {mode} [, {abbr} [, {dict}]]])			*maparg()*
 		  "rhs"	     The {rhs} of the mapping as typed.
 		  "silent"   1 for a |:map-silent| mapping, else 0.
 		  "noremap"  1 if the {rhs} of the mapping is not remappable.
+		  "script"   1 if mapping was defined with <script>.
 		  "expr"     1 for an expression mapping (|:map-<expr>|).
 		  "buffer"   1 for a buffer local mapping (|:map-local|).
 		  "mode"     Modes for which the mapping is defined. In

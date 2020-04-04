@@ -930,7 +930,7 @@ skip_var_list(
 	    {
 		if (*semicolon == 1)
 		{
-		    emsg(_("Double ; in list of variables"));
+		    emsg(_("E452: Double ; in list of variables"));
 		    return NULL;
 		}
 		*semicolon = 1;
@@ -1698,7 +1698,7 @@ item_lock(typval_T *tv, int deep, int lock)
 		    l->lv_lock &= ~VAR_LOCKED;
 		if ((deep < 0 || deep > 1) && l->lv_first != &range_list_item)
 		    // recursive: lock/unlock the items the List contains
-		    for (li = l->lv_first; li != NULL; li = li->li_next)
+		    FOR_ALL_LIST_ITEMS(l, li)
 			item_lock(&li->li_tv, deep - 1, lock);
 	    }
 	    break;
@@ -2382,6 +2382,7 @@ find_var(char_u *name, hashtab_T **htp, int no_autoload)
 
 /*
  * Find variable "varname" in hashtab "ht" with name "htname".
+ * When "varname" is empty returns curwin/curtab/etc vars dictionary.
  * Returns NULL if not found.
  */
     dictitem_T *
@@ -3461,7 +3462,6 @@ f_getwinvar(typval_T *argvars, typval_T *rettv)
 f_getbufvar(typval_T *argvars, typval_T *rettv)
 {
     buf_T	*buf;
-    buf_T	*save_curbuf;
     char_u	*varname;
     dictitem_T	*v;
     int		done = FALSE;
@@ -3476,12 +3476,13 @@ f_getbufvar(typval_T *argvars, typval_T *rettv)
 
     if (buf != NULL && varname != NULL)
     {
-	// set curbuf to be our buf, temporarily
-	save_curbuf = curbuf;
-	curbuf = buf;
-
 	if (*varname == '&')
 	{
+	    buf_T	*save_curbuf = curbuf;
+
+	    // set curbuf to be our buf, temporarily
+	    curbuf = buf;
+
 	    if (varname[1] == NUL)
 	    {
 		// get all buffer-local options in a dict
@@ -3496,22 +3497,25 @@ f_getbufvar(typval_T *argvars, typval_T *rettv)
 	    else if (get_option_tv(&varname, rettv, TRUE) == OK)
 		// buffer-local-option
 		done = TRUE;
+
+	    // restore previous notion of curbuf
+	    curbuf = save_curbuf;
 	}
 	else
 	{
 	    // Look up the variable.
-	    // Let getbufvar({nr}, "") return the "b:" dictionary.
-	    v = find_var_in_ht(&curbuf->b_vars->dv_hashtab,
-							 'b', varname, FALSE);
+	    if (*varname == NUL)
+		// Let getbufvar({nr}, "") return the "b:" dictionary.
+		v = &buf->b_bufvar;
+	    else
+		v = find_var_in_ht(&buf->b_vars->dv_hashtab, 'b',
+							       varname, FALSE);
 	    if (v != NULL)
 	    {
 		copy_tv(&v->di_tv, rettv);
 		done = TRUE;
 	    }
 	}
-
-	// restore previous notion of curbuf
-	curbuf = save_curbuf;
     }
 
     if (!done && argvars[2].v_type != VAR_UNKNOWN)
@@ -3618,11 +3622,11 @@ f_setbufvar(typval_T *argvars, typval_T *rettv UNUSED)
 	}
 	else
 	{
-	    buf_T *save_curbuf = curbuf;
-
 	    bufvarname = alloc(STRLEN(varname) + 3);
 	    if (bufvarname != NULL)
 	    {
+		buf_T *save_curbuf = curbuf;
+
 		curbuf = buf;
 		STRCPY(bufvarname, "b:");
 		STRCPY(bufvarname + 2, varname);

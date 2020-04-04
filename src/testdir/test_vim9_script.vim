@@ -31,6 +31,8 @@ endfunc
 let s:appendToMe = 'xxx'
 let s:addToMe = 111
 let g:existing = 'yes'
+let g:inc_counter = 1
+let $SOME_ENV_VAR = 'some'
 
 def Test_assignment()
   let bool1: bool = true
@@ -53,6 +55,9 @@ def Test_assignment()
   let dict4: dict<any> = #{one: 1, two: '2'}
   let dict5: dict<blob> = #{one: 0z01, tw: 0z02}
 
+  let a: number = 6
+  assert_equal(6, a)
+
   if has('channel')
     let chan1: channel
     let job1: job
@@ -63,8 +68,7 @@ def Test_assignment()
   endif
   let funky1: func
   let funky2: func = function('len')
-  let party1: partial
-  let party2: partial = funcref('Test_syntax')
+  let party2: func = funcref('Test_syntax')
 
   " type becomes list<any>
   let somelist = rand() > 0 ? [1, 2, 3] : ['a', 'b', 'c']
@@ -91,6 +95,83 @@ def Test_assignment()
   assert_equal(333, s:addToMe)
   s:newVar = 'new'
   assert_equal('new', s:newVar)
+
+  set ts=7
+  &ts += 1
+  assert_equal(8, &ts)
+  &ts -= 3
+  assert_equal(5, &ts)
+  &ts *= 2
+  assert_equal(10, &ts)
+  &ts /= 3
+  assert_equal(3, &ts)
+  set ts=10
+  &ts %= 4
+  assert_equal(2, &ts)
+  call CheckDefFailure(['&notex += 3'], 'E113:')
+  call CheckDefFailure(['&ts ..= "xxx"'], 'E1019:')
+  call CheckDefFailure(['&path += 3'], 'E1013:')
+  " test freeing ISN_STOREOPT
+  call CheckDefFailure(['&ts = 3', 'let asdf'], 'E1022:')
+  &ts = 8
+
+  g:inc_counter += 1
+  assert_equal(2, g:inc_counter)
+
+  $SOME_ENV_VAR ..= 'more'
+  assert_equal('somemore', $SOME_ENV_VAR)
+  call CheckDefFailure(['$SOME_ENV_VAR += "more"'], 'E1013:')
+  call CheckDefFailure(['$SOME_ENV_VAR += 123'], 'E1013:')
+
+  @a = 'areg'
+  @a ..= 'add'
+  assert_equal('aregadd', @a)
+  call CheckDefFailure(['@a += "more"'], 'E1013:')
+  call CheckDefFailure(['@a += 123'], 'E1013:')
+
+  v:errmsg = 'none'
+  v:errmsg ..= 'again'
+  assert_equal('noneagain', v:errmsg)
+  call CheckDefFailure(['v:errmsg += "more"'], 'E1013:')
+  call CheckDefFailure(['v:errmsg += 123'], 'E1013:')
+
+  " Test default values.
+  let thebool: bool
+  assert_equal(v:false, thebool)
+
+  let thenumber: number
+  assert_equal(0, thenumber)
+
+  if has('float')
+    let thefloat: float
+    assert_equal(0.0, thefloat)
+  endif
+
+  let thestring: string
+  assert_equal('', thestring)
+
+  let theblob: blob
+  assert_equal(0z, theblob)
+
+  let thefunc: func
+  assert_equal(test_null_function(), thefunc)
+
+  let thelist: list<any>
+  assert_equal([], thelist)
+
+  let thedict: dict<any>
+  assert_equal({}, thedict)
+
+  if has('channel')
+    let thejob: job
+    assert_equal(test_null_job(), thejob)
+
+    let thechannel: channel
+    assert_equal(test_null_channel(), thechannel)
+  endif
+
+  let nr = 1234 | nr = 5678
+  assert_equal(5678, nr)
 enddef
 
 func Test_assignment_failure()
@@ -101,6 +182,24 @@ func Test_assignment_failure()
   call CheckDefFailure(['let true = 1'], 'E1034:')
   call CheckDefFailure(['let false = 1'], 'E1034:')
 
+  call CheckDefFailure(['let [a; b; c] = g:list'], 'E452:')
+
+  call CheckDefFailure(['let somevar'], "E1022:")
+  call CheckDefFailure(['let &option'], 'E1052:')
+  call CheckDefFailure(['&g:option = 5'], 'E113:')
+
+  call CheckDefFailure(['let $VAR = 5'], 'E1065:')
+
+  call CheckDefFailure(['let @~ = 5'], 'E354:')
+  call CheckDefFailure(['let @a = 5'], 'E1066:')
+
+  call CheckDefFailure(['let g:var = 5'], 'E1016:')
+
+  call CheckDefFailure(['let anr = 4', 'anr ..= "text"'], 'E1019:')
+  call CheckDefFailure(['let xnr += 4'], 'E1020:')
+
+  call CheckScriptFailure(['vim9script', 'def Func()', 'let dummy = s:notfound', 'enddef'], 'E1050:')
+
   call CheckDefFailure(['let var: list<string> = [123]'], 'expected list<string> but got list<number>')
   call CheckDefFailure(['let var: list<number> = ["xx"]'], 'expected list<number> but got list<string>')
 
@@ -110,8 +209,18 @@ func Test_assignment_failure()
   call CheckDefFailure(['let var = feedkeys("0")'], 'E1031:')
   call CheckDefFailure(['let var: number = feedkeys("0")'], 'expected number but got void')
 
-  call CheckDefFailure(['let var: dict <number>'], 'E1007:')
+  call CheckDefFailure(['let var: dict <number>'], 'E1068:')
   call CheckDefFailure(['let var: dict<number'], 'E1009:')
+endfunc
+
+func Test_wrong_type()
+  call CheckDefFailure(['let var: list<nothing>'], 'E1010:')
+  call CheckDefFailure(['let var: list<list<nothing>>'], 'E1010:')
+  call CheckDefFailure(['let var: dict<nothing>'], 'E1010:')
+  call CheckDefFailure(['let var: dict<dict<nothing>>'], 'E1010:')
+
+  call CheckDefFailure(['let var: dict<number'], 'E1009:')
+  call CheckDefFailure(['let var: dict<list<number>'], 'E1009:')
 
   call CheckDefFailure(['let var: ally'], 'E1010:')
   call CheckDefFailure(['let var: bram'], 'E1010:')
@@ -130,6 +239,7 @@ func Test_const()
   call CheckDefFailure(['const var = 234', 'var = 99'], 'E1018:')
   call CheckDefFailure(['const one = 234', 'let one = 99'], 'E1017:')
   call CheckDefFailure(['const two'], 'E1021:')
+  call CheckDefFailure(['const &option'], 'E996:')
 endfunc
 
 def Test_block()
@@ -144,7 +254,15 @@ enddef
 
 func Test_block_failure()
   call CheckDefFailure(['{', 'let inner = 1', '}', 'echo inner'], 'E1001:')
+  call CheckDefFailure(['}'], 'E1025:')
+  call CheckDefFailure(['{', 'echo 1'], 'E1026:')
 endfunc
+
+def Test_cmd_modifier()
+  tab echo '0'
+  call CheckDefFailure(['5tab echo 3'], 'E16:')
+enddef
+
 
 def ReturnString(): string
   return 'string'
@@ -160,10 +278,24 @@ def ReturnGlobal(): number
   return g:notNumber
 enddef
 
-def Test_return_string()
+def Test_return_something()
   assert_equal('string', ReturnString())
   assert_equal(123, ReturnNumber())
   assert_fails('call ReturnGlobal()', 'E1029: Expected number but got string')
+enddef
+
+let s:nothing = 0
+def ReturnNothing()
+  s:nothing = 1
+  if true
+    return
+  endif
+  s:nothing = 2
+enddef
+
+def Test_return_nothing()
+  ReturnNothing()
+  assert_equal(1, s:nothing)
 enddef
 
 func Increment()
@@ -203,6 +335,8 @@ def Test_call_default_args()
   assert_equal('string', MyDefaultArgs())
   assert_equal('one', MyDefaultArgs('one'))
   assert_fails('call MyDefaultArgs("one", "two")', 'E118:')
+
+  call CheckScriptFailure(['def Func(arg: number = asdf)', 'enddef'], 'E1001:')
 enddef
 
 func Test_call_default_args_from_func()
@@ -215,9 +349,10 @@ func TakesOneArg(arg)
   echo a:arg
 endfunc
 
-def Test_call_wrong_arg_count()
+def Test_call_wrong_args()
   call CheckDefFailure(['TakesOneArg()'], 'E119:')
   call CheckDefFailure(['TakesOneArg(11, 22)'], 'E118:')
+  call CheckDefFailure(['bufnr(xxx)'], 'E1001:')
 enddef
 
 " Default arg and varargs
@@ -269,6 +404,8 @@ def Test_return_type_wrong()
   CheckScriptFailure(['def Func(): string', 'return 1', 'enddef'], 'expected string but got number')
   CheckScriptFailure(['def Func(): void', 'return "a"', 'enddef'], 'expected void but got string')
   CheckScriptFailure(['def Func()', 'return "a"', 'enddef'], 'expected void but got string')
+
+  CheckScriptFailure(['def Func(): number', 'return', 'enddef'], 'E1003:')
 
   CheckScriptFailure(['def Func(): list', 'return []', 'enddef'], 'E1008:')
   CheckScriptFailure(['def Func(): dict', 'return {}', 'enddef'], 'E1008:')
@@ -342,10 +479,28 @@ def Test_try_catch_match()
     seq ..= 'b'
   catch /asdf/
     seq ..= 'x'
+  catch ?a\?sdf?
+    seq ..= 'y'
   finally
     seq ..= 'c'
   endtry
   assert_equal('abc', seq)
+enddef
+
+def Test_try_catch_fails()
+  call CheckDefFailure(['catch'], 'E603:')
+  call CheckDefFailure(['try', 'echo 0', 'catch','catch'], 'E1033:')
+  call CheckDefFailure(['try', 'echo 0', 'catch /pat'], 'E1067:')
+  call CheckDefFailure(['finally'], 'E606:')
+  call CheckDefFailure(['try', 'echo 0', 'finally', 'echo 1', 'finally'], 'E607:')
+  call CheckDefFailure(['endtry'], 'E602:')
+  call CheckDefFailure(['while 1', 'endtry'], 'E170:')
+  call CheckDefFailure(['for i in range(5)', 'endtry'], 'E170:')
+  call CheckDefFailure(['if 2', 'endtry'], 'E171:')
+  call CheckDefFailure(['try', 'echo 1', 'endtry'], 'E1032:')
+
+  call CheckDefFailure(['throw'], 'E471:')
+  call CheckDefFailure(['throw xxx'], 'E1001:')
 enddef
 
 let s:export_script_lines =<< trim END
@@ -435,6 +590,37 @@ def Test_vim9_import_export()
   writefile(import_star_as_lines, 'Ximport.vim')
   source Ximport.vim
   assert_equal(9883, g:imported)
+
+  let import_star_as_lines_no_dot =<< trim END
+    vim9script
+    import * as Export from './Xexport.vim'
+    def Func()
+      let dummy = 1
+      let imported = Export + dummy
+    enddef
+  END
+  writefile(import_star_as_lines_no_dot, 'Ximport.vim')
+  assert_fails('source Ximport.vim', 'E1060:')
+
+  let import_star_as_lines_dot_space =<< trim END
+    vim9script
+    import * as Export from './Xexport.vim'
+    def Func()
+      let imported = Export . exported
+    enddef
+  END
+  writefile(import_star_as_lines_dot_space, 'Ximport.vim')
+  assert_fails('source Ximport.vim', 'E1074:')
+
+  let import_star_as_lines_missing_name =<< trim END
+    vim9script
+    import * as Export from './Xexport.vim'
+    def Func()
+      let imported = Export.
+    enddef
+  END
+  writefile(import_star_as_lines_missing_name, 'Ximport.vim')
+  assert_fails('source Ximport.vim', 'E1048:')
 
   let import_star_lines =<< trim END
     vim9script
@@ -577,6 +763,12 @@ def Test_vim9script_call()
     enddef
     {'a': 1, 'b': 2}->DictFunc()
     assert_equal(#{a: 1, b: 2}, dictvar)
+    def CompiledDict()
+      {'a': 3, 'b': 4}->DictFunc()
+    enddef
+    CompiledDict()
+    assert_equal(#{a: 3, b: 4}, dictvar)
+
     #{a: 3, b: 4}->DictFunc()
     assert_equal(#{a: 3, b: 4}, dictvar)
 
@@ -763,6 +955,14 @@ def Test_if_elseif_else()
   assert_equal('three', IfElse(3))
 enddef
 
+def Test_if_elseif_else_fails()
+  call CheckDefFailure(['elseif true'], 'E582:')
+  call CheckDefFailure(['else'], 'E581:')
+  call CheckDefFailure(['endif'], 'E580:')
+  call CheckDefFailure(['if true', 'elseif xxx'], 'E1001:')
+  call CheckDefFailure(['if true', 'echo 1'], 'E171:')
+enddef
+
 let g:bool_true = v:true
 let g:bool_false = v:false
 
@@ -772,6 +972,16 @@ def Test_if_const_expr()
     res = true
   endif
   assert_equal(true, res)
+
+  g:glob = 2
+  if false
+    execute('let g:glob = 3')
+  endif
+  assert_equal(2, g:glob)
+  if true
+    execute('let g:glob = 3')
+  endif
+  assert_equal(3, g:glob)
 
   res = false
   if g:bool_true ? true : false
@@ -805,6 +1015,12 @@ def Test_if_const_expr()
 
   res = false
   if false ? true : false
+    res = true
+  endif
+  assert_equal(false, res)
+
+  res = false
+  if has('xyz') ? true : false
     res = true
   endif
   assert_equal(false, res)
@@ -862,7 +1078,13 @@ def Test_if_const_expr()
     res = true
   endif
   assert_equal(false, res)
+enddef
 
+def Test_if_const_expr_fails()
+  call CheckDefFailure(['if "aaa" == "bbb'], 'E114:')
+  call CheckDefFailure(["if 'aaa' == 'bbb"], 'E115:')
+  call CheckDefFailure(["if has('aaa'"], 'E110:')
+  call CheckDefFailure(["if has('aaa') ? true false"], 'E109:')
 enddef
 
 def Test_delfunc()
@@ -902,10 +1124,13 @@ def Test_execute_cmd()
   execute cmd_first .. cmd_last
   assert_equal('execute-var-var', getline(1))
   bwipe!
+
+  call CheckDefFailure(['execute xxx'], 'E1001:')
 enddef
 
 def Test_echo_cmd()
-  echo 'something'
+  echo 'some'
+  echon 'thing'
   assert_match('^something$', Screenline(&lines))
 
   let str1 = 'some'
@@ -929,6 +1154,31 @@ def Test_for_outside_of_function()
   delete('Xvim9for.vim')
 enddef
 
+def Test_for_loop()
+  let result = ''
+  for cnt in range(7)
+    if cnt == 4
+      break
+    endif
+    if cnt == 2
+      continue
+    endif
+    result ..= cnt .. '_'
+  endfor
+  assert_equal('0_1_3_', result)
+enddef
+
+def Test_for_loop_fails()
+  call CheckDefFailure(['for # in range(5)'], 'E690:')
+  call CheckDefFailure(['for i In range(5)'], 'E690:')
+  call CheckDefFailure(['let x = 5', 'for x in range(5)'], 'E1023:')
+  call CheckScriptFailure(['def Func(arg)', 'for arg in range(5)', 'enddef'], 'E1006:')
+  call CheckDefFailure(['for i in "text"'], 'E1024:')
+  call CheckDefFailure(['for i in xxx'], 'E1001:')
+  call CheckDefFailure(['endfor'], 'E588:')
+  call CheckDefFailure(['for i in range(3)', 'echo 3'], 'E170:')
+enddef
+
 def Test_while_loop()
   let result = ''
   let cnt = 0
@@ -943,6 +1193,16 @@ def Test_while_loop()
     result ..= cnt .. '_'
   endwhile
   assert_equal('1_3_', result)
+enddef
+
+def Test_while_loop_fails()
+  call CheckDefFailure(['while xxx'], 'E1001:')
+  call CheckDefFailure(['endwhile'], 'E588:')
+  call CheckDefFailure(['continue'], 'E586:')
+  call CheckDefFailure(['if true', 'continue'], 'E586:')
+  call CheckDefFailure(['break'], 'E587:')
+  call CheckDefFailure(['if true', 'break'], 'E587:')
+  call CheckDefFailure(['while 1', 'echo 3'], 'E170:')
 enddef
 
 def Test_interrupt_loop()
@@ -960,28 +1220,6 @@ def Test_interrupt_loop()
     assert_equal(100, x)
   endtry
   assert_true(caught, 'should have caught an exception')
-enddef
-
-def Test_substitute_cmd()
-  new
-  setline(1, 'something')
-  :substitute(some(other(
-  assert_equal('otherthing', getline(1))
-  bwipe!
-
-  " also when the context is Vim9 script
-  let lines =<< trim END
-    vim9script
-    new
-    setline(1, 'something')
-    :substitute(some(other(
-    assert_equal('otherthing', getline(1))
-    bwipe!
-  END
-  writefile(lines, 'Xvim9lines')
-  source Xvim9lines
-
-  delete('Xvim9lines')
 enddef
 
 def Test_redef_failure()
@@ -1061,5 +1299,28 @@ func Test_internalfunc_arg_error()
   call assert_fails('so Xinvalidarg', 'E119:')
   call delete('Xinvalidarg')
 endfunc
+
+" Keep this last, it messes up highlighting.
+def Test_substitute_cmd()
+  new
+  setline(1, 'something')
+  :substitute(some(other(
+  assert_equal('otherthing', getline(1))
+  bwipe!
+
+  " also when the context is Vim9 script
+  let lines =<< trim END
+    vim9script
+    new
+    setline(1, 'something')
+    :substitute(some(other(
+    assert_equal('otherthing', getline(1))
+    bwipe!
+  END
+  writefile(lines, 'Xvim9lines')
+  source Xvim9lines
+
+  delete('Xvim9lines')
+enddef
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

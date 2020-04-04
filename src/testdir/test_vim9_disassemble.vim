@@ -224,6 +224,31 @@ def Test_disassemble_call()
 enddef
 
 
+def EchoArg(arg: string): string
+  return arg
+enddef
+def RefThis(): func
+  return function('EchoArg')
+enddef
+def s:ScriptPCall()
+  RefThis()("text")
+enddef
+
+def Test_disassemble_pcall()
+  let res = execute('disass s:ScriptPCall')
+  assert_match('<SNR>\d\+_ScriptPCall.*'
+        \ .. 'RefThis()("text").*'
+        \ .. '\d DCALL RefThis(argc 0).*'
+        \ .. '\d PUSHS "text".*'
+        \ .. '\d PCALL top (argc 1).*'
+        \ .. '\d PCALL end.*'
+        \ .. '\d DROP.*'
+        \ .. '\d PUSHNR 0.*'
+        \ .. '\d RETURN.*'
+        \, res)
+enddef
+
+
 def FuncWithForwardCall(): string
   return DefinedLater("yes")
 enddef
@@ -337,8 +362,7 @@ enddef
 def WithFunc()
   let funky1: func
   let funky2: func = function("len")
-  let party1: partial
-  let party2: partial = funcref("UserFunc")
+  let party2: func = funcref("UserFunc")
 enddef
 
 def Test_disassemble_function()
@@ -351,15 +375,12 @@ def Test_disassemble_function()
         \ .. '2 PUSHS "len".*'
         \ .. '3 BCALL function(argc 1).*'
         \ .. '4 STORE $1.*'
-        \ .. 'let party1: partial.*'
-        \ .. '5 PUSHPARTIAL "\[none]".*'
-        \ .. '6 STORE $2.*'
-        \ .. 'let party2: partial = funcref("UserFunc").*'
-        \ .. '7 PUSHS "UserFunc".*'
-        \ .. '8 BCALL funcref(argc 1).*'
-        \ .. '9 STORE $3.*'
-        \ .. '10 PUSHNR 0.*'
-        \ .. '11 RETURN.*'
+        \ .. 'let party2: func = funcref("UserFunc").*'
+        \ .. '\d PUSHS "UserFunc".*'
+        \ .. '\d BCALL funcref(argc 1).*'
+        \ .. '\d STORE $2.*'
+        \ .. '\d PUSHNR 0.*'
+        \ .. '\d RETURN.*'
         \, instr)
 enddef
 
@@ -703,7 +724,6 @@ def Test_disassemble_compare()
         \ ['111 =~ 222', 'COMPARENR =\~'],
         \ ['111 !~ 222', 'COMPARENR !\~'],
         \
-        \ ['"xx" == "yy"', 'COMPARESTRING =='],
         \ ['"xx" != "yy"', 'COMPARESTRING !='],
         \ ['"xx" > "yy"', 'COMPARESTRING >'],
         \ ['"xx" < "yy"', 'COMPARESTRING <'],
@@ -729,10 +749,10 @@ def Test_disassemble_compare()
         \ ['#{a:1} is #{x:2}', 'COMPAREDICT is'],
         \ ['#{a:1} isnot #{x:2}', 'COMPAREDICT isnot'],
         \
-        \ ['{->33} == {->44}', 'COMPAREPARTIAL =='],
-        \ ['{->33} != {->44}', 'COMPAREPARTIAL !='],
-        \ ['{->33} is {->44}', 'COMPAREPARTIAL is'],
-        \ ['{->33} isnot {->44}', 'COMPAREPARTIAL isnot'],
+        \ ['{->33} == {->44}', 'COMPAREFUNC =='],
+        \ ['{->33} != {->44}', 'COMPAREFUNC !='],
+        \ ['{->33} is {->44}', 'COMPAREFUNC is'],
+        \ ['{->33} isnot {->44}', 'COMPAREFUNC isnot'],
         \
         \ ['77 == g:xx', 'COMPAREANY =='],
         \ ['77 != g:xx', 'COMPAREANY !='],
@@ -774,6 +794,49 @@ def Test_disassemble_compare()
         \ .. '\d ' .. case[1] .. '.*'
         \ .. '\d JUMP_IF_FALSE -> \d\+.*'
         \, instr)
+
+    nr += 1
+  endfor
+
+  delete('Xdisassemble')
+enddef
+
+def Test_disassemble_compare_const()
+  let cases = [
+        \ ['"xx" == "yy"', false],
+        \ ['"aa" == "aa"', true],
+        \ ['has("eval") ? true : false', true],
+        \ ['has("asdf") ? true : false', false],
+        \ ]
+
+  let nr = 1
+  for case in cases
+    writefile(['def TestCase' .. nr .. '()',
+             \ '  if ' .. case[0],
+             \ '    echo 42'
+             \ '  endif',
+             \ 'enddef'], 'Xdisassemble')
+    source Xdisassemble
+    let instr = execute('disassemble TestCase' .. nr)
+    if case[1]
+      " condition true, "echo 42" executed
+      assert_match('TestCase' .. nr .. '.*'
+          \ .. 'if ' .. substitute(case[0], '[[~]', '\\\0', 'g') .. '.*'
+          \ .. '\d PUSHNR 42.*'
+          \ .. '\d ECHO 1.*'
+          \ .. '\d PUSHNR 0.*'
+          \ .. '\d RETURN.*'
+          \, instr)
+    else
+      " condition false, function just returns
+      assert_match('TestCase' .. nr .. '.*'
+          \ .. 'if ' .. substitute(case[0], '[[~]', '\\\0', 'g') .. '[ \n]*'
+          \ .. 'echo 42[ \n]*'
+          \ .. 'endif[ \n]*'
+          \ .. '\s*\d PUSHNR 0.*'
+          \ .. '\d RETURN.*'
+          \, instr)
+    endif
 
     nr += 1
   endfor

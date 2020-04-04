@@ -280,19 +280,18 @@ ret_number(int argcount UNUSED, type_T **argtypes UNUSED)
 {
     return &t_number;
 }
-#ifdef FEAT_FLOAT
     static type_T *
 ret_float(int argcount UNUSED, type_T **argtypes UNUSED)
 {
     return &t_float;
 }
-#endif
     static type_T *
 ret_string(int argcount UNUSED, type_T **argtypes UNUSED)
 {
     return &t_string;
 }
-    static type_T * ret_list_any(int argcount UNUSED, type_T **argtypes UNUSED)
+    static type_T *
+ret_list_any(int argcount UNUSED, type_T **argtypes UNUSED)
 {
     return &t_list_any;
 }
@@ -332,11 +331,10 @@ ret_blob(int argcount UNUSED, type_T **argtypes UNUSED)
     return &t_blob;
 }
     static type_T *
-ret_partial_void(int argcount UNUSED, type_T **argtypes UNUSED)
+ret_func_any(int argcount UNUSED, type_T **argtypes UNUSED)
 {
-    return &t_partial_void;
+    return &t_func_any;
 }
-#ifdef FEAT_JOB_CHANNEL
     static type_T *
 ret_channel(int argcount UNUSED, type_T **argtypes UNUSED)
 {
@@ -347,7 +345,6 @@ ret_job(int argcount UNUSED, type_T **argtypes UNUSED)
 {
     return &t_job;
 }
-#endif
 
 static type_T *ret_f_function(int argcount, type_T **argtypes);
 
@@ -562,7 +559,7 @@ static funcentry_T global_functions[] =
     {"foldtext",	0, 0, 0,	  ret_string,	f_foldtext},
     {"foldtextresult",	1, 1, FEARG_1,	  ret_string,	f_foldtextresult},
     {"foreground",	0, 0, 0,	  ret_void,	f_foreground},
-    {"funcref",		1, 3, FEARG_1,	  ret_partial_void, f_funcref},
+    {"funcref",		1, 3, FEARG_1,	  ret_func_any, f_funcref},
     {"function",	1, 3, FEARG_1,	  ret_f_function, f_function},
     {"garbagecollect",	0, 1, 0,	  ret_void,	f_garbagecollect},
     {"get",		2, 3, FEARG_1,	  ret_any,	f_get},
@@ -956,9 +953,10 @@ static funcentry_T global_functions[] =
     {"test_null_blob",	0, 0, 0,	  ret_blob,	f_test_null_blob},
     {"test_null_channel", 0, 0, 0,	  ret_channel,	JOB_FUNC(f_test_null_channel)},
     {"test_null_dict",	0, 0, 0,	  ret_dict_any,	f_test_null_dict},
+    {"test_null_function", 0, 0, 0,	  ret_func_any,	f_test_null_function},
     {"test_null_job",	0, 0, 0,	  ret_job,	JOB_FUNC(f_test_null_job)},
     {"test_null_list",	0, 0, 0,	  ret_list_any,	f_test_null_list},
-    {"test_null_partial", 0, 0, 0,	  ret_partial_void, f_test_null_partial},
+    {"test_null_partial", 0, 0, 0,	  ret_func_any, f_test_null_partial},
     {"test_null_string", 0, 0, 0,	  ret_string,	f_test_null_string},
     {"test_option_not_set", 1, 1, FEARG_1,ret_void,	 f_test_option_not_set},
     {"test_override",	2, 2, FEARG_2,	  ret_void,	f_test_override},
@@ -2828,8 +2826,7 @@ common_function(typval_T *argvars, typval_T *rettv, int is_funcref)
 		    if (lv_len > 0)
 		    {
 			range_list_materialize(list);
-			for (li = list->lv_first; li != NULL;
-							 li = li->li_next)
+			FOR_ALL_LIST_ITEMS(list, li)
 			    copy_tv(&li->li_tv, &pt->pt_argv[i++]);
 		    }
 		}
@@ -2900,7 +2897,7 @@ ret_f_function(int argcount, type_T **argtypes UNUSED)
 {
     if (argcount == 1 && argtypes[0]->tt_type == VAR_STRING)
 	return &t_func_any;
-    return &t_partial_void;
+    return &t_func_void;
 }
 
 /*
@@ -5018,7 +5015,7 @@ f_inputlist(typval_T *argvars, typval_T *rettv)
 
     l = argvars[0].vval.v_list;
     range_list_materialize(l);
-    for (li = l->lv_first; li != NULL; li = li->li_next)
+    FOR_ALL_LIST_ITEMS(argvars[0].vval.v_list, li)
     {
 	msg_puts((char *)tv_get_string(&li->li_tv));
 	msg_putchar('\n');
