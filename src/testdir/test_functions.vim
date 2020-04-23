@@ -99,9 +99,11 @@ func Test_len()
   call assert_equal(2, len('ab'))
 
   call assert_equal(0, len([]))
+  call assert_equal(0, len(test_null_list()))
   call assert_equal(2, len([2, 1]))
 
   call assert_equal(0, len({}))
+  call assert_equal(0, len(test_null_dict()))
   call assert_equal(2, len({'a': 1, 'b': 2}))
 
   call assert_fails('call len(v:none)', 'E701:')
@@ -450,7 +452,7 @@ func Test_simplify()
   call assert_equal('/',           simplify('/.'))
   call assert_equal('/',           simplify('/..'))
   call assert_equal('/...',        simplify('/...'))
-  call assert_equal('./dir/file',  simplify('./dir/file'))
+  call assert_equal('./dir/file',  './dir/file'->simplify())
   call assert_equal('./dir/file',  simplify('.///dir//file'))
   call assert_equal('./dir/file',  simplify('./dir/./file'))
   call assert_equal('./file',      simplify('./dir/../file'))
@@ -659,6 +661,7 @@ func Save_mode()
   return ''
 endfunc
 
+" Test for the mode() function
 func Test_mode()
   new
   call append(0, ["Blue Ball Black", "Brown Band Bowl", ""])
@@ -782,6 +785,8 @@ func Test_mode()
   call assert_equal('c-c', g:current_modes)
   call feedkeys("gQecho \<C-R>=Save_mode()\<CR>\<CR>vi\<CR>", 'xt')
   call assert_equal('c-cv', g:current_modes)
+  call feedkeys("Qcall Save_mode()\<CR>vi\<CR>", 'xt')
+  call assert_equal('c-ce', g:current_modes)
   " How to test Ex mode?
 
   bwipe!
@@ -789,13 +794,39 @@ func Test_mode()
   set complete&
 endfunc
 
+" Test for append()
 func Test_append()
   enew!
   split
   call append(0, ["foo"])
+  call append(1, [])
+  call append(1, test_null_list())
+  call assert_equal(['foo', ''], getline(1, '$'))
   split
   only
   undo
+  undo
+
+  " Using $ instead of '$' must give an error
+  call assert_fails("call append($, 'foobar')", 'E116:')
+endfunc
+
+" Test for setline()
+func Test_setline()
+  new
+  call setline(0, ["foo"])
+  call setline(0, [])
+  call setline(0, test_null_list())
+  call setline(1, ["bar"])
+  call setline(1, [])
+  call setline(1, test_null_list())
+  call setline(2, [])
+  call setline(2, test_null_list())
+  call setline(3, [])
+  call setline(3, test_null_list())
+  call setline(2, ["baz"])
+  call assert_equal(['bar', 'baz'], getline(1, '$'))
+  close!
 endfunc
 
 func Test_getbufvar()
@@ -905,6 +936,7 @@ func Test_match_func()
   call assert_equal(-1, match(['a', 'b', 'c', 'a'], 'a', 5))
   call assert_equal(4,  match('testing', 'ing', -1))
   call assert_fails("let x=match('testing', 'ing', 0, [])", 'E745:')
+  call assert_equal(-1, match(test_null_list(), 2))
 endfunc
 
 func Test_matchend()
@@ -1283,6 +1315,19 @@ func Test_inputlist()
   call assert_equal(2, c)
   call feedkeys(":let c = inputlist(['Select color:', '1. red', '2. green', '3. blue'])\<cr>3\<cr>", 'tx')
   call assert_equal(3, c)
+
+  " Use backspace to delete characters in the prompt
+  call feedkeys(":let c = inputlist(['Select color:', '1. red', '2. green', '3. blue'])\<cr>1\<BS>3\<BS>2\<cr>", 'tx')
+  call assert_equal(2, c)
+
+  " Use mouse to make a selection
+  call test_setmouse(&lines - 3, 2)
+  call feedkeys(":let c = inputlist(['Select color:', '1. red', '2. green', '3. blue'])\<cr>\<LeftMouse>", 'tx')
+  call assert_equal(1, c)
+  " Mouse click outside of the list
+  call test_setmouse(&lines - 6, 2)
+  call feedkeys(":let c = inputlist(['Select color:', '1. red', '2. green', '3. blue'])\<cr>\<LeftMouse>", 'tx')
+  call assert_equal(-2, c)
 
   call assert_fails('call inputlist("")', 'E686:')
 endfunc
@@ -1775,6 +1820,7 @@ func Test_call()
   call assert_equal(3, 'len'->call([123]))
   call assert_fails("call call('len', 123)", 'E714:')
   call assert_equal(0, call('', []))
+  call assert_equal(0, call('len', test_null_list()))
 
   function Mylen() dict
      return len(self.data)
@@ -1842,15 +1888,6 @@ endfunc
 func Test_state()
   CheckRunVimInTerminal
 
-  " In the first run try a short wait time.  If the test fails retry with a
-  " longer wait time.
-  if g:run_nr == 1
-    let wait_time = 50
-  elseif g:run_nr == 2
-    let wait_time = 200
-  else
-    let wait_time = 500
-  endif
   let getstate = ":echo 'state: ' .. g:state .. '; mode: ' .. g:mode\<CR>"
 
   let lines =<< trim END
@@ -1872,27 +1909,27 @@ func Test_state()
 
   " Using a timer callback
   call term_sendkeys(buf, ":call RunTimer()\<CR>")
-  call term_wait(buf, wait_time)
+  call TermWait(buf, 25)
   call term_sendkeys(buf, getstate)
   call WaitForAssert({-> assert_match('state: c; mode: n', term_getline(buf, 6))}, 1000)
 
   " Halfway a mapping
   call term_sendkeys(buf, ":call RunTimer()\<CR>;")
-  call term_wait(buf, wait_time)
+  call TermWait(buf, 25)
   call term_sendkeys(buf, ";")
   call term_sendkeys(buf, getstate)
   call WaitForAssert({-> assert_match('state: mSc; mode: n', term_getline(buf, 6))}, 1000)
 
   " Insert mode completion (bit slower on Mac)
   call term_sendkeys(buf, ":call RunTimer()\<CR>Got\<C-N>")
-  call term_wait(buf, wait_time)
+  call TermWait(buf, 25)
   call term_sendkeys(buf, "\<Esc>")
   call term_sendkeys(buf, getstate)
   call WaitForAssert({-> assert_match('state: aSc; mode: i', term_getline(buf, 6))}, 1000)
 
   " Autocommand executing
   call term_sendkeys(buf, ":set filetype=foobar\<CR>")
-  call term_wait(buf, wait_time)
+  call TermWait(buf, 25)
   call term_sendkeys(buf, getstate)
   call WaitForAssert({-> assert_match('state: xS; mode: n', term_getline(buf, 6))}, 1000)
 
@@ -1900,7 +1937,7 @@ func Test_state()
 
   " messages scrolled
   call term_sendkeys(buf, ":call RunTimer()\<CR>:echo \"one\\ntwo\\nthree\"\<CR>")
-  call term_wait(buf, wait_time)
+  call TermWait(buf, 25)
   call term_sendkeys(buf, "\<CR>")
   call term_sendkeys(buf, getstate)
   call WaitForAssert({-> assert_match('state: Scs; mode: r', term_getline(buf, 6))}, 1000)
@@ -2035,6 +2072,7 @@ func Test_range()
 
   " list2str()
   call assert_equal('ABC', list2str(range(65, 67)))
+  call assert_fails('let s = list2str(5)', 'E474:')
 
   " lock()
   let thelist = range(5)
@@ -2206,6 +2244,19 @@ func Test_screen_functions()
   call assert_equal(-1, screenattr(-1, -1))
   call assert_equal(-1, screenchar(-1, -1))
   call assert_equal([], screenchars(-1, -1))
+endfunc
+
+" Test for getcurpos() and setpos()
+func Test_getcurpos_setpos()
+  new
+  call setline(1, ['012345678', '012345678'])
+  normal gg6l
+  let sp = getcurpos()
+  normal 0
+  call setpos('.', sp)
+  normal jyl
+  call assert_equal('6', @")
+  close!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -146,9 +146,7 @@ endfunc
 " In Ex-mode, backslashes at the end of a command should be halved.
 func Test_Ex_echo_backslash()
   " This test works only when the language is English
-  if v:lang != "C" && v:lang !~ '^[Ee]n'
-    return
-  endif
+  CheckEnglish
   let bsl = '\\\\'
   let bsl2 = '\\\'
   call assert_fails('call feedkeys("Qecho " .. bsl .. "\nvisual\n", "xt")',
@@ -160,13 +158,13 @@ endfunc
 func Test_ex_mode_errors()
   " Not allowed to enter ex mode when text is locked
   au InsertCharPre <buffer> normal! gQ<CR>
-  let caught_e523 = 0
+  let caught_e565 = 0
   try
     call feedkeys("ix\<esc>", 'xt')
-  catch /^Vim\%((\a\+)\)\=:E523/ " catch E523
-    let caught_e523 = 1
+  catch /^Vim\%((\a\+)\)\=:E565/ " catch E565
+    let caught_e565 = 1
   endtry
-  call assert_equal(1, caught_e523)
+  call assert_equal(1, caught_e565)
   au! InsertCharPre
 endfunc
 

@@ -207,6 +207,7 @@ func Test_blob_add()
   call assert_equal(0z001122, b)
   call add(b, '51')
   call assert_equal(0z00112233, b)
+  call assert_equal(1, add(test_null_blob(), 0x22))
 
   call assert_fails('call add(b, [9])', 'E745:')
   call assert_fails('call add("", 0x01)', 'E897:')
@@ -257,6 +258,9 @@ func Test_blob_read_write()
   let br = readfile('Xblob', 'B')
   call assert_equal(b, br)
   call delete('Xblob')
+
+  " This was crashing when calling readfile() with a directory.
+  call assert_fails("call readfile('.', 'B')", 'E17: "." is a directory')
 endfunc
 
 " filter() item in blob
@@ -288,6 +292,7 @@ func Test_blob_index()
   call assert_equal(3, index(0z11110111, 0x11, -2))
   call assert_equal(0, index(0z11110111, 0x11, -10))
   call assert_fails("echo index(0z11110111, 0x11, [])", 'E745:')
+  call assert_equal(-1, index(test_null_blob(), 1))
 
   call assert_fails('call index("asdf", 0)', 'E897:')
 endfunc
@@ -304,6 +309,9 @@ func Test_blob_insert()
   call assert_fails('call insert(b, -1)', 'E475:')
   call assert_fails('call insert(b, 257)', 'E475:')
   call assert_fails('call insert(b, 0, [9])', 'E745:')
+  call assert_fails('call insert(b, 0, -20)', 'E475:')
+  call assert_fails('call insert(b, 0, 20)', 'E475:')
+  call assert_fails('call insert(b, [])', 'E745:')
 endfunc
 
 func Test_blob_reverse()

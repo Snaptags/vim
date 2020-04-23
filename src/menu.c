@@ -1980,7 +1980,7 @@ show_popupmenu(void)
 
     apply_autocmds(EVENT_MENUPOPUP, (char_u*)mode, NULL, FALSE, curbuf);
 
-    for (menu = root_menu; menu != NULL; menu = menu->next)
+    FOR_ALL_MENUS(menu)
 	if (STRNCMP("PopUp", menu->name, 5) == 0 && STRNCMP(menu->name + 5, mode, mode_len) == 0)
 	    break;
 
@@ -2133,7 +2133,7 @@ gui_is_menu_shortcut(int key)
 
     if (key < 256)
 	key = TOLOWER_LOC(key);
-    for (menu = root_menu; menu != NULL; menu = menu->next)
+    FOR_ALL_MENUS(menu)
 	if (menu->mnemonic == key
 		|| (menu->mnemonic < 256 && TOLOWER_LOC(menu->mnemonic) == key))
 	    return TRUE;
@@ -2680,7 +2680,7 @@ ex_menutranslate(exarg_T *eap UNUSED)
     /*
      * ":menutrans clear": clear all translations.
      */
-    if (STRNCMP(arg, "clear", 5) == 0 && ends_excmd(*skipwhite(arg + 5)))
+    if (STRNCMP(arg, "clear", 5) == 0 && ends_excmd2(arg, skipwhite(arg + 5)))
     {
 	tp = (menutrans_T *)menutrans_ga.ga_data;
 	for (i = 0; i < menutrans_ga.ga_len; ++i)
@@ -2703,7 +2703,9 @@ ex_menutranslate(exarg_T *eap UNUSED)
 	to = skipwhite(arg);
 	*arg = NUL;
 	arg = menu_skip_part(to);
-	if (arg == to)
+	if (arg == to || ends_excmd2(eap->arg, from)
+		      || ends_excmd2(eap->arg, to)
+		      || !ends_excmd2(eap->arg, skipwhite(arg)))
 	    emsg(_(e_invarg));
 	else
 	{

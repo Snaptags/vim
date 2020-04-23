@@ -285,6 +285,7 @@ func Test_getsettagstack()
   call assert_fails("call settagstack(1, {'items' : 10})", 'E714')
   call assert_fails("call settagstack(1, {'items' : []}, 10)", 'E928')
   call assert_fails("call settagstack(1, {'items' : []}, 'b')", 'E962')
+  call assert_equal(-1, settagstack(0, test_null_dict()))
 
   set tags=Xtags
   call writefile(["!_TAG_FILE_ENCODING\tutf-8\t//",
@@ -544,7 +545,7 @@ func Test_tselect()
   call writefile(lines, 'XTest_tselect')
   let buf = RunVimInTerminal('-S XTest_tselect', {'rows': 10, 'cols': 50})
 
-  call term_wait(buf, 100)
+  call TermWait(buf, 50)
   call term_sendkeys(buf, ":tselect main\<CR>2\<CR>")
   call VerifyScreenDump(buf, 'Test_tselect_1', {})
 

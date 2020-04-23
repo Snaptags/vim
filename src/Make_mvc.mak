@@ -317,6 +317,10 @@ MSVCRT_NAME = vcruntime$(MSVCRT_VER)
 CPU = ix86
 !endif
 
+### Set the default $(WINVER) to make it work with VC++7.0 (VS.NET)
+!ifndef WINVER
+WINVER = 0x0501
+!endif
 
 # Flag to turn on Win64 compatibility warnings for VC7.x and VC8.
 WP64CHECK = /Wp64
@@ -467,9 +471,12 @@ SOUND_LIB	= winmm.lib
 !if "$(CHANNEL)" == "yes"
 CHANNEL_PRO	= proto/channel.pro
 CHANNEL_OBJ	= $(OBJDIR)/channel.obj
-CHANNEL_DEFS	= -DFEAT_JOB_CHANNEL
+CHANNEL_DEFS	= -DFEAT_JOB_CHANNEL -DFEAT_IPV6
+! if $(WINVER) >= 0x600
+CHANNEL_DEFS	= $(CHANNEL_DEFS) -DHAVE_INET_NTOP
+! endif
 
-NETBEANS_LIB	= WSock32.lib
+NETBEANS_LIB	= WSock32.lib Ws2_32.lib
 !endif
 
 # Set which version of the CRT to use
@@ -491,11 +498,6 @@ CON_LIB = oldnames.lib kernel32.lib advapi32.lib shell32.lib gdi32.lib \
           comdlg32.lib ole32.lib netapi32.lib uuid.lib /machine:$(CPU)
 !if "$(DELAYLOAD)" == "yes"
 CON_LIB = $(CON_LIB) /DELAYLOAD:comdlg32.dll /DELAYLOAD:ole32.dll DelayImp.lib
-!endif
-
-### Set the default $(WINVER) to make it work with VC++7.0 (VS.NET)
-!ifndef WINVER
-WINVER = 0x0501
 !endif
 
 # If you have a fixed directory for $VIM or $VIMRUNTIME, other than the normal
@@ -730,6 +732,7 @@ OBJ = \
 	$(OUTDIR)\change.obj \
 	$(OUTDIR)\charset.obj \
 	$(OUTDIR)\cindent.obj \
+	$(OUTDIR)\clientserver.obj \
 	$(OUTDIR)\clipboard.obj \
 	$(OUTDIR)\cmdexpand.obj \
 	$(OUTDIR)\cmdhist.obj \
@@ -1516,6 +1519,8 @@ $(OUTDIR)/charset.obj:	$(OUTDIR) charset.c  $(INCL)
 
 $(OUTDIR)/cindent.obj:	$(OUTDIR) cindent.c  $(INCL)
 
+$(OUTDIR)/clientserver.obj:	$(OUTDIR) clientserver.c  $(INCL)
+
 $(OUTDIR)/clipboard.obj:	$(OUTDIR) clipboard.c  $(INCL)
 
 $(OUTDIR)/cmdexpand.obj:	$(OUTDIR) cmdexpand.c  $(INCL)
@@ -1865,6 +1870,7 @@ proto.h: \
 	proto/change.pro \
 	proto/charset.pro \
 	proto/cindent.pro \
+	proto/clientserver.pro \
 	proto/clipboard.pro \
 	proto/cmdexpand.pro \
 	proto/cmdhist.pro \

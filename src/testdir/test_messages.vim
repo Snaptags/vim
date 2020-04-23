@@ -40,6 +40,8 @@ function Test_messages()
   finally
     let &more = oldmore
   endtry
+
+  call assert_fails('message 1', 'E474:')
 endfunction
 
 " Patch 7.4.1696 defined the "clearmode()" function for clearing the mode
@@ -74,6 +76,7 @@ func Test_echomsg()
   call assert_equal("\n12345", execute(':echomsg 12345'))
   call assert_equal("\n[]", execute(':echomsg []'))
   call assert_equal("\n[1, 2, 3]", execute(':echomsg [1, 2, 3]'))
+  call assert_equal("\n[1, 2, []]", execute(':echomsg [1, 2, test_null_list()]'))
   call assert_equal("\n{}", execute(':echomsg {}'))
   call assert_equal("\n{'a': 1, 'b': 2}", execute(':echomsg {"a": 1, "b": 2}'))
   if has('float')
@@ -114,7 +117,7 @@ func Test_mode_message_at_leaving_insert_by_ctrl_c()
 
   let rows = 10
   let buf = term_start([GetVimProg(), '--clean', '-S', testfile], {'term_rows': rows})
-  call term_wait(buf, 200)
+  call TermWait(buf, 100)
   call assert_equal('run', job_status(term_getjob(buf)))
 
   call term_sendkeys(buf, "i")
@@ -143,7 +146,7 @@ func Test_mode_message_at_leaving_insert_with_esc_mapped()
 
   let rows = 10
   let buf = term_start([GetVimProg(), '--clean', '-S', testfile], {'term_rows': rows})
-  call term_wait(buf, 200)
+  call WaitForAssert({-> assert_match('0,0-1\s*All$', term_getline(buf, rows - 1))})
   call assert_equal('run', job_status(term_getjob(buf)))
 
   call term_sendkeys(buf, "i")

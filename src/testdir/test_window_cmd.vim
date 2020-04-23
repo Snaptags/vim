@@ -203,43 +203,6 @@ func Test_window_split_no_room()
   %bw!
 endfunc
 
-func Test_window_preview()
-  CheckFeature quickfix
-
-  " Open a preview window
-  pedit Xa
-  call assert_equal(2, winnr('$'))
-  call assert_equal(0, &previewwindow)
-
-  " Go to the preview window
-  wincmd P
-  call assert_equal(1, &previewwindow)
-
-  " Close preview window
-  wincmd z
-  call assert_equal(1, winnr('$'))
-  call assert_equal(0, &previewwindow)
-
-  call assert_fails('wincmd P', 'E441:')
-endfunc
-
-func Test_window_preview_from_help()
-  CheckFeature quickfix
-
-  filetype on
-  call writefile(['/* some C code */'], 'Xpreview.c')
-  help
-  pedit Xpreview.c
-  wincmd P
-  call assert_equal(1, &previewwindow)
-  call assert_equal('c', &filetype)
-  wincmd z
-
-  filetype off
-  close
-  call delete('Xpreview.c')
-endfunc
-
 func Test_window_exchange()
   e Xa
 
@@ -1114,6 +1077,18 @@ endfunc
 func Test_split_cmds_with_no_room()
   call Run_noroom_for_newwindow_test('h')
   call Run_noroom_for_newwindow_test('v')
+endfunc
+
+" Test for various wincmd failures
+func Test_wincmd_fails()
+  only!
+  call assert_beeps("normal \<C-W>w")
+  call assert_beeps("normal \<C-W>p")
+  call assert_beeps("normal \<C-W>gk")
+  call assert_beeps("normal \<C-W>r")
+  call assert_beeps("normal \<C-W>K")
+  call assert_beeps("normal \<C-W>H")
+  call assert_beeps("normal \<C-W>2gt")
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -402,7 +402,7 @@ func Test_pum_with_folds_two_tabs()
 
   call writefile(lines, 'Xpumscript')
   let buf = RunVimInTerminal('-S Xpumscript', #{rows: 10})
-  call term_wait(buf, 100)
+  call TermWait(buf, 50)
   call term_sendkeys(buf, "a\<C-N>")
   call VerifyScreenDump(buf, 'Test_pum_with_folds_two_tabs', {})
 
@@ -427,9 +427,9 @@ func Test_pum_with_preview_win()
 
   call writefile(lines, 'Xpreviewscript')
   let buf = RunVimInTerminal('-S Xpreviewscript', #{rows: 12})
-  call term_wait(buf, 100)
+  call TermWait(buf, 50)
   call term_sendkeys(buf, "Gi\<C-X>\<C-O>")
-  call term_wait(buf, 200)
+  call TermWait(buf, 100)
   call term_sendkeys(buf, "\<C-N>")
   call VerifyScreenDump(buf, 'Test_pum_with_preview_win', {})
 
@@ -465,3 +465,54 @@ func Test_ins_compl_tag_sft()
   set tags&
   %bwipe!
 endfunc
+
+" Test for 'completefunc' deleting text
+func Test_completefunc_error()
+  new
+  " delete text when called for the first time
+  func CompleteFunc(findstart, base)
+    if a:findstart == 1
+      normal dd
+      return col('.') - 1
+    endif
+    return ['a', 'b']
+  endfunc
+  set completefunc=CompleteFunc
+  call setline(1, ['', 'abcd', ''])
+  call assert_fails('exe "normal 2G$a\<C-X>\<C-U>"', 'E840:')
+
+  " delete text when called for the second time
+  func CompleteFunc2(findstart, base)
+    if a:findstart == 1
+      return col('.') - 1
+    endif
+    normal dd
+    return ['a', 'b']
+  endfunc
+  set completefunc=CompleteFunc2
+  call setline(1, ['', 'abcd', ''])
+  call assert_fails('exe "normal 2G$a\<C-X>\<C-U>"', 'E565:')
+
+  set completefunc&
+  delfunc CompleteFunc
+  delfunc CompleteFunc2
+  close!
+endfunc
+
+" Test for errors in using complete() function
+func Test_complete_func_error()
+  call assert_fails('call complete(1, ["a"])', 'E785:')
+  func ListColors()
+    call complete(col('.'), "blue")
+  endfunc
+  call assert_fails('exe "normal i\<C-R>=ListColors()\<CR>"', 'E474:')
+  func ListMonths()
+    call complete(col('.'), test_null_list())
+  endfunc
+  call assert_fails('exe "normal i\<C-R>=ListMonths()\<CR>"', 'E474:')
+  delfunc ListColors
+  delfunc ListMonths
+  call assert_fails('call complete_info({})', 'E714:')
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

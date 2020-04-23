@@ -44,6 +44,7 @@ func Test_dict()
   call assert_equal('zero', d[0])
   call assert_true(has_key(d, ''))
   call assert_true(has_key(d, 'a'))
+  call assert_fails("let i = has_key([], 'a')", 'E715:')
 
   let d[''] = 'none'
   let d['a'] = 'aaa'
@@ -93,13 +94,6 @@ func Test_loop_over_null_list()
   for i in null_list
     call assert_report('should not get here')
   endfor
-endfunc
-
-func Test_compare_null_dict()
-  call assert_fails('let x = test_null_dict()[10]')
-  call assert_equal({}, {})
-  call assert_equal(test_null_dict(), test_null_dict())
-  call assert_notequal({}, test_null_dict())
 endfunc
 
 func Test_set_reg_null_list()
@@ -373,8 +367,10 @@ function Test_printf_errors()
   call assert_fails('echo printf("%d", [])', 'E745:')
   call assert_fails('echo printf("%d", 1, 2)', 'E767:')
   call assert_fails('echo printf("%*d", 1)', 'E766:')
+  call assert_fails('echo printf("%s")', 'E766:')
   if has('float')
     call assert_fails('echo printf("%d", 1.2)', 'E805:')
+    call assert_fails('echo printf("%f")')
   endif
 endfunc
 
@@ -429,52 +425,6 @@ function Test_printf_spec_b()
   call assert_equal("1111111111111111111111111111111111111111111111111111111111111111", printf('%b', -1))
 endfunc
 
-func Test_substitute_expr()
-  let g:val = 'XXX'
-  call assert_equal('XXX', substitute('yyy', 'y*', '\=g:val', ''))
-  call assert_equal('XXX', substitute('yyy', 'y*', {-> g:val}, ''))
-  call assert_equal("-\u1b \uf2-", substitute("-%1b %f2-", '%\(\x\x\)',
-			   \ '\=nr2char("0x" . submatch(1))', 'g'))
-  call assert_equal("-\u1b \uf2-", substitute("-%1b %f2-", '%\(\x\x\)',
-			   \ {-> nr2char("0x" . submatch(1))}, 'g'))
-
-  call assert_equal('231', substitute('123', '\(.\)\(.\)\(.\)',
-	\ {-> submatch(2) . submatch(3) . submatch(1)}, ''))
-
-  func Recurse()
-    return substitute('yyy', 'y\(.\)y', {-> submatch(1)}, '')
-  endfunc
-  " recursive call works
-  call assert_equal('-y-x-', substitute('xxx', 'x\(.\)x', {-> '-' . Recurse() . '-' . submatch(1) . '-'}, ''))
-
-  call assert_fails("let s=submatch([])", 'E745:')
-  call assert_fails("let s=submatch(2, [])", 'E745:')
-endfunc
-
-func Test_invalid_submatch()
-  " This was causing invalid memory access in Vim-7.4.2232 and older
-  call assert_fails("call substitute('x', '.', {-> submatch(10)}, '')", 'E935:')
-endfunc
-
-func Test_substitute_expr_arg()
-  call assert_equal('123456789-123456789=', substitute('123456789',
-	\ '\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)',
-	\ {m -> m[0] . '-' . m[1] . m[2] . m[3] . m[4] . m[5] . m[6] . m[7] . m[8] . m[9] . '='}, ''))
-
-  call assert_equal('123456-123456=789', substitute('123456789',
-	\ '\(.\)\(.\)\(.\)\(a*\)\(n*\)\(.\)\(.\)\(.\)\(x*\)',
-	\ {m -> m[0] . '-' . m[1] . m[2] . m[3] . m[4] . m[5] . m[6] . m[7] . m[8] . m[9] . '='}, ''))
-
-  call assert_equal('123456789-123456789x=', substitute('123456789',
-	\ '\(.\)\(.\)\(.*\)',
-	\ {m -> m[0] . '-' . m[1] . m[2] . m[3] . 'x' . m[4] . m[5] . m[6] . m[7] . m[8] . m[9] . '='}, ''))
-
-  call assert_fails("call substitute('xxx', '.', {m -> string(add(m, 'x'))}, '')", 'E742:')
-  call assert_fails("call substitute('xxx', '.', {m -> string(insert(m, 'x'))}, '')", 'E742:')
-  call assert_fails("call substitute('xxx', '.', {m -> string(extend(m, ['x']))}, '')", 'E742:')
-  call assert_fails("call substitute('xxx', '.', {m -> string(remove(m, 1))}, '')", 'E742:')
-endfunc
-
 func Test_function_with_funcref()
   let s:f = function('type')
   let s:fref = function(s:f)
@@ -502,6 +452,7 @@ func Test_funcref()
   call assert_fails('echo funcref("{")', 'E475:')
   let OneByRef = funcref("One", repeat(["foo"], 20))
   call assert_fails('let OneByRef = funcref("One", repeat(["foo"], 21))', 'E118:')
+  call assert_fails('echo function("min") =~ function("min")', 'E694:')
 endfunc
 
 func Test_setmatches()

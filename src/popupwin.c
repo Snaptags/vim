@@ -798,16 +798,16 @@ apply_general_options(win_T *wp, dict_T *dict)
 		    if (*str != NUL)
 			wp->w_border_char[i] = mb_ptr2char(str);
 		}
-	    }
-	    if (list->lv_len == 1)
-		for (i = 1; i < 8; ++i)
-		    wp->w_border_char[i] = wp->w_border_char[0];
-	    if (list->lv_len == 2)
-	    {
-		for (i = 4; i < 8; ++i)
-		    wp->w_border_char[i] = wp->w_border_char[1];
-		for (i = 1; i < 4; ++i)
-		    wp->w_border_char[i] = wp->w_border_char[0];
+		if (list->lv_len == 1)
+		    for (i = 1; i < 8; ++i)
+			wp->w_border_char[i] = wp->w_border_char[0];
+		if (list->lv_len == 2)
+		{
+		    for (i = 4; i < 8; ++i)
+			wp->w_border_char[i] = wp->w_border_char[1];
+		    for (i = 1; i < 4; ++i)
+			wp->w_border_char[i] = wp->w_border_char[0];
+		}
 	    }
 	}
     }
@@ -2133,7 +2133,7 @@ popup_close_and_callback(win_T *wp, typval_T *arg)
 	// - another popup window with a terminal
 	// - the previous window
 	// - the first one.
-	for (owp = first_popupwin; owp != NULL; owp = owp->w_next)
+	FOR_ALL_POPUPWINS(owp)
 	    if (owp != curwin && owp->w_buffer->b_term != NULL)
 		break;
 	if (owp != NULL)
