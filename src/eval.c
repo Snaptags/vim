@@ -34,8 +34,6 @@ static char *e_float_as_string = N_("E806: using Float as a String");
  */
 static int current_copyID = 0;
 
-static int echo_attr = 0;   // attributes used for ":echo"
-
 /*
  * Info used by a ":for" loop.
  */
@@ -243,6 +241,9 @@ eval_expr_typval(typval_T *expr, typval_T *argv, int argc, typval_T *rettv)
     {
 	partial_T   *partial = expr->vval.v_partial;
 
+	if (partial == NULL)
+	    return FAIL;
+
 	if (partial->pt_func != NULL && partial->pt_func->uf_dfunc_idx >= 0)
 	{
 	    if (call_def_function(partial->pt_func, argc, argv, rettv) == FAIL)
@@ -392,7 +393,7 @@ eval_to_string(
 
 /*
  * Call eval_to_string() without using current local variables and using
- * textlock.  When "use_sandbox" is TRUE use the sandbox.
+ * textwinlock.  When "use_sandbox" is TRUE use the sandbox.
  */
     char_u *
 eval_to_string_safe(
@@ -406,11 +407,11 @@ eval_to_string_safe(
     save_funccal(&funccal_entry);
     if (use_sandbox)
 	++sandbox;
-    ++textlock;
+    ++textwinlock;
     retval = eval_to_string(arg, nextcmd, FALSE);
     if (use_sandbox)
 	--sandbox;
-    --textlock;
+    --textwinlock;
     restore_funccal();
     return retval;
 }
@@ -575,7 +576,7 @@ eval_foldexpr(char_u *arg, int *cp)
     ++emsg_off;
     if (use_sandbox)
 	++sandbox;
-    ++textlock;
+    ++textwinlock;
     *cp = NUL;
     if (eval0(arg, &tv, NULL, TRUE) == FAIL)
 	retval = 0;
@@ -600,7 +601,7 @@ eval_foldexpr(char_u *arg, int *cp)
     --emsg_off;
     if (use_sandbox)
 	--sandbox;
-    --textlock;
+    --textwinlock;
 
     return (int)retval;
 }
@@ -3681,7 +3682,9 @@ partial_name(partial_T *pt)
 {
     if (pt->pt_name != NULL)
 	return pt->pt_name;
-    return pt->pt_func->uf_name;
+    if (pt->pt_func != NULL)
+	return pt->pt_func->uf_name;
+    return (char_u *)"";
 }
 
     static void
@@ -3700,6 +3703,24 @@ partial_free(partial_T *pt)
     }
     else
 	func_ptr_unref(pt->pt_func);
+
+    if (pt->pt_funcstack != NULL)
+    {
+	// Decrease the reference count for the context of a closure.  If down
+	// to zero free it and clear the variables on the stack.
+	if (--pt->pt_funcstack->fs_refcount == 0)
+	{
+	    garray_T	*gap = &pt->pt_funcstack->fs_ga;
+	    typval_T	*stack = gap->ga_data;
+
+	    for (i = 0; i < gap->ga_len; ++i)
+		clear_tv(stack + i);
+	    ga_clear(gap);
+	    vim_free(pt->pt_funcstack);
+	}
+	pt->pt_funcstack = NULL;
+    }
+
     vim_free(pt);
 }
 
@@ -4316,9 +4337,11 @@ set_ref_in_item(
 	partial_T	*pt = tv->vval.v_partial;
 	int		i;
 
-	// A partial does not have a copyID, because it cannot contain itself.
-	if (pt != NULL)
+	if (pt != NULL && pt->pt_copyID != copyID)
 	{
+	    // Didn't see this partial yet.
+	    pt->pt_copyID = copyID;
+
 	    abort = set_ref_in_func(pt->pt_name, pt->pt_func, copyID);
 
 	    if (pt->pt_dict != NULL)
@@ -4333,6 +4356,15 @@ set_ref_in_item(
 	    for (i = 0; i < pt->pt_argc; ++i)
 		abort = abort || set_ref_in_item(&pt->pt_argv[i], copyID,
 							ht_stack, list_stack);
+	    if (pt->pt_funcstack != NULL)
+	    {
+		typval_T    *stack = pt->pt_funcstack->fs_ga.ga_data;
+
+		for (i = 0; i < pt->pt_funcstack->fs_ga.ga_len; ++i)
+		    abort = abort || set_ref_in_item(stack + i, copyID,
+							 ht_stack, list_stack);
+	    }
+
 	}
     }
 #ifdef FEAT_JOB_CHANNEL
@@ -6145,7 +6177,6 @@ ex_execute(exarg_T *eap)
     char_u	*p;
     garray_T	ga;
     int		len;
-    int		save_did_emsg;
 
     ga_init2(&ga, 1, 80);
 
@@ -6213,8 +6244,9 @@ ex_execute(exarg_T *eap)
 	}
 	else if (eap->cmdidx == CMD_echoerr)
 	{
+	    int		save_did_emsg = did_emsg;
+
 	    // We don't want to abort following commands, restore did_emsg.
-	    save_did_emsg = did_emsg;
 	    emsg(ga.ga_data);
 	    if (!force_abort)
 		did_emsg = save_did_emsg;
@@ -6418,8 +6450,9 @@ typval_compare(
 					&& typ1->vval.v_partial == NULL)
 		|| (typ2->v_type == VAR_PARTIAL
 					&& typ2->vval.v_partial == NULL))
-	    // when a partial is NULL assume not equal
-	    n1 = FALSE;
+	    // When both partials are NULL, then they are equal.
+	    // Otherwise they are not equal.
+	    n1 = (typ1->vval.v_partial == typ2->vval.v_partial);
 	else if (type_is)
 	{
 	    if (typ1->v_type == VAR_FUNC && typ2->v_type == VAR_FUNC)

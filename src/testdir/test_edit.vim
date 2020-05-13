@@ -328,8 +328,8 @@ func Test_edit_11_indentexpr()
   bw!
 endfunc
 
+" Test changing indent in replace mode
 func Test_edit_12()
-  " Test changing indent in replace mode
   new
   call setline(1, ["\tabc", "\tdef"])
   call cursor(2, 4)
@@ -368,15 +368,15 @@ func Test_edit_12()
   call feedkeys("R\<c-t>\<c-t>", 'tnix')
   call assert_equal(["\tabc", "\t\t\tdef"], getline(1, '$'))
   call assert_equal([0, 2, 2, 0], getpos('.'))
-  set et
-  set sw& et&
+  set sw&
+
+  " In replace mode, after hitting enter in a line with tab characters,
+  " pressing backspace should restore the tab characters.
   %d
-  call setline(1, ["\t/*"])
-  set formatoptions=croql
-  call cursor(1, 3)
-  call feedkeys("A\<cr>\<cr>/", 'tnix')
-  call assert_equal(["\t/*", " *", " */"], getline(1, '$'))
-  set formatoptions&
+  setlocal autoindent backspace=2
+  call setline(1, "\tone\t\ttwo")
+  exe "normal ggRred\<CR>six" .. repeat("\<BS>", 8)
+  call assert_equal(["\tone\t\ttwo"], getline(1, '$'))
   bw!
 endfunc
 
@@ -927,7 +927,7 @@ func Test_edit_completefunc_delete()
   set completefunc=CompleteFunc
   call setline(1, ['', 'abcd', ''])
   2d
-  call assert_fails("normal 2G$a\<C-X>\<C-U>", 'E565:')
+  call assert_fails("normal 2G$a\<C-X>\<C-U>", 'E578:')
   bwipe!
 endfunc
 
@@ -1444,7 +1444,7 @@ func Test_edit_alt()
   call delete('XAltFile')
 endfunc
 
-func Test_leave_insert_autocmd()
+func Test_edit_InsertLeave()
   new
   au InsertLeave * let g:did_au = 1
   let g:did_au = 0
@@ -1472,6 +1472,21 @@ func Test_leave_insert_autocmd()
   bwipe!
   au! InsertLeave
   iunmap x
+endfunc
+
+func Test_edit_InsertLeave_undo()
+  new XtestUndo
+  set undofile
+  au InsertLeave * wall
+  exe "normal ofoo\<Esc>"
+  call assert_equal(2, line('$'))
+  normal u
+  call assert_equal(1, line('$'))
+
+  bwipe!
+  au! InsertLeave
+  call delete('XtestUndo')
+  set undofile&
 endfunc
 
 " Test for inserting characters using CTRL-V followed by a number.

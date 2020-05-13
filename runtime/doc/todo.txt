@@ -1,4 +1,4 @@
-*todo.txt*      For Vim version 8.2.  Last change: 2020 Apr 20
+*todo.txt*      For Vim version 8.2.  Last change: 2020 May 11
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -38,39 +38,62 @@ browser use: https://github.com/vim/vim/issues/1234
 							*known-bugs*
 -------------------- Known bugs and current work -----------------------
 
+Patch to test TERM signal. (Dominique, #6055)
+
+Include src/po/vim.pot
+
 Vim9 script:
-more tests for # comments:
-  check all calls to ends_excmd() and test that space before # is needed.
-  next: ex_findpat()
-func and partial types:
-- Calling unknown user function does not give proper error message:
-      assert_equal('123text', RefDef2Arg())  typo for "RetDef2Arg"
-- "func" inside "vim9script" doesn't work?  (Ben Jackson, #5670)
-- :func inside vim9script must still use a:arg
-- define function and create funcref in one step:
-	let ref = def(arg: type): rettype
-	    body
-	enddef
+Make closures work:
+  - call closure from not compiled context
+  - Create closure in a loop.  Need to make a list of them.
+Forward declarations:
+  - Cleanup when sourcing a script again: all script-local variables, imports
+    and functions are deleted.
+  - make sure only constants in declarations are executed, no function calls.
+  - Declare a variable at script level without an assignment.
+	let var: string
+    Error without a type or assignment
+	let var  # error!
+Making everything work:
 - Test that a script-local function in Vim9 script cannot be deleted.
 - Test that a function defined inside a :def function is local to that
   function, g: functions can be defined and script-local functions cannot be
   defined.
-Also:
-- When wildcards are expanded, find `=expr` and evaluate it before invoking
-  the command. For example:  :edit `=filename`
+- Check that when using a user function name without prefix, it does not find
+  a global function.  Prefixing g: is required.
+- Compile: let [var, var] = expr
+- Compile: for [key, value] in items(map)
+- Assignment to dict doesn't work:
+      let ret: dict<string> = #{}
+      ret[i] = string(i)
+- Appending to dict item doesn't work:
+    let d[i] ..= value
+- Compile replacement of :s command: s/pat/\=expr/
+- Compile redir to local variable: var_redir_start().
+- Compile builtin functions that access local variables:
+    islocked()
+- Expand `=expr` in :next, :argedit, :argadd, :argdelete, :drop
+- Expand `=expr` in :vimgrep, :vimgrepadd, :lvimgrep, :lvimgrepadd
+- Expand `=expr` in :mkspell
+- Support type for ":let"/":const" at script level for Vim9 script.
+    (Ben Jackson, #5671)
+    Can we share the code from ex_let_const() between direct execution and
+    compiling?
+- Disallow unlet for local/script/imported vars
+- Make "++nr" work.
+- expandcmd() with `=expr` in filename uses legacy expression.
+- eval_expr() in ex_cexpr()
+- eval_expr() call in dbg_parsearg() and debuggy_find()
+- Make "true" and "false" work in vim9script
+New syntax and functionality:
+Improve error checking:
 - "echo Func()" is an error if Func() does not return anything.
-- Check all Ex commands, give error if they use an expression and should be
-  compiled.
+Also:
 - For range: make table of first ASCII character with flag to quickly check if
   it can be a Vim9 command. E.g. "+" can, but "." can't.
 - better implementation for partial and tests for that.
 - Make "g:imported = Export.exported" work in Vim9 script.
 - Make Foo.Bar() work to call the dict function. (#5676)
-- Support type for ":let"/":const" at script level for Vim9 script.
-    (Ben Jackson, #5671)
-    Can we share the code for :let between direct execution and compiling?
-- Disallow unlet for local/script/imported vars
-- Make "++nr" work.
 - Check that import in legacy script works and puts item in s:
 - Error in any command in "vim9script" aborts sourcing.
 - Find a way to test expressions in legacy and Vim9 script without duplication
@@ -93,6 +116,17 @@ Also:
 - Make accessing varargs faster: arg[expr]
 	EVAL expr
 	LOADVARARG (varags idx)
+Further improvements:
+- compile options that are an expression, e.g. "expr:" in 'spellsuggest',
+  'foldexpr', 'foldtext', 'printexpr', 'diffexpr', 'patchexpr', 'charconvert',
+  'balloonexpr', 'includeexpr', 'indentexpr', 'formatexpr'.
+- Make inline function work, to be used as a funcref:
+	let ref = def(arg: type): rettype
+	    body
+	enddef
+- compile get_lambda_tv() in popup_add_timeout()
+- compile "skip" argument of searchpair()
+- compile "expr" and "call" expression of a channel in channel_exe_cmd()?
 
 Popup windows:
 - With some sequence get get hidden finished terminal buffer. (#5768)
@@ -198,7 +232,7 @@ Terminal emulator window:
   conversions.
 
 Error numbers available:
-E453, E454, E460, E489, E491, E565, E578, E610, E611, E653,
+E453, E454, E460, E489, E491, E610, E611, E653,
 E856, E857, E861, E900
 
 Buffer autocommands are a bit inconsistent.  Add a separate set of
@@ -222,7 +256,17 @@ Ready to include.
 
 Patch to add "-d" to xxd. (#5616)
 
+Patch for the Haiku port: #5961
+
 Patch to add Turkish manual. (Emir Sarı, #5641)
+
+Patch to add lua sleep function. (Prabir Shrestha, #6057)
+Alternative: use vim.call and vim.fn: #6063
+
+Patch to add getmarklist() (Yegappan, #6032)
+
+Patch to support different color for undercurl in cterm.
+(Timur Celik, #6011)
 
 Patch to support cindent option to handle pragmas differently.
 (Max Rumpf, #5468)
@@ -233,6 +277,9 @@ Running test_gui and test_gui_init with Motif sometimes kills the window
 manager.  Problem with Motif? Now test_gui crashes in submenu_change().
 Athena is OK.
 Motif: Build on Ubuntu can't enter any text in dialog text fields.
+
+:map output does not clear the reset of the command line.
+(#5623, also see #5962)
 
 Patch to properly break CJK lines: Anton Kochkov, #3875
 Flag in 'formatoptions' is not used in the tests.
@@ -248,7 +295,14 @@ Ready to include?  Review the code.
 When 'lazyredraw' is set sometimes the title is not updated.
 (Jason Franklin, 2020 Feb 3)  Looks like a race condition.
 
-Patch to delete BeOS code. (#5817)
+Patch to delete BeOS code. (#5817)  Anyone who wants to keep it?
+
+With bash ":make" does not set v:shell_error.  Possible solution: set
+'shellpipe' to "2>&1| tee %s; exit ${PIPESTATUS[0]}"  #5994
+
+When changing the crypt key the buffer should be considered modified.
+Like when changing 'fileformat'.  Save the old key in save_file_ff().
+(Ninu-Ciprian Marginean)
 
 Strange sequence of BufWipeout and BufNew events while doing omni-complete.
 (Paul Jolly, #5656)
@@ -330,11 +384,6 @@ Python 3.8 doesn't work. (Antonios Hadjigeorgalis, #5509)
 
 The :syntax cchar value can only be a single character.  It would be useful to
 support combining characters. (Charles Campbell)  Also #4687
-
-Include Haiku port. (Adrien Destugues, Siarzhuk Zharski, 2013 Oct 24)
-It can replace the BeOS code, which is likely not used anymore.
-Now on github: #1856.  Updated Oct 2017
-Got permission to include this under the Vim license.
 
 "--cleanFOO" does not result in an error. (#5537)
 

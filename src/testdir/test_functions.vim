@@ -29,6 +29,8 @@ func Test_has()
     call assert_equal(0, and(has('ttyout'), 0))
     call assert_equal(1, has('multi_byte_encoding'))
   endif
+  call assert_equal(1, has('vcon', 1))
+  call assert_equal(1, has('mouse_gpm_enabled', 1))
 
   call assert_equal(0, has('nonexistent'))
   call assert_equal(0, has('nonexistent', 1))
@@ -480,6 +482,7 @@ func Test_pathshorten()
   call assert_equal('~.f/bar', pathshorten('~.foo/bar'))
   call assert_equal('.~f/bar', pathshorten('.~foo/bar'))
   call assert_equal('~/f/bar', pathshorten('~/foo/bar'))
+  call assert_fails('call pathshorten([])', 'E730:')
 endfunc
 
 func Test_strpart()
@@ -567,6 +570,12 @@ func Test_tolower()
   " invalid memory.
   call tolower("\xC0\x80\xC0")
   call tolower("123\xC0\x80\xC0")
+
+  " Test in latin1 encoding
+  let save_enc = &encoding
+  set encoding=latin1
+  call assert_equal("abc", tolower("ABC"))
+  let &encoding = save_enc
 endfunc
 
 func Test_toupper()
@@ -638,6 +647,12 @@ func Test_toupper()
   " invalid memory.
   call toupper("\xC0\x80\xC0")
   call toupper("123\xC0\x80\xC0")
+
+  " Test in latin1 encoding
+  let save_enc = &encoding
+  set encoding=latin1
+  call assert_equal("ABC", toupper("abc"))
+  let &encoding = save_enc
 endfunc
 
 func Test_tr()
@@ -970,6 +985,7 @@ func Test_matchstrpos()
   call assert_equal(['', -1, -1], matchstrpos('testing', 'ing', 8))
   call assert_equal(['ing', 1, 4, 7], matchstrpos(['vim', 'testing', 'execute'], 'ing'))
   call assert_equal(['', -1, -1, -1], matchstrpos(['vim', 'testing', 'execute'], 'img'))
+  call assert_equal(['', -1, -1], matchstrpos(test_null_list(), '\a'))
 endfunc
 
 func Test_nextnonblank_prevnonblank()
@@ -1156,6 +1172,10 @@ func Test_filewritable()
 
   call assert_equal(0, filewritable('doesnotexist'))
 
+  call mkdir('Xdir')
+  call assert_equal(2, filewritable('Xdir'))
+  call delete('Xdir', 'd')
+
   call delete('Xfilewritable')
   bw!
 endfunc
@@ -1222,6 +1242,7 @@ func Test_hlexists()
   syntax off
 endfunc
 
+" Test for the col() function
 func Test_col()
   new
   call setline(1, 'abcdef')
@@ -1239,6 +1260,8 @@ func Test_col()
   call assert_equal(0, col([2, '$']))
   call assert_equal(0, col([1, 100]))
   call assert_equal(0, col([1]))
+  call assert_equal(0, col(test_null_list()))
+  call assert_fails('let c = col({})', 'E731:')
 
   " test for getting the visual start column
   func T()
@@ -1299,12 +1322,15 @@ endfunc
 
 " Test for the inputdialog() function
 func Test_inputdialog()
-  CheckNotGui
-
-  call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<CR>", 'xt')
-  call assert_equal('xx', v)
-  call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<Esc>", 'xt')
-  call assert_equal('yy', v)
+  if has('gui_running')
+    call assert_fails('let v=inputdialog([], "xx")', 'E730:')
+    call assert_fails('let v=inputdialog("Q", [])', 'E730:')
+  else
+    call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<CR>", 'xt')
+    call assert_equal('xx', v)
+    call feedkeys(":let v=inputdialog('Q:', 'xx', 'yy')\<CR>\<Esc>", 'xt')
+    call assert_equal('yy', v)
+  endif
 endfunc
 
 " Test for inputlist()
@@ -1330,6 +1356,7 @@ func Test_inputlist()
   call assert_equal(-2, c)
 
   call assert_fails('call inputlist("")', 'E686:')
+  call assert_fails('call inputlist(test_null_list())', 'E686:')
 endfunc
 
 func Test_balloon_show()
@@ -1338,6 +1365,7 @@ func Test_balloon_show()
     call balloon_show('hi!')
     if !has('gui_running')
       call balloon_show(range(3))
+      call balloon_show([])
     endif
   endif
 endfunc
@@ -2207,6 +2235,9 @@ func Test_range()
   call assert_fails('let x=range(2, 8, 0)', 'E726:')
   call assert_fails('let x=range(3, 1)', 'E727:')
   call assert_fails('let x=range(1, 3, -2)', 'E727:')
+  call assert_fails('let x=range([])', 'E745:')
+  call assert_fails('let x=range(1, [])', 'E745:')
+  call assert_fails('let x=range(1, 4, [])', 'E745:')
 endfunc
 
 func Test_echoraw()
@@ -2223,6 +2254,16 @@ func Test_echoraw()
   " clean up
   call StopVimInTerminal(buf)
   call delete('XTest_echoraw')
+endfunc
+
+" Test for echo highlighting
+func Test_echohl()
+  echohl Search
+  echo 'Vim'
+  call assert_equal('Vim', Screenline(&lines))
+  " TODO: How to check the highlight group used by echohl?
+  " ScreenAttrs() returns all zeros.
+  echohl None
 endfunc
 
 " Test for the eval() function
@@ -2256,7 +2297,27 @@ func Test_getcurpos_setpos()
   call setpos('.', sp)
   normal jyl
   call assert_equal('6', @")
+  call assert_equal(-1, setpos('.', test_null_list()))
+  call assert_equal(-1, setpos('.', {}))
   close!
+endfunc
+
+" Test for glob()
+func Test_glob()
+  call assert_equal('', glob(test_null_string()))
+  call assert_equal('', globpath(test_null_string(), test_null_string()))
+endfunc
+
+" Test for browse()
+func Test_browse()
+  CheckFeature browse
+  call assert_fails('call browse([], "open", "x", "a.c")', 'E745:')
+endfunc
+
+" Test for browsedir()
+func Test_browsedir()
+  CheckFeature browse
+  call assert_fails('call browsedir("open", [])', 'E730:')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

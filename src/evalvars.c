@@ -164,7 +164,6 @@ static dict_T		vimvardict;		// Dictionary with v: variables
 // for VIM_VERSION_ defines
 #include "version.h"
 
-static void ex_let_const(exarg_T *eap, int is_const);
 static char_u *skip_var_one(char_u *arg, int include_type);
 static void list_glob_vars(int *first);
 static void list_buf_vars(int *first);
@@ -595,7 +594,7 @@ heredoc_get(exarg_T *eap, char_u *cmd, int script_get)
 	    return NULL;
 	}
 	*p = NUL;
-	if (vim_islower(*marker))
+	if (!script_get && vim_islower(*marker))
 	{
 	    emsg(_("E221: Marker cannot start with lower case letter"));
 	    return NULL;
@@ -698,11 +697,15 @@ ex_let(exarg_T *eap)
     void
 ex_const(exarg_T *eap)
 {
-    ex_let_const(eap, TRUE);
+    ex_let_const(eap, FALSE);
 }
 
-    static void
-ex_let_const(exarg_T *eap, int is_const)
+/*
+ * When "redefine" is TRUE the command will be executed again, redefining the
+ * variable is OK then.
+ */
+    void
+ex_let_const(exarg_T *eap, int redefine)
 {
     char_u	*arg = eap->arg;
     char_u	*expr = NULL;
@@ -714,11 +717,13 @@ ex_let_const(exarg_T *eap, int is_const)
     char_u	*argend;
     int		first = TRUE;
     int		concat;
-    int		flags = is_const ? LET_IS_CONST : 0;
+    int		flags = eap->cmdidx == CMD_const ? LET_IS_CONST : 0;
 
     // detect Vim9 assignment without ":let" or ":const"
     if (eap->arg == eap->cmd)
 	flags |= LET_NO_COMMAND;
+    if (redefine)
+	flags |= LET_REDEFINE;
 
     argend = skip_var_list(arg, TRUE, &var_count, &semicolon);
     if (argend == NULL)
@@ -1251,13 +1256,15 @@ ex_let_one(
 	    int		opt_type;
 	    long	numval;
 	    char_u	*stringval = NULL;
-	    char_u	*s;
+	    char_u	*s = NULL;
 
 	    c1 = *p;
 	    *p = NUL;
 
 	    n = (long)tv_get_number(tv);
-	    s = tv_get_string_chk(tv);	    // != NULL if number or string
+	    // avoid setting a string option to the text "v:false" or similar.
+	    if (tv->v_type != VAR_BOOL && tv->v_type != VAR_SPECIAL)
+		s = tv_get_string_chk(tv);	// != NULL if number or string
 	    if (s != NULL && op != NULL && *op != '=')
 	    {
 		opt_type = get_option_value(arg, &numval,
@@ -1289,7 +1296,8 @@ ex_let_one(
 		    }
 		}
 	    }
-	    if (s != NULL)
+	    if (s != NULL || tv->v_type == VAR_BOOL
+						  || tv->v_type == VAR_SPECIAL)
 	    {
 		set_option_value(arg, n, s, opt_flags);
 		arg_end = p;
@@ -2492,21 +2500,22 @@ get_script_local_ht(void)
 
 /*
  * Look for "name[len]" in script-local variables.
- * Return -1 when not found.
+ * Return a non-NULL pointer when found, NULL when not found.
  */
-    int
+    void *
 lookup_scriptvar(char_u *name, size_t len, cctx_T *dummy UNUSED)
 {
     hashtab_T	*ht = get_script_local_ht();
     char_u	buffer[30];
     char_u	*p;
-    int		res;
+    void	*res;
     hashitem_T	*hi;
 
     if (ht == NULL)
-	return -1;
+	return NULL;
     if (len < sizeof(buffer) - 1)
     {
+	// avoid an alloc/free for short names
 	vim_strncpy(buffer, name, len);
 	p = buffer;
     }
@@ -2514,19 +2523,20 @@ lookup_scriptvar(char_u *name, size_t len, cctx_T *dummy UNUSED)
     {
 	p = vim_strnsave(name, (int)len);
 	if (p == NULL)
-	    return -1;
+	    return NULL;
     }
 
     hi = hash_find(ht, p);
-    res = HASHITEM_EMPTY(hi) ? -1 : 1;
+    res = HASHITEM_EMPTY(hi) ? NULL : hi;
 
     // if not script-local, then perhaps imported
-    if (res == -1 && find_imported(p, 0, NULL) != NULL)
-	res = 1;
+    if (res == NULL && find_imported(p, 0, NULL) != NULL)
+	res = p;
 
     if (p != buffer)
 	vim_free(p);
-    return res;
+    // Don't return "buffer", gcc complains.
+    return res == NULL ? NULL : IObuff;
 }
 
 /*
@@ -2971,6 +2981,8 @@ set_var_const(
 
     if (flags & LET_IS_CONST)
 	di->di_tv.v_lock |= VAR_LOCKED;
+    if (flags & LET_REDEFINE)
+	di->di_flags |= DI_FLAGS_RELOAD;
 }
 
 /*

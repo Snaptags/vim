@@ -3069,8 +3069,10 @@ parse_cmd_address(exarg_T *eap, char **errormsg, int silent)
 	    if (!eap->skip)
 	    {
 		curwin->w_cursor.lnum = eap->line2;
-		// don't leave the cursor on an illegal line or column
-		check_cursor();
+		// Don't leave the cursor on an illegal line or column, but do
+		// accept zero as address, so 0;/PATTERN/ works correctly.
+		if (eap->line2 > 0)
+		    check_cursor();
 	    }
 	}
 	else if (*eap->cmd != ',')
@@ -3155,7 +3157,7 @@ append_command(char_u *cmd)
 find_ex_command(
 	exarg_T *eap,
 	int	*full UNUSED,
-	int	(*lookup)(char_u *, size_t, cctx_T *) UNUSED,
+	void	*(*lookup)(char_u *, size_t, cctx_T *) UNUSED,
 	cctx_T	*cctx UNUSED)
 {
     int		len;
@@ -3195,7 +3197,7 @@ find_ex_command(
 	    // "g:var = expr"
 	    // "var = expr"  where "var" is a local var name.
 	    if (((p - eap->cmd) > 2 && eap->cmd[1] == ':')
-		    || lookup(eap->cmd, p - eap->cmd, cctx) >= 0)
+		    || lookup(eap->cmd, p - eap->cmd, cctx) != NULL)
 	    {
 		eap->cmdidx = CMD_let;
 		return eap->cmd;
@@ -5747,7 +5749,7 @@ handle_drop(
 handle_any_postponed_drop(void)
 {
     if (!drop_busy && drop_filev != NULL
-		     && !text_locked() && !curbuf_locked() && !updating_screen)
+	     && !text_locked() && !curbuf_locked() && !updating_screen)
 	handle_drop_internal();
 }
 #endif

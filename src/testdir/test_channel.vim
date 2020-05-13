@@ -6,6 +6,7 @@ CheckFeature channel
 
 source shared.vim
 source screendump.vim
+source view_util.vim
 
 let s:python = PythonProg()
 if s:python == ''
@@ -869,8 +870,10 @@ func Test_pipe_both_to_buffer()
   let job = job_start(s:python . " test_channel_pipe.py",
 	\ {'out_io': 'buffer', 'out_name': 'pipe-err', 'err_io': 'out'})
   call assert_equal("run", job_status(job))
+  let handle = job_getchannel(job)
+  call assert_equal(bufnr('pipe-err'), ch_getbufnr(handle, 'out'))
+  call assert_equal(bufnr('pipe-err'), ch_getbufnr(handle, 'err'))
   try
-    let handle = job_getchannel(job)
     call ch_sendraw(handle, "echo line one\n")
     call ch_sendraw(handle, "echoerr line two\n")
     call ch_sendraw(handle, "double this\n")
@@ -896,6 +899,9 @@ func Run_test_pipe_from_buffer(use_name)
 
   let job = job_start(s:python . " test_channel_pipe.py", options)
   call assert_equal("run", job_status(job))
+  if has('unix') && !a:use_name
+    call assert_equal(bufnr('%'), ch_getbufnr(job, 'in'))
+  endif
   try
     let handle = job_getchannel(job)
     call assert_equal('one', ch_read(handle))
@@ -1139,6 +1145,8 @@ func Test_pipe_null()
   call assert_equal("run", job_status(job))
   call assert_equal('channel fail', string(job_getchannel(job)))
   call assert_equal('fail', ch_status(job))
+  call assert_equal('no process', string(test_null_job()))
+  call assert_equal('channel fail', string(test_null_channel()))
   call job_stop(job)
 endfunc
 
@@ -1203,6 +1211,7 @@ func Test_out_cb()
 	\  'err_cb': dict.errHandler,
 	\  'err_mode': 'json'})
   call assert_equal("run", job_status(job))
+  call test_garbagecollect_now()
   try
     let g:Ch_outmsg = ''
     let g:Ch_errmsg = ''
@@ -1705,6 +1714,7 @@ func Test_partial_in_channel_cycle()
   let d.a = function('string', [d])
   try
     let d.b = ch_open('nowhere:123', {'close_cb': d.a})
+    call test_garbagecollect_now()
   catch
     call assert_exception('E901:')
   endtry
@@ -1818,6 +1828,7 @@ func Test_read_nonl_in_close_cb()
   let g:out = ''
   let arg = 'import sys;sys.stdout.write("1\n2\n3")'
   call job_start([s:python, '-c', arg], {'close_cb': function('s:close_cb')})
+  call test_garbagecollect_now()
   call WaitForAssert({-> assert_equal('123', g:out)})
   unlet g:out
   delfunc s:close_cb
@@ -1828,6 +1839,7 @@ func Test_read_from_terminated_job()
   let arg = 'import os,sys;os.close(1);sys.stderr.write("test\n")'
   call job_start([s:python, '-c', arg], {'callback': {-> execute('let g:linecount += 1')}})
   call WaitForAssert({-> assert_equal(1, g:linecount)})
+  call test_garbagecollect_now()
   unlet g:linecount
 endfunc
 
@@ -1890,6 +1902,7 @@ function Ch_test_close_lambda(port)
   endif
   let g:Ch_close_ret = ''
   call ch_setoptions(handle, {'close_cb': {ch -> execute("let g:Ch_close_ret = 'closed'")}})
+  call test_garbagecollect_now()
 
   call assert_equal('', ch_evalexpr(handle, 'close me'))
   call WaitForAssert({-> assert_equal('closed', g:Ch_close_ret)})
@@ -2283,6 +2296,22 @@ func Test_job_with_list_args()
   call WaitForAssert({-> assert_equal("dead", job_status(job))})
   call assert_equal('Hello World', getline(1))
   %bw!
+endfunc
+
+func ExitCb_cb_with_input(job, status)
+  call feedkeys(":\<C-u>echo input('', 'default')\<CR>\<CR>", 'nx')
+  call assert_equal('default', Screenline(&lines))
+  let g:wait_exit_cb = 0
+endfunc
+
+func Test_cb_with_input()
+  let g:wait_exit_cb = 1
+
+  call job_start('echo "Vim''s test"',
+        \ {'out_cb': 'ExitCb_cb_with_input'})
+  call WaitForAssert({-> assert_equal(0, g:wait_exit_cb)})
+
+  unlet g:wait_exit_cb
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

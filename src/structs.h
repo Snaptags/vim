@@ -1561,7 +1561,9 @@ typedef struct
     sctx_T	uf_script_ctx;	// SCTX where function was defined,
 				// used for s: variables
     int		uf_refcount;	// reference count, see func_name_refcount()
+
     funccall_T	*uf_scoped;	// l: local variables for closure
+
     char_u	*uf_name_exp;	// if "uf_name[]" starts with SNR the name with
 				// "<SNR>" as a string, otherwise NULL
     char_u	uf_name[1];	// name of function (actually longer); can
@@ -1569,12 +1571,25 @@ typedef struct
 				// KS_EXTRA KE_SNR)
 } ufunc_T;
 
+// flags used in uf_flags
+#define FC_ABORT    0x01	// abort function on error
+#define FC_RANGE    0x02	// function accepts range
+#define FC_DICT	    0x04	// Dict function, uses "self"
+#define FC_CLOSURE  0x08	// closure, uses outer scope variables
+#define FC_DELETED  0x10	// :delfunction used while uf_refcount > 0
+#define FC_REMOVED  0x20	// function redefined while uf_refcount > 0
+#define FC_SANDBOX  0x40	// function defined in the sandbox
+#define FC_DEAD	    0x80	// function kept only for reference to dfunc
+#define FC_EXPORT   0x100	// "export def Func()"
+#define FC_NOARGS   0x200	// no a: variables in lambda
+#define FC_VIM9	    0x400	// defined in vim9 script file
+
 #define MAX_FUNC_ARGS	20	// maximum number of function arguments
 #define VAR_SHORT_LEN	20	// short variable name length
 #define FIXVAR_CNT	12	// number of fixed variables
 
 /*
- * structure to hold info for a function that is currently being executed.
+ * Structure to hold info for a function that is currently being executed.
  */
 struct funccall_S
 {
@@ -1762,6 +1777,21 @@ typedef struct {
     typval_T	*basetv;	// base for base->method()
 } funcexe_T;
 
+/*
+ * Structure to hold the context of a compiled function, used by closures
+ * defined in that function.
+ */
+typedef struct funcstack_S
+{
+    garray_T	fs_ga;		// contains the stack, with:
+				// - arguments
+				// - frame
+				// - local variables
+
+    int		fs_refcount;	// nr of closures referencing this funcstack
+    int		fs_copyID;	// for garray_T collection
+} funcstack_T;
+
 struct partial_S
 {
     int		pt_refcount;	// reference count
@@ -1771,9 +1801,18 @@ struct partial_S
 				// with pt_name
     int		pt_auto;	// when TRUE the partial was created for using
 				// dict.member in handle_subscript()
+
+    // For a compiled closure: the arguments and local variables.
+    garray_T	*pt_ectx_stack;	    // where to find local vars
+    int		pt_ectx_frame;	    // index of function frame in uf_ectx_stack
+    funcstack_T	*pt_funcstack;	    // copy of stack, used after context
+				    // function returns
+
     int		pt_argc;	// number of arguments
     typval_T	*pt_argv;	// arguments in allocated array
+
     dict_T	*pt_dict;	// dict for "self"
+    int		pt_copyID;	// funcstack may contain pointer to partial
 };
 
 typedef struct AutoPatCmd_S AutoPatCmd;
