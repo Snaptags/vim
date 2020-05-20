@@ -938,10 +938,10 @@ func Test_terminal_composing_unicode()
   call WaitForAssert({-> assert_equal(txt, term_getline(buf, lnum[1] + 1))}, 1000)
   let l = term_scrape(buf, lnum[1] + 1)
   call assert_equal("\u304b\u3099", l[0].chars)
-  call assert_equal("\u304e", l[1].chars)
-  call assert_equal("\u304f\u3099", l[2].chars)
-  call assert_equal("\u3052", l[3].chars)
-  call assert_equal("\u3053\u3099", l[4].chars)
+  call assert_equal("\u304e", l[2].chars)
+  call assert_equal("\u304f\u3099", l[3].chars)
+  call assert_equal("\u3052", l[5].chars)
+  call assert_equal("\u3053\u3099", l[6].chars)
 
   " \u00a0 + composing
   let txt = "abc\u00a0\u0308"
@@ -2587,9 +2587,8 @@ func Test_double_popup_terminal()
   let buf1 = term_start(&shell, #{hidden: 1})
   let win1 = popup_create(buf1, {})
   let buf2 = term_start(&shell, #{hidden: 1})
-  let win2 = popup_create(buf2, {})
+  call assert_fails('call popup_create(buf2, {})', 'E861:')
   call popup_close(win1)
-  call popup_close(win2)
   exe buf1 .. 'bwipe!'
   exe buf2 .. 'bwipe!'
 endfunc
@@ -2617,27 +2616,13 @@ endfunc
 
 func Test_term_nasty_callback()
   CheckExecutable sh
-  func OpenTerms()
-    set hidden
-    let g:buf0 = term_start('sh', #{hidden: 1})
-    call popup_create(g:buf0, {})
-    let g:buf1 = term_start('sh', #{hidden: 1, term_finish: 'close'})
-    call popup_create(g:buf1, {})
-    let g:buf2 = term_start(['sh', '-c'], #{curwin: 1, exit_cb: function('TermExit')})
-    call TermWait(g:buf2, 50)
-    call popup_close(win_getid())
-  endfunc
-  func TermExit(...)
-    let altbuf = bufnr('#')
-    call term_sendkeys(altbuf, "exit\<CR>")
-    call TermWait(altbuf)
-    call popup_close(win_getid())
-  endfunc
-  call OpenTerms()
 
-  call term_sendkeys(g:buf0, "exit\<CR>")
-  call TermWait(g:buf0, 50)
-  exe g:buf0 .. 'bwipe!'
+  set hidden
+  let g:buf0 = term_start('sh', #{hidden: 1, term_finish: 'close'})
+  call popup_create(g:buf0, {})
+  call assert_fails("call term_start(['sh', '-c'], #{curwin: 1})", 'E863:')
+
+  call popup_clear(1)
   set hidden&
 endfunc
 

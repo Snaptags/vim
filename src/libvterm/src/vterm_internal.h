@@ -32,6 +32,9 @@
 #define CSI_ARGS_MAX 16
 #define CSI_LEADER_MAX 16
 
+#define BUFIDX_PRIMARY   0
+#define BUFIDX_ALTSCREEN 1
+
 typedef struct VTermEncoding VTermEncoding;
 
 typedef struct {
@@ -92,6 +95,10 @@ struct VTermState
   // Bitvector of tab stops
   unsigned char *tabstops;
 
+  /* Primary and Altscreen; lineinfos[1] is lazily allocated as needed */
+  VTermLineInfo *lineinfos[2];
+
+  /* lineinfo will == lineinfos[0] or lineinfos[1], depending on altscreen */
   VTermLineInfo *lineinfo;
 #define ROWWIDTH(state,row) ((state)->lineinfo[(row)].doublewidth ? ((state)->cols / 2) : (state)->cols)
 #define THISROWWIDTH(state) ROWWIDTH(state, (state)->pos.row)
@@ -153,14 +160,12 @@ struct VTermState
       unsigned int cursor_shape:2;
     } mode;
   } saved;
+
+  /* Temporary state for DECRQSS parsing */
+  union {
+    char decrqss[4];
+  } tmp;
 };
-
-typedef enum {
-  VTERM_PARSER_OSC,
-  VTERM_PARSER_DCS,
-
-  VTERM_N_PARSER_TYPES
-} VTermParserStringType;
 
 struct VTerm
 {
@@ -181,35 +186,52 @@ struct VTerm
       CSI_LEADER,
       CSI_ARGS,
       CSI_INTERMED,
-      ESC,
+      OSC_COMMAND,
+      DCS_COMMAND,
       // below here are the "string states"
-      STRING,
-      ESC_IN_STRING,
+      OSC,
+      DCS,
     } state;
+
+    unsigned int in_esc : 1;
 
     int intermedlen;
     char intermed[INTERMED_MAX];
 
-    int csi_leaderlen;
-    char csi_leader[CSI_LEADER_MAX];
+    union {
+      struct {
+        int leaderlen;
+        char leader[CSI_LEADER_MAX];
 
-    int csi_argi;
-    long csi_args[CSI_ARGS_MAX];
+        int argi;
+        long args[CSI_ARGS_MAX];
+      } csi;
+      struct {
+        int command;
+      } osc;
+      struct {
+        int commandlen;
+        char command[CSI_LEADER_MAX];
+      } dcs;
+    } v;
 
     const VTermParserCallbacks *callbacks;
     void *cbdata;
 
-    VTermParserStringType stringtype;
-    char  *strbuffer;
-    size_t strbuffer_len;
-    size_t strbuffer_cur;
+    int string_initial;
   } parser;
 
   // len == malloc()ed size; cur == number of valid bytes
 
+  VTermOutputCallback *outfunc;
+  void                *outdata;
+
   char  *outbuffer;
   size_t outbuffer_len;
   size_t outbuffer_cur;
+
+  char  *tmpbuffer;
+  size_t tmpbuffer_len;
 
   VTermState *state;
   VTermScreen *screen;
@@ -264,5 +286,25 @@ int vterm_unicode_width(uint32_t codepoint);
 int vterm_unicode_is_combining(uint32_t codepoint);
 int vterm_unicode_is_ambiguous(uint32_t codepoint);
 int vterm_get_special_pty_type(void);
+
+#if (defined(_XOPEN_SOURCE) && _XOPEN_SOURCE >= 500) \
+	|| defined(_ISOC99_SOURCE) || defined(_BSD_SOURCE)
+# undef VSNPRINTF
+# define VSNPRINTF vsnprintf
+# undef SNPRINTF
+#else
+# ifdef VSNPRINTF
+// Use a provided vsnprintf() function.
+int VSNPRINTF(char *str, size_t str_m, const char *fmt, va_list ap);
+# endif
+# ifdef SNPRINTF
+// Use a provided snprintf() function.
+int SNPRINTF(char *str, size_t str_m, const char *fmt, ...);
+# endif
+#endif
+#ifndef SNPRINTF
+# define SNPRINTF snprintf
+#endif
+
 
 #endif

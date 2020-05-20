@@ -2869,14 +2869,14 @@ to_name_const_end(char_u *arg)
     {
 
 	// Can be "[1, 2, 3]->Func()".
-	if (get_list_tv(&p, &rettv, FALSE, FALSE) == FAIL)
+	if (get_list_tv(&p, &rettv, 0, FALSE) == FAIL)
 	    p = arg;
     }
     else if (p == arg && *arg == '#' && arg[1] == '{')
     {
 	// Can be "#{a: 1}->Func()".
 	++p;
-	if (eval_dict(&p, &rettv, FALSE, TRUE) == FAIL)
+	if (eval_dict(&p, &rettv, 0, TRUE) == FAIL)
 	    p = arg;
     }
     else if (p == arg && *arg == '{')
@@ -2886,7 +2886,7 @@ to_name_const_end(char_u *arg)
 	// Can be "{x -> ret}()".
 	// Can be "{'a': 1}->Func()".
 	if (ret == NOTDONE)
-	    ret = eval_dict(&p, &rettv, FALSE, FALSE);
+	    ret = eval_dict(&p, &rettv, 0, FALSE);
 	if (ret != OK)
 	    p = arg;
     }
@@ -3490,7 +3490,7 @@ compile_subscript(
 	    type_T	**typep;
 
 	    // list index: list[123]
-	    // list member: dict[key]
+	    // dict member: dict[key]
 	    // TODO: blob index
 	    // TODO: more arguments
 	    // TODO: recognize list or dict at runtime
@@ -4999,8 +4999,8 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 			goto theend;
 		}
 	    }
-	    else if (*p != '=' && check_type(member_type, stacktype, TRUE)
-								       == FAIL)
+	    else if (*p != '=' && need_type(stacktype, member_type, -1,
+								 cctx) == FAIL)
 		goto theend;
 	}
     }

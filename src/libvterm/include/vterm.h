@@ -19,6 +19,12 @@ extern "C" {
 typedef unsigned char		uint8_t;
 typedef unsigned int		uint32_t;
 
+#define VTERM_VERSION_MAJOR 0
+#define VTERM_VERSION_MINOR 1
+
+#define VTERM_CHECK_VERSION \
+        vterm_check_version(VTERM_VERSION_MAJOR, VTERM_VERSION_MINOR)
+
 typedef struct VTerm VTerm;
 typedef struct VTermState VTermState;
 typedef struct VTermScreen VTermScreen;
@@ -101,10 +107,17 @@ typedef enum {
   VTERM_N_VALUETYPES
 } VTermValueType;
 
+typedef struct {
+  const char *str;
+  size_t      len : 30;
+  unsigned int  initial : 1;
+  unsigned int  final : 1;
+} VTermStringFragment;
+
 typedef union {
   int boolean;
   int number;
-  char *string;
+  VTermStringFragment string;
   VTermColor color;
 } VTermValue;
 
@@ -164,8 +177,9 @@ typedef struct {
 } VTermGlyphInfo;
 
 typedef struct {
-  unsigned int    doublewidth:1;     // DECDWL or DECDHL line
-  unsigned int    doubleheight:2;    // DECDHL line (1=top 2=bottom)
+  unsigned int    doublewidth:1;     /* DECDWL or DECDHL line */
+  unsigned int    doubleheight:2;    /* DECDHL line (1=top 2=bottom) */
+  unsigned int    continuation:1;    /* Line is a flow continuation of the previous */
 } VTermLineInfo;
 
 typedef struct {
@@ -174,6 +188,8 @@ typedef struct {
   void *(*malloc)(size_t size, void *allocdata);
   void  (*free)(void *ptr, void *allocdata);
 } VTermAllocatorFunctions;
+
+void vterm_check_version(int major, int minor);
 
 // Allocate and initialize a new terminal with default allocators.
 VTerm *vterm_new(int rows, int cols);
@@ -194,10 +210,17 @@ void vterm_set_utf8(VTerm *vt, int is_utf8);
 
 size_t vterm_input_write(VTerm *vt, const char *bytes, size_t len);
 
+/* Setting output callback will override the buffer logic */
+typedef void VTermOutputCallback(const char *s, size_t len, void *user);
+void vterm_output_set_callback(VTerm *vt, VTermOutputCallback *func, void *user);
+
+/* These buffer functions only work if output callback is NOT set
+ * These are deprecated and will be removed in a later version */
 size_t vterm_output_get_buffer_size(const VTerm *vt);
 size_t vterm_output_get_buffer_current(const VTerm *vt);
 size_t vterm_output_get_buffer_remaining(const VTerm *vt);
 
+/* This too */
 size_t vterm_output_read(VTerm *vt, char *buffer, size_t len);
 
 int vterm_is_modify_other_keys(VTerm *vt);
@@ -241,8 +264,8 @@ typedef struct {
   int (*control)(unsigned char control, void *user);
   int (*escape)(const char *bytes, size_t len, void *user);
   int (*csi)(const char *leader, const long args[], int argcount, const char *intermed, char command, void *user);
-  int (*osc)(const char *command, size_t cmdlen, void *user);
-  int (*dcs)(const char *command, size_t cmdlen, void *user);
+  int (*osc)(int command, VTermStringFragment frag, void *user);
+  int (*dcs)(const char *command, size_t commandlen, VTermStringFragment frag, void *user);
   int (*resize)(int rows, int cols, void *user);
 } VTermParserCallbacks;
 
@@ -252,6 +275,15 @@ void *vterm_parser_get_cbdata(VTerm *vt);
 // -----------
 // State layer
 // -----------
+
+/* Copies of VTermState fields that the 'resize' callback might have reason to
+ * edit. 'resize' callback gets total control of these fields and may
+ * free-and-reallocate them if required. They will be copied back from the
+ * struct after the callback has returned.
+ */
+typedef struct {
+  VTermPos pos;                /* current cursor position */
+} VTermStateFields;
 
 typedef struct {
   int (*putglyph)(VTermGlyphInfo *info, VTermPos pos, void *user);
@@ -265,7 +297,7 @@ typedef struct {
   // was accepted, 0 otherwise.
   int (*settermprop)(VTermProp prop, VTermValue *val, void *user);
   int (*bell)(void *user);
-  int (*resize)(int rows, int cols, VTermPos *delta, void *user);
+  int (*resize)(int rows, int cols, VTermStateFields *fields, void *user);
   int (*setlineinfo)(int row, const VTermLineInfo *newinfo, const VTermLineInfo *oldinfo, void *user);
 } VTermStateCallbacks;
 
@@ -322,6 +354,13 @@ typedef struct {
     unsigned int dwl       : 1; // On a DECDWL or DECDHL line
     unsigned int dhl       : 2; // On a DECDHL line (1=top 2=bottom)
 } VTermScreenCellAttrs;
+
+enum {
+  VTERM_UNDERLINE_OFF,
+  VTERM_UNDERLINE_SINGLE,
+  VTERM_UNDERLINE_DOUBLE,
+  VTERM_UNDERLINE_CURLY,
+};
 
 typedef struct {
 #define VTERM_MAX_CHARS_PER_CELL 6
