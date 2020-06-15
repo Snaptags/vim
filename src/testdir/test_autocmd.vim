@@ -1712,23 +1712,27 @@ func Test_TextYankPost()
 
   norm "ayiw
   call assert_equal(
-    \{'regcontents': ['foo'], 'regname': 'a', 'operator': 'y', 'regtype': 'v'},
+    \{'regcontents': ['foo'], 'regname': 'a', 'operator': 'y', 'regtype': 'v', 'visual': v:false},
     \g:event)
   norm y_
   call assert_equal(
-    \{'regcontents': ['foo'], 'regname': '',  'operator': 'y', 'regtype': 'V'},
+    \{'regcontents': ['foo'], 'regname': '',  'operator': 'y', 'regtype': 'V', 'visual': v:false},
+    \g:event)
+  norm Vy
+  call assert_equal(
+    \{'regcontents': ['foo'], 'regname': '',  'operator': 'y', 'regtype': 'V', 'visual': v:true},
     \g:event)
   call feedkeys("\<C-V>y", 'x')
   call assert_equal(
-    \{'regcontents': ['f'], 'regname': '',  'operator': 'y', 'regtype': "\x161"},
+    \{'regcontents': ['f'], 'regname': '',  'operator': 'y', 'regtype': "\x161", 'visual': v:true},
     \g:event)
   norm "xciwbar
   call assert_equal(
-    \{'regcontents': ['foo'], 'regname': 'x', 'operator': 'c', 'regtype': 'v'},
+    \{'regcontents': ['foo'], 'regname': 'x', 'operator': 'c', 'regtype': 'v', 'visual': v:false},
     \g:event)
   norm "bdiw
   call assert_equal(
-    \{'regcontents': ['bar'], 'regname': 'b', 'operator': 'd', 'regtype': 'v'},
+    \{'regcontents': ['bar'], 'regname': 'b', 'operator': 'd', 'regtype': 'v', 'visual': v:false},
     \g:event)
 
   call assert_equal({}, v:event)
@@ -2507,6 +2511,19 @@ func Test_autocmd_deep_nesting()
   autocmd BufEnter Xfile doautocmd BufEnter Xfile
   call assert_fails('doautocmd BufEnter Xfile', 'E218:')
   autocmd! BufEnter Xfile
+endfunc
+
+" Tests for SigUSR1 autocmd event, which is only available on posix systems.
+func Test_autocmd_sigusr1()
+  CheckUnix
+
+  let g:sigusr1_passed = 0
+  au SigUSR1 * let g:sigusr1_passed = 1
+  call system('/bin/kill -s usr1 ' . getpid())
+  call WaitForAssert({-> assert_true(g:sigusr1_passed)})
+
+  au! SigUSR1
+  unlet g:sigusr1_passed
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -33,6 +33,7 @@
 		       : (a)->coladd < (b)->coladd)
 #define EQUAL_POS(a, b) (((a).lnum == (b).lnum) && ((a).col == (b).col) && ((a).coladd == (b).coladd))
 #define CLEAR_POS(a) do {(a)->lnum = 0; (a)->col = 0; (a)->coladd = 0;} while (0)
+#define EMPTY_POS(a) ((a).lnum == 0 && (a).col == 0 && (a).coladd == 0)
 
 #define LTOREQ_POS(a, b) (LT_POS(a, b) || EQUAL_POS(a, b))
 
@@ -92,6 +93,7 @@
 #define MB_ISUPPER(c)	vim_isupper(c)
 #define MB_TOLOWER(c)	vim_tolower(c)
 #define MB_TOUPPER(c)	vim_toupper(c)
+#define MB_CASEFOLD(c)	(enc_utf8 ? utf_fold(c) : MB_TOLOWER(c))
 
 // Use our own isdigit() replacement, because on MS-Windows isdigit() returns
 // non-zero for superscript 1.  Also avoids that isdigit() crashes for numbers

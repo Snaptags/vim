@@ -53,18 +53,10 @@ struct VTermPen
   unsigned int italic:1;
   unsigned int blink:1;
   unsigned int reverse:1;
+  unsigned int conceal:1;
   unsigned int strike:1;
-  unsigned int font:4; // To store 0-9
+  unsigned int font:4; /* To store 0-9 */
 };
-
-int vterm_color_equal(VTermColor a, VTermColor b);
-
-#if defined(DEFINE_INLINES) || USE_INLINE
-INLINE int vterm_color_equal(VTermColor a, VTermColor b)
-{
-  return a.red == b.red && a.green == b.green && a.blue == b.blue;
-}
-#endif
 
 struct VTermState
 {
@@ -73,26 +65,26 @@ struct VTermState
   const VTermStateCallbacks *callbacks;
   void *cbdata;
 
-  const VTermParserCallbacks *fallbacks;
+  const VTermStateFallbacks *fallbacks;
   void *fbdata;
 
   int rows;
   int cols;
 
-  // Current cursor position
+  /* Current cursor position */
   VTermPos pos;
 
-  int at_phantom; // True if we're on the "81st" phantom column to defer a wraparound
+  int at_phantom; /* True if we're on the "81st" phantom column to defer a wraparound */
 
   int scrollregion_top;
-  int scrollregion_bottom; // -1 means unbounded
+  int scrollregion_bottom; /* -1 means unbounded */
 #define SCROLLREGION_BOTTOM(state) ((state)->scrollregion_bottom > -1 ? (state)->scrollregion_bottom : (state)->rows)
   int scrollregion_left;
 #define SCROLLREGION_LEFT(state)  ((state)->mode.leftrightmargin ? (state)->scrollregion_left : 0)
-  int scrollregion_right; // -1 means unbounded
+  int scrollregion_right; /* -1 means unbounded */
 #define SCROLLREGION_RIGHT(state) ((state)->mode.leftrightmargin && (state)->scrollregion_right > -1 ? (state)->scrollregion_right : (state)->cols)
 
-  // Bitvector of tab stops
+  /* Bitvector of tab stops */
   unsigned char *tabstops;
 
   /* Primary and Altscreen; lineinfos[1] is lazily allocated as needed */
@@ -103,14 +95,14 @@ struct VTermState
 #define ROWWIDTH(state,row) ((state)->lineinfo[(row)].doublewidth ? ((state)->cols / 2) : (state)->cols)
 #define THISROWWIDTH(state) ROWWIDTH(state, (state)->pos.row)
 
-  // Mouse state
+  /* Mouse state */
   int mouse_col, mouse_row;
   int mouse_buttons;
   int mouse_flags;
 
   enum { MOUSE_X10, MOUSE_UTF8, MOUSE_SGR, MOUSE_RXVT } mouse_protocol;
 
-  // Last glyph output, for Unicode recombining purposes
+  /* Last glyph output, for Unicode recombining purposes */
   uint32_t *combine_chars;
   size_t combine_chars_size; // Number of ELEMENTS in the above
   int combine_width; // The width of the glyph above
@@ -143,13 +135,11 @@ struct VTermState
   VTermColor default_bg;
   VTermColor colors[16]; // Store the 8 ANSI and the 8 ANSI high-brights only
 
-  int fg_index;
-  int bg_index;
   int bold_is_highbright;
 
   unsigned int protected_cell : 1;
 
-  // Saved state under DEC mode 1048/1049
+  /* Saved state under DEC mode 1048/1049 */
   struct {
     VTermPos pos;
     struct VTermPen pen;
@@ -186,9 +176,9 @@ struct VTerm
       CSI_LEADER,
       CSI_ARGS,
       CSI_INTERMED,
-      OSC_COMMAND,
       DCS_COMMAND,
-      // below here are the "string states"
+      /* below here are the "string states" */
+      OSC_COMMAND,
       OSC,
       DCS,
     } state;
@@ -221,7 +211,7 @@ struct VTerm
     int string_initial;
   } parser;
 
-  // len == malloc()ed size; cur == number of valid bytes
+  /* len == malloc()ed size; cur == number of valid bytes */
 
   VTermOutputCallback *outfunc;
   void                *outdata;

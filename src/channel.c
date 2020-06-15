@@ -999,8 +999,8 @@ channel_open(
     for (addr = res; addr != NULL; addr = addr->ai_next)
     {
 	const char  *dst = hostname;
-	const void  *src = NULL;
 # ifdef HAVE_INET_NTOP
+	const void  *src = NULL;
 	char	    buf[NUMBUFLEN];
 # endif
 
@@ -1009,14 +1009,18 @@ channel_open(
 	    struct sockaddr_in6 *sai = (struct sockaddr_in6 *)addr->ai_addr;
 
 	    sai->sin6_port = htons(port);
+# ifdef HAVE_INET_NTOP
 	    src = &sai->sin6_addr;
+# endif
 	}
 	else if (addr->ai_family == AF_INET)
 	{
 	    struct sockaddr_in *sai = (struct sockaddr_in *)addr->ai_addr;
 
 	    sai->sin_port = htons(port);
+# ifdef HAVE_INET_NTOP
 	    src = &sai->sin_addr;
+#endif
 	}
 # ifdef HAVE_INET_NTOP
 	if (src != NULL)
@@ -2902,7 +2906,7 @@ may_invoke_callback(channel_T *channel, ch_part_T part)
 	    {
 		// Copy the message into allocated memory (excluding the NL)
 		// and remove it from the buffer (including the NL).
-		msg = vim_strnsave(buf, (int)(nl - buf));
+		msg = vim_strnsave(buf, nl - buf);
 		channel_consume(channel, part, (int)(nl - buf) + 1);
 	    }
 	}
@@ -3699,7 +3703,7 @@ channel_read_block(
 	{
 	    // Copy the message into allocated memory and remove it from the
 	    // buffer.
-	    msg = vim_strnsave(buf, (int)(nl - buf));
+	    msg = vim_strnsave(buf, nl - buf);
 	    channel_consume(channel, part, (int)(nl - buf) + 1);
 	}
     }
@@ -5308,6 +5312,7 @@ get_job_options(typval_T *tv, jobopt_T *opt, int supported, int supported2)
 		{
 		    char_u	*color_name;
 		    guicolor_T	guicolor;
+		    int		called_emsg_before = called_emsg;
 
 		    color_name = tv_get_string_chk(&li->li_tv);
 		    if (color_name == NULL)
@@ -5315,7 +5320,12 @@ get_job_options(typval_T *tv, jobopt_T *opt, int supported, int supported2)
 
 		    guicolor = GUI_GET_COLOR(color_name);
 		    if (guicolor == INVALCOLOR)
+		    {
+			if (called_emsg_before == called_emsg)
+			    // may not get the error if the GUI didn't start
+			    semsg(_(e_alloc_color), color_name);
 			return FAIL;
+		    }
 
 		    rgb[n] = GUI_MCH_GET_RGB(guicolor);
 		}

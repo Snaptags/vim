@@ -60,6 +60,26 @@ static VTermKey strp_key(char *str)
   return VTERM_KEY_NONE;
 }
 
+static void print_color(const VTermColor *col)
+{
+  if (VTERM_COLOR_IS_RGB(col)) {
+    printf("rgb(%d,%d,%d", col->red, col->green, col->blue);
+  }
+  else if (VTERM_COLOR_IS_INDEXED(col)) {
+    printf("idx(%d", col->index);
+  }
+  else {
+    printf("invalid(%d", col->type);
+  }
+  if (VTERM_COLOR_IS_DEFAULT_FG(col)) {
+    printf(",is_default_fg");
+  }
+  if (VTERM_COLOR_IS_DEFAULT_BG(col)) {
+    printf(",is_default_bg");
+  }
+  printf(")");
+}
+
 static VTerm *vt;
 static VTermState *state;
 static VTermScreen *screen;
@@ -206,7 +226,14 @@ static VTermParserCallbacks parser_cbs = {
   NULL // resize
 };
 
-// These callbacks are shared by State and Screen
+static VTermStateFallbacks fallbacks = {
+  parser_control, // control
+  parser_csi, // csi
+  parser_osc, // osc
+  parser_dcs // dcs
+};
+
+/* These callbacks are shared by State and Screen */
 
 static int want_movecursor = 0;
 static VTermPos state_pos;
@@ -266,7 +293,9 @@ static int settermprop(VTermProp prop, VTermValue *val, void *user UNUSED)
         val->string.initial ? "[" : "", val->string.len, val->string.str, val->string.final ? "]" : "");
     return 1;
   case VTERM_VALUETYPE_COLOR:
-    printf("settermprop %d rgb(%d,%d,%d)\n", prop, val->color.red, val->color.green, val->color.blue);
+    printf("settermprop %d ", prop);
+    print_color(&val->color);
+    printf("\n");
     return 1;
 
   case VTERM_N_VALUETYPES:
@@ -319,6 +348,7 @@ static struct {
   int italic;
   int blink;
   int reverse;
+  int conceal;
   int strike;
   int font;
   VTermColor foreground;
@@ -341,6 +371,9 @@ static int state_setpenattr(VTermAttr attr, VTermValue *val, void *user UNUSED)
     break;
   case VTERM_ATTR_REVERSE:
     state_pen.reverse = val->boolean;
+    break;
+  case VTERM_ATTR_CONCEAL:
+    state_pen.conceal = val->boolean;
     break;
   case VTERM_ATTR_STRIKE:
     state_pen.strike = val->boolean;
@@ -552,7 +585,7 @@ int main(int argc UNUSED, char **argv UNUSED)
           want_settermprop = sense;
           break;
         case 'f':
-          vterm_state_set_unrecognised_fallbacks(state, sense ? &parser_cbs : NULL, NULL);
+          vterm_state_set_unrecognised_fallbacks(state, sense ? &fallbacks : NULL, NULL);
           break;
         default:
           fprintf(stderr, "Unrecognised WANTSTATE flag '%c'\n", line[i]);
@@ -823,10 +856,12 @@ int main(int argc UNUSED, char **argv UNUSED)
             printf("%d\n", state_pen.font);
         }
         else if(streq(linep, "foreground")) {
-          printf("rgb(%d,%d,%d)\n", state_pen.foreground.red, state_pen.foreground.green, state_pen.foreground.blue);
+          print_color(&state_pen.foreground);
+          printf("\n");
         }
         else if(streq(linep, "background")) {
-          printf("rgb(%d,%d,%d)\n", state_pen.background.red, state_pen.background.green, state_pen.background.blue);
+          print_color(&state_pen.background);
+          printf("\n");
         }
         else
           printf("?\n");
@@ -941,8 +976,13 @@ int main(int argc UNUSED, char **argv UNUSED)
         printf("} ");
         if(cell.attrs.dwl)       printf("dwl ");
         if(cell.attrs.dhl)       printf("dhl-%s ", cell.attrs.dhl == 2 ? "bottom" : "top");
-        printf("fg=rgb(%d,%d,%d) ",  cell.fg.red, cell.fg.green, cell.fg.blue);
-        printf("bg=rgb(%d,%d,%d)\n", cell.bg.red, cell.bg.green, cell.bg.blue);
+        printf("fg=");
+        vterm_screen_convert_color_to_rgb(screen, &cell.fg);
+        print_color(&cell.fg);
+        printf(" bg=");
+        vterm_screen_convert_color_to_rgb(screen, &cell.bg);
+        print_color(&cell.bg);
+        printf("\n");
       }
       else if(strstartswith(line, "?screen_eol ")) {
         VTermPos pos;

@@ -164,7 +164,6 @@ static dict_T		vimvardict;		// Dictionary with v: variables
 // for VIM_VERSION_ defines
 #include "version.h"
 
-static char_u *skip_var_one(char_u *arg, int include_type);
 static void list_glob_vars(int *first);
 static void list_buf_vars(int *first);
 static void list_win_vars(int *first);
@@ -244,7 +243,9 @@ evalvars_init(void)
 
     set_vim_var_nr(VV_ECHOSPACE,    sc_col - 1);
 
-    set_reg_var(0);  // default for v:register is not 0 but '"'
+    // Default for v:register is not 0 but '"'.  This is adjusted once the
+    // clipboard has been setup by calling reset_reg_var().
+    set_reg_var(0);
 }
 
 #if defined(EXITFREE) || defined(PROTO)
@@ -681,34 +682,14 @@ heredoc_get(exarg_T *eap, char_u *cmd, int script_get)
  * ":let [var1, var2] = expr"	unpack list.
  * ":let var =<< ..."		heredoc
  * ":let var: string"		Vim9 declaration
- */
-    void
-ex_let(exarg_T *eap)
-{
-    ex_let_const(eap, FALSE);
-}
-
-/*
+ *
  * ":const"			list all variable values
  * ":const var1 var2"		list variable values
  * ":const var = expr"		assignment command.
  * ":const [var1, var2] = expr"	unpack list.
  */
     void
-ex_const(exarg_T *eap)
-{
-    ex_let_const(eap, FALSE);
-}
-
-/*
- * When "discovery" is TRUE the ":let" or ":const" is encountered during the
- * discovery phase of vim9script:
- * - The command will be executed again, redefining the variable is OK then.
- * - The expresion argument must be a constant.
- * - If no constant expression a type must be specified.
- */
-    void
-ex_let_const(exarg_T *eap, int discovery)
+ex_let(exarg_T *eap)
 {
     char_u	*arg = eap->arg;
     char_u	*expr = NULL;
@@ -726,10 +707,8 @@ ex_let_const(exarg_T *eap, int discovery)
     // detect Vim9 assignment without ":let" or ":const"
     if (eap->arg == eap->cmd)
 	flags |= LET_NO_COMMAND;
-    if (discovery)
-	flags |= LET_DISCOVERY;
 
-    argend = skip_var_list(arg, TRUE, &var_count, &semicolon);
+    argend = skip_var_list(arg, TRUE, &var_count, &semicolon, FALSE);
     if (argend == NULL)
 	return;
     if (argend > arg && argend[-1] == '.')  // for var.='str'
@@ -740,7 +719,7 @@ ex_let_const(exarg_T *eap, int discovery)
 		|| (expr[1] == '.' && expr[2] == '='));
     has_assign =  *expr == '=' || (vim_strchr((char_u *)"+-*/%", *expr) != NULL
 							    && expr[1] == '=');
-    if (!has_assign && !concat && !discovery)
+    if (!has_assign && !concat)
     {
 	// ":let" without "=": list variables
 	if (*arg == '[')
@@ -748,8 +727,18 @@ ex_let_const(exarg_T *eap, int discovery)
 	else if (expr[0] == '.')
 	    emsg(_("E985: .= is not supported with script version 2"));
 	else if (!ends_excmd2(eap->cmd, arg))
-	    // ":let var1 var2"
-	    arg = list_arg_vars(eap, arg, &first);
+	{
+	    if (current_sctx.sc_version == SCRIPT_VERSION_VIM9)
+	    {
+		// Vim9 declaration ":let var: type"
+		arg = vim9_declare_scriptvar(eap, arg);
+	    }
+	    else
+	    {
+		// ":let var1 var2" - list values
+		arg = list_arg_vars(eap, arg, &first);
+	    }
+	}
 	else if (!eap->skip)
 	{
 	    // ":let"
@@ -785,7 +774,6 @@ ex_let_const(exarg_T *eap, int discovery)
     else
     {
 	int eval_flags;
-	int save_called_emsg = called_emsg;
 
 	rettv.v_type = VAR_UNKNOWN;
 	i = FAIL;
@@ -809,8 +797,6 @@ ex_let_const(exarg_T *eap, int discovery)
 	    if (eap->skip)
 		++emsg_skip;
 	    eval_flags = eap->skip ? 0 : EVAL_EVALUATE;
-	    if (discovery)
-		eval_flags |= EVAL_CONSTANT;
 	    i = eval0(expr, &rettv, &eap->nextcmd, eval_flags);
 	}
 	if (eap->skip)
@@ -819,10 +805,8 @@ ex_let_const(exarg_T *eap, int discovery)
 		clear_tv(&rettv);
 	    --emsg_skip;
 	}
-	else if (i != FAIL || (discovery && save_called_emsg == called_emsg))
+	else if (i != FAIL)
 	{
-	    // In Vim9 script discovery "let v: bool = Func()" fails but is
-	    // still a valid declaration.
 	    (void)ex_let_vars(eap->arg, &rettv, FALSE, semicolon, var_count,
 								 flags, op);
 	    clear_tv(&rettv);
@@ -931,7 +915,8 @@ ex_let_vars(
  * Skip over assignable variable "var" or list of variables "[var, var]".
  * Used for ":let varvar = expr" and ":for varvar in expr".
  * For "[var, var]" increment "*var_count" for each variable.
- * for "[var, var; var]" set "semicolon".
+ * for "[var, var; var]" set "semicolon" to 1.
+ * If "silent" is TRUE do not give an "invalid argument" error message.
  * Return NULL for an error.
  */
     char_u *
@@ -939,7 +924,8 @@ skip_var_list(
     char_u	*arg,
     int		include_type,
     int		*var_count,
-    int		*semicolon)
+    int		*semicolon,
+    int		silent)
 {
     char_u	*p, *s;
 
@@ -950,10 +936,11 @@ skip_var_list(
 	for (;;)
 	{
 	    p = skipwhite(p + 1);	// skip whites after '[', ';' or ','
-	    s = skip_var_one(p, TRUE);
+	    s = skip_var_one(p, FALSE);
 	    if (s == p)
 	    {
-		semsg(_(e_invarg2), p);
+		if (!silent)
+		    semsg(_(e_invarg2), p);
 		return NULL;
 	    }
 	    ++*var_count;
@@ -972,7 +959,8 @@ skip_var_list(
 	    }
 	    else if (*p != ',')
 	    {
-		semsg(_(e_invarg2), p);
+		if (!silent)
+		    semsg(_(e_invarg2), p);
 		return NULL;
 	    }
 	}
@@ -987,7 +975,7 @@ skip_var_list(
  * l[idx].
  * In Vim9 script also skip over ": type" if "include_type" is TRUE.
  */
-    static char_u *
+    char_u *
 skip_var_one(char_u *arg, int include_type)
 {
     char_u *end;
@@ -996,10 +984,13 @@ skip_var_one(char_u *arg, int include_type)
 	return arg + 2;
     end = find_name_end(*arg == '$' || *arg == '&' ? arg + 1 : arg,
 				   NULL, NULL, FNE_INCL_BR | FNE_CHECK_START);
-    if (include_type && current_sctx.sc_version == SCRIPT_VERSION_VIM9
-								&& *end == ':')
+    if (include_type && current_sctx.sc_version == SCRIPT_VERSION_VIM9)
     {
-	end = skip_type(skipwhite(end + 1));
+	// "a: type" is declaring variable "a" with a type, not "a:".
+	if (end == arg + 2 && end[-1] == ':')
+	    --end;
+	if (*end == ':')
+	    end = skip_type(skipwhite(end + 1));
     }
     return end;
 }
@@ -1371,12 +1362,7 @@ ex_let_one(
 	lval_T	lv;
 
 	p = get_lval(arg, tv, &lv, FALSE, FALSE, 0, FNE_CHECK_START);
-	if ((flags & LET_DISCOVERY) && tv->v_type == VAR_UNKNOWN
-							 && lv.ll_type == NULL)
-	{
-	    semsg(_("E1091: type missing for %s"), arg);
-	}
-	else if (p != NULL && lv.ll_name != NULL)
+	if (p != NULL && lv.ll_name != NULL)
 	{
 	    if (endchars != NULL && vim_strchr(endchars,
 					   *skipwhite(lv.ll_name_end)) == NULL)
@@ -2224,6 +2210,22 @@ set_argv_var(char **argv, int argc)
 }
 
 /*
+ * Reset v:register, taking the 'clipboard' setting into account.
+ */
+    void
+reset_reg_var(void)
+{
+    int regname = 0;
+
+    // Adjust the register according to 'clipboard', so that when
+    // "unnamed" is present it becomes '*' or '+' instead of '"'.
+#ifdef FEAT_CLIPBOARD
+    adjust_clip_reg(&regname);
+#endif
+    set_reg_var(regname);
+}
+
+/*
  * Set v:register if needed.
  */
     void
@@ -2373,9 +2375,13 @@ get_var_tv(
 	    *dip = v;
     }
 
-    if (tv == NULL && current_sctx.sc_version == SCRIPT_VERSION_VIM9)
+    if (tv == NULL && (current_sctx.sc_version == SCRIPT_VERSION_VIM9
+					       || STRNCMP(name, "s:", 2) == 0))
     {
-	imported_T *import = find_imported(name, 0, NULL);
+	imported_T  *import;
+	char_u	    *p = STRNCMP(name, "s:", 2) == 0 ? name + 2 : name;
+
+	import = find_imported(p, 0, NULL);
 
 	// imported variable from another script
 	if (import != NULL)
@@ -2544,7 +2550,7 @@ lookup_scriptvar(char_u *name, size_t len, cctx_T *dummy UNUSED)
     }
     else
     {
-	p = vim_strnsave(name, (int)len);
+	p = vim_strnsave(name, len);
 	if (p == NULL)
 	    return NULL;
     }
@@ -2621,7 +2627,7 @@ find_var_ht(char_u *name, char_u **varname)
     if (*name == 'v')				// v: variable
 	return &vimvarht;
     if (get_current_funccal() != NULL
-			      && get_current_funccal()->func->uf_dfunc_idx < 0)
+	       && get_current_funccal()->func->uf_dfunc_idx == UF_NOT_COMPILED)
     {
 	// a: and l: are only used in functions defined with ":function"
 	if (*name == 'a')			// a: function argument
@@ -2883,12 +2889,17 @@ set_var_const(
 			       || var_check_lock(di->di_tv.v_lock, name, FALSE))
 		return;
 
-	    if ((flags & LET_NO_COMMAND) == 0
-		    && is_script_local
-		    && current_sctx.sc_version == SCRIPT_VERSION_VIM9)
+	    if (is_script_local
+			     && current_sctx.sc_version == SCRIPT_VERSION_VIM9)
 	    {
-		semsg(_("E1041: Redefining script item %s"), name);
-		return;
+		if ((flags & LET_NO_COMMAND) == 0)
+		{
+		    semsg(_("E1041: Redefining script item %s"), name);
+		    return;
+		}
+
+		// check the type
+		check_script_var_type(&di->di_tv, tv, name);
 	    }
 	}
 	else
@@ -3004,8 +3015,6 @@ set_var_const(
 
     if (flags & LET_IS_CONST)
 	di->di_tv.v_lock |= VAR_LOCKED;
-    if (flags & LET_DISCOVERY)
-	di->di_flags |= DI_FLAGS_RELOAD;
 }
 
 /*

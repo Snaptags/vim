@@ -920,7 +920,12 @@ gui_x11_key_hit_cb(
     if (ev_press->state & ShiftMask)
 	modifiers |= MOD_MASK_SHIFT;
     if (ev_press->state & ControlMask)
+    {
 	modifiers |= MOD_MASK_CTRL;
+	if (len == 1 && string[0] < 0x20)
+	    // Use the character before applyng CTRL.
+	    string[0] += 0x40;
+    }
     if (ev_press->state & Mod1Mask)
 	modifiers |= MOD_MASK_ALT;
     if (ev_press->state & Mod4Mask)
@@ -948,6 +953,11 @@ gui_x11_key_hit_cb(
     {
 	string[0] = key;
 	len = 1;
+
+	// Remove the SHIFT modifier for keys where it's already included,
+	// e.g., '(', '!' and '*'.
+	if (!ASCII_ISALPHA(key) && key > 0x20 && key < 0x7f)
+	    modifiers &= ~MOD_MASK_SHIFT;
     }
 
     if (modifiers != 0)

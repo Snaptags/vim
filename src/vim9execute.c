@@ -230,7 +230,7 @@ call_dfunc(int cdf_idx, int argcount_arg, ectx_T *ectx)
     // Set execution state to the start of the called function.
     ectx->ec_dfunc_idx = cdf_idx;
     ectx->ec_instr = dfunc->df_instr;
-    estack_push_ufunc(ETYPE_UFUNC, dfunc->df_ufunc, 1);
+    estack_push_ufunc(dfunc->df_ufunc, 1);
 
     // Decide where to start execution, handles optional arguments.
     init_instr_idx(ufunc, argcount, ectx);
@@ -487,6 +487,9 @@ call_ufunc(ufunc_T *ufunc, int argcount, ectx_T *ectx, isn_T *iptr)
     int		error;
     int		idx;
 
+    if (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+	    && compile_def_function(ufunc, FALSE, NULL) == FAIL)
+	return FAIL;
     if (ufunc->uf_dfunc_idx >= 0)
     {
 	// The function has been compiled, can call it quickly.  For a function
@@ -653,6 +656,7 @@ call_def_function(
     int		defcount = ufunc->uf_args.ga_len - argc;
     int		save_sc_version = current_sctx.sc_version;
     int		breakcheck_count = 0;
+    int		called_emsg_before = called_emsg;
 
 // Get pointer to item in the stack.
 #define STACK_TV(idx) (((typval_T *)ectx.ec_stack.ga_data) + idx)
@@ -667,8 +671,19 @@ call_def_function(
 // Like STACK_TV_VAR but use the outer scope
 #define STACK_OUT_TV_VAR(idx) (((typval_T *)ectx.ec_outer_stack->ga_data) + ectx.ec_outer_frame + STACK_FRAME_SIZE + idx)
 
+    if (ufunc->uf_dfunc_idx == UF_NOT_COMPILED
+	    || (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+			  && compile_def_function(ufunc, FALSE, NULL) == FAIL))
     {
-	// Check the function was compiled, it is postponed in ex_vim9script().
+	if (called_emsg == called_emsg_before)
+	    semsg(_("E1091: Function is not compiled: %s"),
+		    ufunc->uf_name_exp == NULL
+					? ufunc->uf_name : ufunc->uf_name_exp);
+	return FAIL;
+    }
+
+    {
+	// Check the function was really compiled.
 	dfunc_T	*dfunc = ((dfunc_T *)def_functions.ga_data)
 							 + ufunc->uf_dfunc_idx;
 	if (dfunc->df_instr == NULL)
@@ -2099,6 +2114,31 @@ call_def_function(
 		}
 		break;
 
+	    case ISN_GETITEM:
+		{
+		    listitem_T	*li;
+		    int		index = iptr->isn_arg.number;
+
+		    // get list item: list is at stack-1, push item
+		    tv = STACK_TV_BOT(-1);
+		    if (tv->v_type != VAR_LIST)
+		    {
+			emsg(_(e_listreq));
+			goto failed;
+		    }
+		    if ((li = list_find(tv->vval.v_list, index)) == NULL)
+		    {
+			semsg(_(e_listidx), index);
+			goto failed;
+		    }
+
+		    if (GA_GROW(&ectx.ec_stack, 1) == FAIL)
+			goto failed;
+		    ++ectx.ec_stack.ga_len;
+		    copy_tv(&li->li_tv, STACK_TV_BOT(-1));
+		}
+		break;
+
 	    case ISN_MEMBER:
 		{
 		    dict_T	*dict;
@@ -2303,6 +2343,9 @@ ex_disassemble(exarg_T *eap)
 	semsg(_("E1061: Cannot find function %s"), eap->arg);
 	return;
     }
+    if (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+	    && compile_def_function(ufunc, FALSE, NULL) == FAIL)
+	return;
     if (ufunc->uf_dfunc_idx < 0)
     {
 	semsg(_("E1062: Function %s is not compiled"), eap->arg);
@@ -2771,6 +2814,8 @@ ex_disassemble(exarg_T *eap)
 	    // expression operations
 	    case ISN_CONCAT: smsg("%4d CONCAT", current); break;
 	    case ISN_INDEX: smsg("%4d INDEX", current); break;
+	    case ISN_GETITEM: smsg("%4d ITEM %lld",
+					 current, iptr->isn_arg.number); break;
 	    case ISN_MEMBER: smsg("%4d MEMBER", current); break;
 	    case ISN_STRINGMEMBER: smsg("%4d MEMBER %s", current,
 						  iptr->isn_arg.string); break;

@@ -928,6 +928,8 @@ yank_do_autocmd(oparg_T *oap, yankreg_T *reg)
     }
     dict_add_string(v_event, "regtype", buf);
 
+    dict_add_bool(v_event, "visual", oap->is_VIsual);
+
     // Lock the dictionary and its keys
     dict_set_items_ro(v_event);
 
@@ -2111,6 +2113,15 @@ get_register_name(int num)
 }
 
 /*
+ * Return the index of the register "" points to.
+ */
+    int
+get_unname_register()
+{
+    return y_previous == NULL ? -1 : y_previous - &y_regs[0];
+}
+
+/*
  * ":dis" and ":registers": Display the contents of the yank registers.
  */
     void
@@ -2644,7 +2655,7 @@ write_reg_contents_ex(
     {
 	char_u	    *p, *s;
 
-	p = vim_strnsave(str, (int)len);
+	p = vim_strnsave(str, len);
 	if (p == NULL)
 	    return;
 	if (must_append && expr_line != NULL)

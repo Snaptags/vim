@@ -407,6 +407,10 @@ main
     init_highlight(TRUE, FALSE); // set the default highlight groups
     TIME_MSG("init highlight");
 
+#if defined(FEAT_TERMRESPONSE)
+    init_term_props(TRUE);
+#endif
+
 #ifdef FEAT_EVAL
     // Set the break level after the terminal is initialized.
     debug_break_level = params.use_debug_break_level;
@@ -793,7 +797,7 @@ vim_main2(void)
 
 #if defined(FEAT_TERMRESPONSE)
     // Must be done before redrawing, puts a few characters on the screen.
-    may_req_ambiguous_char_width();
+    check_terminal_behavior();
 #endif
 
     RedrawingDisabled = 0;
@@ -826,12 +830,7 @@ vim_main2(void)
     // done after the clipboard is available and all initial commands that may
     // modify the 'clipboard' setting have run; i.e. just before entering the
     // main loop.
-    {
-	int default_regname = 0;
-
-	adjust_clip_reg(&default_regname);
-	set_reg_var(default_regname);
-    }
+    reset_reg_var();
 #endif
 
 #if defined(FEAT_DIFF)

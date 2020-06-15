@@ -850,11 +850,20 @@ func Test_gui_run_cmd_in_terminal()
     " assume all the other systems have a cat command
     let cmd = 'cat'
   endif
-  let cmd = ':silent !' . cmd . " test_gui.vim\<CR>\<CR>"
-  call feedkeys(cmd, 'xt')
+  exe "silent !" . cmd . " test_gui.vim"
   " TODO: how to check that the command ran in a separate terminal?
   " Maybe check for $TERM (dumb vs xterm) in the spawned shell?
   let &guioptions = save_guioptions
+endfunc
+
+func Test_gui_recursive_mapping()
+  nmap ' <C-W>
+  nmap <C-W>a :let didit = 1<CR>
+  call feedkeys("'a", 'xt')
+  call assert_equal(1, didit)
+
+  nunmap '
+  nunmap <C-W>a
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab
