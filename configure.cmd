@@ -1,7 +1,7 @@
 @echo off
 
 :: Visual Studio directory. Quotation marks, no trailing backslash.
-set VS_DIR="c:\Program Files (x86)\Microsoft Visual Studio\2019\Professional"
+set VS_DIR="c:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools"
 
 :: Target architecture, AMD64 (64-bit) or I386 (32-bit)
 set CPU=AMD64
@@ -34,8 +34,8 @@ set MBYTE=yes
 ::set PYTHON_VER=27
 
 set DYNAMIC_PYTHON3=yes
-set PYTHON3=c:\Python37
-set PYTHON3_VER=37
+set PYTHON3=c:\Python38
+set PYTHON3_VER=38
 
 :: Enable Perl scripting
 :: set DYNAMIC_PERL=yes
@@ -43,6 +43,6 @@ set PYTHON3_VER=37
 :: set PERL_VER=524
 
 echo "Updating version numbers from git..."
-call c:\Python37\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
+call c:\Python38\python.exe .\tools\UpdateVersionByGitTag.py -i .\src\version.h
 echo "Configuring Visual Studio..."
 call %VS_DIR%\VC\Auxiliary\Build\vcvarsall.bat %TOOLCHAIN%
