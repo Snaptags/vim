@@ -485,6 +485,14 @@ func Test_set_register_dict()
   call assert_equal(['six'], getreginfo('0').regcontents)
   call assert_equal(['six'], getreginfo('"').regcontents)
 
+  let @x = 'one'
+  call setreg('x', {})
+  call assert_equal(1, len(split(execute('reg x'), '\n')))
+
+  call assert_fails("call setreg('0', #{regtype: 'V'}, 'v')", 'E118:')
+  call assert_fails("call setreg('0', #{regtype: 'X'})", 'E475:')
+  call assert_fails("call setreg('0', #{regtype: 'vy'})", 'E475:')
+
   bwipe!
 endfunc
 
@@ -554,6 +562,100 @@ func Test_v_register()
   call assert_equal('"', s:register2)
 
   set opfunc&
+  bwipe!
+endfunc
+
+" Test for executing the contents of a register as an Ex command with line
+" continuation.
+func Test_execute_reg_as_ex_cmd()
+  " Line continuation with just two lines
+  let code =<< trim END
+    let l = [
+      \ 1]
+  END
+  let @r = code->join("\n")
+  let l = []
+  @r
+  call assert_equal([1], l)
+
+  " Line continuation with more than two lines
+  let code =<< trim END
+    let l = [
+      \ 1,
+      \ 2,
+      \ 3]
+  END
+  let @r = code->join("\n")
+  let l = []
+  @r
+  call assert_equal([1, 2, 3], l)
+
+  " use comments interspersed with code
+  let code =<< trim END
+    let l = [
+      "\ one
+      \ 1,
+      "\ two
+      \ 2,
+      "\ three
+      \ 3]
+  END
+  let @r = code->join("\n")
+  let l = []
+  @r
+  call assert_equal([1, 2, 3], l)
+
+  " use line continuation in the middle
+  let code =<< trim END
+    let a = "one"
+    let l = [
+      \ 1,
+      \ 2]
+    let b = "two"
+  END
+  let @r = code->join("\n")
+  let l = []
+  @r
+  call assert_equal([1, 2], l)
+  call assert_equal("one", a)
+  call assert_equal("two", b)
+
+  " only one line with a \
+  let @r = "\\let l = 1"
+  call assert_fails('@r', 'E10:')
+
+  " only one line with a "\
+  let @r = '   "\ let i = 1'
+  @r
+  call assert_false(exists('i'))
+
+  " first line also begins with a \
+  let @r = "\\let l = [\n\\ 1]"
+  call assert_fails('@r', 'E10:')
+
+  " Test with a large number of lines
+  let @r = "let str = \n"
+  let @r ..= repeat("  \\ 'abcdefghijklmnopqrstuvwxyz' ..\n", 312)
+  let @r ..= '  \ ""'
+  @r
+  call assert_equal(repeat('abcdefghijklmnopqrstuvwxyz', 312), str)
+endfunc
+
+" Test for clipboard registers with ASCII NUL
+func Test_clipboard_nul()
+  CheckFeature clipboard_working
+  new
+
+  " Test for putting ASCII NUL into the clipboard
+  set clipboard=unnamed
+  call append(0, "\ntest")
+  normal ggyyp
+  call assert_equal("^@test^@", strtrans(getreg('*')))
+  call assert_equal(getline(1), getline(2))
+  let b = split(execute(":reg *"), "\n")
+  call assert_match('"\*\s*\^@test\^J',b[1])
+
+  set clipboard&vim
   bwipe!
 endfunc
 

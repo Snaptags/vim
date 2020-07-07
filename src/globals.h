@@ -1699,6 +1699,7 @@ EXTERN char e_const_option[]	INIT(= N_("E996: Cannot lock an option"));
 EXTERN char e_unknown_option[]	INIT(= N_("E113: Unknown option: %s"));
 EXTERN char e_letunexp[]	INIT(= N_("E18: Unexpected characters in :let"));
 EXTERN char e_reduceempty[]	INIT(= N_("E998: Reduce of an empty %s with no initial value"));
+EXTERN char e_no_dict_key[]	INIT(= N_("E857: Dictionary key \"%s\" required"));
 #endif
 #ifdef FEAT_QUICKFIX
 EXTERN char e_readerrf[]	INIT(= N_("E47: Error while reading errorfile"));
@@ -1764,6 +1765,7 @@ EXTERN char e_float_as_string[] INIT(= N_("E806: using Float as a String"));
 #endif
 EXTERN char e_dirnotf[]	INIT(= N_("E919: Directory not found in '%s': \"%s\""));
 EXTERN char e_au_recursive[]	INIT(= N_("E952: Autocommand caused recursive behavior"));
+EXTERN char e_autocmd_close[]	INIT(= N_("E813: Cannot close autocmd or popup window"));
 #ifdef FEAT_MENU
 EXTERN char e_menuothermode[]	INIT(= N_("E328: Menu only exists in another mode"));
 #endif
@@ -1787,6 +1789,9 @@ EXTERN char e_no_white_before[] INIT(= N_("E1068: No white space allowed before 
 EXTERN char e_lock_unlock[]	INIT(= N_("E940: Cannot lock or unlock variable %s"));
 EXTERN char e_const_req_value[] INIT(= N_("E1021: const requires a value"));
 EXTERN char e_type_req[]	INIT(= N_("E1022: type or initialization required"));
+EXTERN char e_declare_var[]	INIT(= N_("E1016: Cannot declare a %s variable: %s"));
+EXTERN char e_declare_env_var[]	INIT(= N_("E1016: Cannot declare an environment variable: %s"));
+EXTERN char e_colon_required[]	INIT(= N_("E1050: Colon required before a range"));
 #endif
 #if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
 EXTERN char e_alloc_color[]	INIT(= N_("E254: Cannot allocate color %s"));
@@ -1841,6 +1846,7 @@ EXTERN int  disable_redraw_for_testing INIT(= FALSE);
 EXTERN int  ignore_redraw_flag_for_testing INIT(= FALSE);
 EXTERN int  nfa_fail_for_testing INIT(= FALSE);
 EXTERN int  no_query_mouse_for_testing INIT(= FALSE);
+EXTERN int  ui_delay_for_testing INIT(= 0);
 EXTERN int  reset_term_props_on_termresponse INIT(= FALSE);
 
 EXTERN int  in_free_unref_items INIT(= FALSE);
@@ -1875,6 +1881,13 @@ EXTERN char windowsVersion[20] INIT(= {0});
 
 // Used for lv_first in a non-materialized range() list.
 EXTERN listitem_T range_list_item;
+
+// Passed to an eval() function to enable evaluation.
+EXTERN evalarg_T EVALARG_EVALUATE
+# ifdef DO_INIT
+	= {EVAL_EVALUATE, 0, NULL, NULL, {0, 0, 0, 0, NULL}, NULL}
+# endif
+	;
 #endif
 
 #ifdef MSWIN

@@ -23,6 +23,13 @@
 #define DEFINE_VIM9_GLOBALS
 #include "vim9.h"
 
+// values for ctx_skip
+typedef enum {
+    SKIP_NOT,		// condition is a constant, produce code
+    SKIP_YES,		// condition is a constant, do NOT produce code
+    SKIP_UNKNOWN	// condition is not a constant, produce code
+} skip_T;
+
 /*
  * Chain of jump instructions where the end label needs to be set.
  */
@@ -36,6 +43,8 @@ struct endlabel_S {
  * info specific for the scope of :if / elseif / else
  */
 typedef struct {
+    int		is_seen_else;
+    int		is_had_return;	    // every block ends in :return
     int		is_if_label;	    // instruction idx at IF or ELSEIF
     endlabel_T	*is_end_label;	    // instructions to set end label
 } ifscope_T;
@@ -83,6 +92,7 @@ struct scope_S {
     scope_T	*se_outer;	    // scope containing this one
     scopetype_T se_type;
     int		se_local_count;	    // ctx_locals.ga_len before scope
+    skip_T	se_skip_save;	    // ctx_skip before the block
     union {
 	ifscope_T	se_if;
 	whilescope_T	se_while;
@@ -121,9 +131,9 @@ struct cctx_S {
 
     garray_T	ctx_imports;	    // imported items
 
-    int		ctx_skip;	    // when TRUE skip commands, when FALSE skip
-				    // commands after "else"
+    skip_T	ctx_skip;
     scope_T	*ctx_scope;	    // current scope, NULL at toplevel
+    int		ctx_had_return;	    // last seen statement was "return"
 
     cctx_T	*ctx_outer;	    // outer scope for lambda or nested
 				    // function
@@ -278,7 +288,7 @@ lookup_script(char_u *name, size_t len)
  * Return FAIL and give an error if it defined.
  */
     int
-check_defined(char_u *p, int len, cctx_T *cctx)
+check_defined(char_u *p, size_t len, cctx_T *cctx)
 {
     if (lookup_script(p, len) == OK
 	    || (cctx != NULL
@@ -545,8 +555,8 @@ check_type(type_T *expected, type_T *actual, int give_msg)
 /////////////////////////////////////////////////////////////////////
 // Following generate_ functions expect the caller to call ga_grow().
 
-#define RETURN_NULL_IF_SKIP(cctx) if (cctx->ctx_skip == TRUE) return NULL
-#define RETURN_OK_IF_SKIP(cctx) if (cctx->ctx_skip == TRUE) return OK
+#define RETURN_NULL_IF_SKIP(cctx) if (cctx->ctx_skip == SKIP_YES) return NULL
+#define RETURN_OK_IF_SKIP(cctx) if (cctx->ctx_skip == SKIP_YES) return OK
 
 /*
  * Generate an instruction without arguments.
@@ -633,7 +643,7 @@ check_number_or_float(vartype_T type1, vartype_T type2, char_u *op)
 							 || type2 == VAR_ANY)))
     {
 	if (*op == '+')
-	    emsg(_("E1035: wrong argument type for +"));
+	    emsg(_("E1051: wrong argument type for +"));
 	else
 	    semsg(_("E1036: %c requires number or float arguments"), *op);
 	return FAIL;
@@ -1086,6 +1096,39 @@ generate_GETITEM(cctx_T *cctx, int index)
 }
 
 /*
+ * Generate an ISN_SLICE instruction with "count".
+ */
+    static int
+generate_SLICE(cctx_T *cctx, int count)
+{
+    isn_T	*isn;
+
+    RETURN_OK_IF_SKIP(cctx);
+    if ((isn = generate_instr(cctx, ISN_SLICE)) == NULL)
+	return FAIL;
+    isn->isn_arg.number = count;
+    return OK;
+}
+
+/*
+ * Generate an ISN_CHECKLEN instruction with "min_len".
+ */
+    static int
+generate_CHECKLEN(cctx_T *cctx, int min_len, int more_OK)
+{
+    isn_T	*isn;
+
+    RETURN_OK_IF_SKIP(cctx);
+
+    if ((isn = generate_instr(cctx, ISN_CHECKLEN)) == NULL)
+	return FAIL;
+    isn->isn_arg.checklen.cl_min_len = min_len;
+    isn->isn_arg.checklen.cl_more_OK = more_OK;
+
+    return OK;
+}
+
+/*
  * Generate an ISN_STORE instruction.
  */
     static int
@@ -1450,7 +1493,7 @@ generate_CALL(cctx_T *cctx, ufunc_T *ufunc, int pushed_argcount)
 	return FAIL;
     }
 
-    if (ufunc->uf_dfunc_idx != UF_NOT_COMPILED)
+    if (ufunc->uf_def_status != UF_NOT_COMPILED)
     {
 	int		i;
 
@@ -1474,16 +1517,16 @@ generate_CALL(cctx_T *cctx, ufunc_T *ufunc, int pushed_argcount)
 		return FAIL;
 	    }
 	}
-	if (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED)
+	if (ufunc->uf_def_status == UF_TO_BE_COMPILED)
 	    if (compile_def_function(ufunc, TRUE, NULL) == FAIL)
 		return FAIL;
     }
 
     if ((isn = generate_instr(cctx,
-		    ufunc->uf_dfunc_idx != UF_NOT_COMPILED ? ISN_DCALL
+		    ufunc->uf_def_status != UF_NOT_COMPILED ? ISN_DCALL
 							 : ISN_UCALL)) == NULL)
 	return FAIL;
-    if (ufunc->uf_dfunc_idx != UF_NOT_COMPILED)
+    if (ufunc->uf_def_status != UF_NOT_COMPILED)
     {
 	isn->isn_arg.dfunc.cdf_idx = ufunc->uf_dfunc_idx;
 	isn->isn_arg.dfunc.cdf_argcount = argcount;
@@ -2293,9 +2336,12 @@ get_script_item_idx(int sid, char_u *name, int check_writable)
     imported_T *
 find_imported(char_u *name, size_t len, cctx_T *cctx)
 {
-    scriptitem_T    *si = SCRIPT_ITEM(current_sctx.sc_sid);
+    scriptitem_T    *si;
     int		    idx;
 
+    if (current_sctx.sc_sid <= 0)
+	return NULL;
+    si = SCRIPT_ITEM(current_sctx.sc_sid);
     if (cctx != NULL)
 	for (idx = 0; idx < cctx->ctx_imports.ga_len; ++idx)
 	{
@@ -2338,11 +2384,66 @@ free_imported(cctx_T *cctx)
 }
 
 /*
+ * Return TRUE if "p" points at a "#" but not at "#{".
+ */
+    static int
+comment_start(char_u *p)
+{
+    return p[0] == '#' && p[1] != '{';
+}
+
+/*
+ * Return a pointer to the next line that isn't empty or only contains a
+ * comment. Skips over white space.
+ * Returns NULL if there is none.
+ */
+    static char_u *
+peek_next_line(cctx_T *cctx)
+{
+    int lnum = cctx->ctx_lnum;
+
+    while (++lnum < cctx->ctx_ufunc->uf_lines.ga_len)
+    {
+	char_u *line = ((char_u **)cctx->ctx_ufunc->uf_lines.ga_data)[lnum];
+	char_u *p;
+
+	if (line == NULL)
+	    break;
+	p = skipwhite(line);
+	if (*p != NUL && !comment_start(p))
+	    return p;
+    }
+    return NULL;
+}
+
+/*
+ * Called when checking for a following operator at "arg".  When the rest of
+ * the line is empty or only a comment, peek the next line.  If there is a next
+ * line return a pointer to it and set "nextp".
+ * Otherwise skip over white space.
+ */
+    static char_u *
+may_peek_next_line(cctx_T *cctx, char_u *arg, char_u **nextp)
+{
+    char_u *p = skipwhite(arg);
+
+    *nextp = NULL;
+    if (*p == NUL || (VIM_ISWHITE(*arg) && comment_start(p)))
+    {
+	*nextp = peek_next_line(cctx);
+	if (*nextp != NULL)
+	    return *nextp;
+    }
+    return p;
+}
+
+/*
  * Get the next line of the function from "cctx".
+ * Skips over empty lines.  Skips over comment lines if "skip_comment" is TRUE.
  * Returns NULL when at the end.
  */
     static char_u *
-next_line_from_context(cctx_T *cctx)
+next_line_from_context(cctx_T *cctx, int skip_comment)
 {
     char_u	*line;
 
@@ -2357,17 +2458,9 @@ next_line_from_context(cctx_T *cctx)
 	line = ((char_u **)cctx->ctx_ufunc->uf_lines.ga_data)[cctx->ctx_lnum];
 	cctx->ctx_line_start = line;
 	SOURCING_LNUM = cctx->ctx_lnum + 1;
-    } while (line == NULL || *skipwhite(line) == NUL);
+    } while (line == NULL || *skipwhite(line) == NUL
+			  || (skip_comment && comment_start(skipwhite(line))));
     return line;
-}
-
-/*
- * Return TRUE if "p" points at a "#" but not at "#{".
- */
-    static int
-comment_start(char_u *p)
-{
-    return p[0] == '#' && p[1] != '{';
 }
 
 /*
@@ -2380,7 +2473,7 @@ may_get_next_line(char_u *whitep, char_u **arg, cctx_T *cctx)
 {
     if (**arg == NUL || (VIM_ISWHITE(*whitep) && comment_start(*arg)))
     {
-	char_u *next = next_line_from_context(cctx);
+	char_u *next = next_line_from_context(cctx, TRUE);
 
 	if (next == NULL)
 	    return FAIL;
@@ -2460,7 +2553,7 @@ generate_ppconst(cctx_T *cctx, ppconst_T *ppconst)
     int	    ret = OK;
     int	    save_skip = cctx->ctx_skip;
 
-    cctx->ctx_skip = FALSE;
+    cctx->ctx_skip = SKIP_NOT;
     for (i = 0; i < ppconst->pp_used; ++i)
 	if (generate_tv_PUSH(cctx, &ppconst->pp_tv[i]) == FAIL)
 	    ret = FAIL;
@@ -2520,7 +2613,8 @@ compile_load_scriptvar(
 	if (import->imp_all)
 	{
 	    char_u	*p = skipwhite(*end);
-	    int		name_len;
+	    char_u	*exp_name;
+	    int		cc;
 	    ufunc_T	*ufunc;
 	    type_T	*type;
 
@@ -2537,7 +2631,17 @@ compile_load_scriptvar(
 		return FAIL;
 	    }
 
-	    idx = find_exported(import->imp_sid, &p, &name_len, &ufunc, &type);
+	    // isolate one name
+	    exp_name = p;
+	    while (eval_isnamec(*p))
+		++p;
+	    cc = *p;
+	    *p = NUL;
+
+	    idx = find_exported(import->imp_sid, exp_name, &ufunc, &type);
+	    *p = cc;
+	    p = skipwhite(p);
+
 	    // TODO: what if it is a function?
 	    if (idx < 0)
 		return FAIL;
@@ -2709,14 +2813,8 @@ compile_arguments(char_u **arg, cctx_T *cctx, int *argcount)
 
     for (;;)
     {
-	while (*p == NUL || (VIM_ISWHITE(*whitep) && comment_start(p)))
-	{
-	    p = next_line_from_context(cctx);
-	    if (p == NULL)
-		goto failret;
-	    whitep = (char_u *)" ";
-	    p = skipwhite(p);
-	}
+	if (may_get_next_line(whitep, &p, cctx) == FAIL)
+	    goto failret;
 	if (*p == ')')
 	{
 	    *arg = p + 1;
@@ -2781,9 +2879,9 @@ compile_call(
 
 	argvars[0].v_type = VAR_UNKNOWN;
 	if (*s == '"')
-	    (void)get_string_tv(&s, &argvars[0], TRUE);
+	    (void)eval_string(&s, &argvars[0], TRUE);
 	else if (*s == '\'')
-	    (void)get_lit_string_tv(&s, &argvars[0], TRUE);
+	    (void)eval_lit_string(&s, &argvars[0], TRUE);
 	s = skipwhite(s);
 	if (*s == ')' && argvars[0].v_type == VAR_STRING)
 	{
@@ -2894,6 +2992,7 @@ to_name_end(char_u *arg, int namespace)
 
 /*
  * Like to_name_end() but also skip over a list or dict constant.
+ * This intentionally does not handle line continuation.
  */
     char_u *
 to_name_const_end(char_u *arg)
@@ -2905,24 +3004,24 @@ to_name_const_end(char_u *arg)
     {
 
 	// Can be "[1, 2, 3]->Func()".
-	if (get_list_tv(&p, &rettv, 0, FALSE) == FAIL)
+	if (eval_list(&p, &rettv, NULL, FALSE) == FAIL)
 	    p = arg;
     }
     else if (p == arg && *arg == '#' && arg[1] == '{')
     {
 	// Can be "#{a: 1}->Func()".
 	++p;
-	if (eval_dict(&p, &rettv, 0, TRUE) == FAIL)
+	if (eval_dict(&p, &rettv, NULL, TRUE) == FAIL)
 	    p = arg;
     }
     else if (p == arg && *arg == '{')
     {
-	int	    ret = get_lambda_tv(&p, &rettv, FALSE);
+	int	    ret = get_lambda_tv(&p, &rettv, NULL);
 
 	// Can be "{x -> ret}()".
 	// Can be "{'a': 1}->Func()".
 	if (ret == NOTDONE)
-	    ret = eval_dict(&p, &rettv, 0, FALSE);
+	    ret = eval_dict(&p, &rettv, NULL, FALSE);
 	if (ret != OK)
 	    p = arg;
     }
@@ -2943,16 +3042,10 @@ compile_list(char_u **arg, cctx_T *cctx)
 
     for (;;)
     {
-	while (*p == NUL || (VIM_ISWHITE(*whitep) && comment_start(p)))
+	if (may_get_next_line(whitep, &p, cctx) == FAIL)
 	{
-	    p = next_line_from_context(cctx);
-	    if (p == NULL)
-	    {
-		semsg(_(e_list_end), *arg);
-		return FAIL;
-	    }
-	    whitep = (char_u *)" ";
-	    p = skipwhite(p);
+	    semsg(_(e_list_end), *arg);
+	    return FAIL;
 	}
 	if (*p == ']')
 	{
@@ -2987,7 +3080,7 @@ compile_lambda(char_u **arg, cctx_T *cctx)
     ufunc_T	*ufunc;
 
     // Get the funcref in "rettv".
-    if (get_lambda_tv(arg, &rettv, TRUE) != OK)
+    if (get_lambda_tv(arg, &rettv, &EVALARG_EVALUATE) != OK)
 	return FAIL;
 
     ufunc = rettv.vval.v_partial->pt_func;
@@ -2999,7 +3092,7 @@ compile_lambda(char_u **arg, cctx_T *cctx)
     // Compile it into instructions.
     compile_def_function(ufunc, TRUE, cctx);
 
-    if (ufunc->uf_dfunc_idx >= 0)
+    if (ufunc->uf_def_status == UF_COMPILED)
 	return generate_FUNCREF(cctx, ufunc->uf_dfunc_idx);
     return FAIL;
 }
@@ -3017,7 +3110,7 @@ compile_lambda_call(char_u **arg, cctx_T *cctx)
     int		ret = FAIL;
 
     // Get the funcref in "rettv".
-    if (get_lambda_tv(arg, &rettv, TRUE) == FAIL)
+    if (get_lambda_tv(arg, &rettv, &EVALARG_EVALUATE) == FAIL)
 	return FAIL;
 
     if (**arg != '(')
@@ -3069,14 +3162,10 @@ compile_dict(char_u **arg, cctx_T *cctx, int literal)
     {
 	char_u *key = NULL;
 
-	while (**arg == NUL || (literal && **arg == '"')
-			      || (VIM_ISWHITE(*whitep) && comment_start(*arg)))
+	if (may_get_next_line(whitep, arg, cctx) == FAIL)
 	{
-	    *arg = next_line_from_context(cctx);
-	    if (*arg == NULL)
-		goto failret;
-	    whitep = (char_u *)" ";
-	    *arg = skipwhite(*arg);
+	    *arg = NULL;
+	    goto failret;
 	}
 
 	if (**arg == '}')
@@ -3136,13 +3225,10 @@ compile_dict(char_u **arg, cctx_T *cctx, int literal)
 
 	whitep = *arg + 1;
 	*arg = skipwhite(*arg + 1);
-	while (**arg == NUL || (VIM_ISWHITE(*whitep) && comment_start(*arg)))
+	if (may_get_next_line(whitep, arg, cctx) == FAIL)
 	{
-	    *arg = next_line_from_context(cctx);
-	    if (*arg == NULL)
-		goto failret;
-	    whitep = (char_u *)" ";
-	    *arg = skipwhite(*arg);
+	    *arg = NULL;
+	    goto failret;
 	}
 
 	if (compile_expr0(arg, cctx) == FAIL)
@@ -3150,15 +3236,11 @@ compile_dict(char_u **arg, cctx_T *cctx, int literal)
 	++count;
 
 	whitep = *arg;
-	p = skipwhite(*arg);
-	while (*p == NUL || (VIM_ISWHITE(*whitep) && comment_start(p)))
+	*arg = skipwhite(*arg);
+	if (may_get_next_line(whitep, arg, cctx) == FAIL)
 	{
-	    *arg = next_line_from_context(cctx);
-	    if (*arg == NULL)
-		goto failret;
-	    whitep = (char_u *)" ";
-	    *arg = skipwhite(*arg);
-	    p = *arg;
+	    *arg = NULL;
+	    goto failret;
 	}
 	if (**arg == '}')
 	    break;
@@ -3200,10 +3282,10 @@ compile_get_option(char_u **arg, cctx_T *cctx)
 
     // parse the option and get the current value to get the type.
     rettv.v_type = VAR_UNKNOWN;
-    ret = get_option_tv(arg, &rettv, TRUE);
+    ret = eval_option(arg, &rettv, TRUE);
     if (ret == OK)
     {
-	// include the '&' in the name, get_option_tv() expects it.
+	// include the '&' in the name, eval_option() expects it.
 	char_u *name = vim_strnsave(start, *arg - start);
 	type_T	*type = rettv.v_type == VAR_NUMBER ? &t_number : &t_string;
 
@@ -3234,7 +3316,7 @@ compile_get_env(char_u **arg, cctx_T *cctx)
 	return FAIL;
     }
 
-    // include the '$' in the name, get_env_tv() expects it.
+    // include the '$' in the name, eval_env_var() expects it.
     name = vim_strnsave(start, len + 1);
     ret = generate_LOAD(cctx, ISN_LOADENV, 0, name, &t_string);
     vim_free(name);
@@ -3463,6 +3545,24 @@ compile_subscript(
 {
     for (;;)
     {
+	char_u *p = skipwhite(*arg);
+
+	if (*p == NUL || (VIM_ISWHITE(**arg) && comment_start(p)))
+	{
+	    char_u *next = peek_next_line(cctx);
+
+	    // If a following line starts with "->{" or "->X" advance to that
+	    // line, so that a line break before "->" is allowed.
+	    if (next != NULL && next[0] == '-' && next[1] == '>'
+		    && (next[2] == '{' || ASCII_ISALPHA(next[2])))
+	    {
+		next = next_line_from_context(cctx, TRUE);
+		if (next == NULL)
+		    return FAIL;
+		*arg = skipwhite(next);
+	    }
+	}
+
 	if (**arg == '(')
 	{
 	    garray_T    *stack = &cctx->ctx_type_stack;
@@ -3483,8 +3583,6 @@ compile_subscript(
 	}
 	else if (**arg == '-' && (*arg)[1] == '>')
 	{
-	    char_u *p;
-
 	    if (generate_ppconst(cctx, ppconst) == FAIL)
 		return FAIL;
 
@@ -3495,7 +3593,10 @@ compile_subscript(
 		return FAIL;
 	    *start_leader = end_leader;   // don't apply again later
 
-	    *arg = skipwhite(*arg + 2);
+	    p = *arg + 2;
+	    *arg = skipwhite(p);
+	    if (may_get_next_line(p, arg, cctx) == FAIL)
+		return FAIL;
 	    if (**arg == '{')
 	    {
 		// lambda call:  list->{lambda}
@@ -3533,7 +3634,10 @@ compile_subscript(
 	    if (generate_ppconst(cctx, ppconst) == FAIL)
 		return FAIL;
 
-	    *arg = skipwhite(*arg + 1);
+	    p = *arg + 1;
+	    *arg = skipwhite(p);
+	    if (may_get_next_line(p, arg, cctx) == FAIL)
+		return FAIL;
 	    if (compile_expr0(arg, cctx) == FAIL)
 		return FAIL;
 
@@ -3568,14 +3672,14 @@ compile_subscript(
 	}
 	else if (**arg == '.' && (*arg)[1] != '.')
 	{
-	    char_u *p;
-
 	    if (generate_ppconst(cctx, ppconst) == FAIL)
 		return FAIL;
 
 	    ++*arg;
-	    p = *arg;
+	    if (may_get_next_line(*arg, arg, cctx) == FAIL)
+		return FAIL;
 	    // dictionary member: dict.name
+	    p = *arg;
 	    if (eval_isnamec1(*p))
 		while (eval_isnamec(*p))
 		    MB_PTR_ADV(p);
@@ -3669,21 +3773,21 @@ compile_expr7(
 	case '7':
 	case '8':
 	case '9':
-	case '.':   if (get_number_tv(arg, rettv, TRUE, FALSE) == FAIL)
+	case '.':   if (eval_number(arg, rettv, TRUE, FALSE) == FAIL)
 			return FAIL;
 		    break;
 
 	/*
 	 * String constant: "string".
 	 */
-	case '"':   if (get_string_tv(arg, rettv, TRUE) == FAIL)
+	case '"':   if (eval_string(arg, rettv, TRUE) == FAIL)
 			return FAIL;
 		    break;
 
 	/*
 	 * Literal string constant: 'str''ing'.
 	 */
-	case '\'':  if (get_lit_string_tv(arg, rettv, TRUE) == FAIL)
+	case '\'':  if (eval_lit_string(arg, rettv, TRUE) == FAIL)
 			return FAIL;
 		    break;
 
@@ -3748,7 +3852,6 @@ compile_expr7(
 			char_u *start = skipwhite(*arg + 1);
 
 			// Find out what comes after the arguments.
-			// TODO: pass getline function
 			ret = get_function_args(&start, '-', NULL,
 					   NULL, NULL, NULL, TRUE, NULL, NULL);
 			if (ret != FAIL && *start == '>')
@@ -3818,7 +3921,7 @@ compile_expr7(
 	}
 	start_leader = end_leader;   // don't apply again below
 
-	if (cctx->ctx_skip == TRUE)
+	if (cctx->ctx_skip == SKIP_YES)
 	    clear_tv(rettv);
 	else
 	    // A constant expression can possibly be handled compile time,
@@ -3879,6 +3982,7 @@ compile_expr7(
 compile_expr6(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 {
     char_u	*op;
+    char_u	*next;
     int		ppconst_used = ppconst->pp_used;
 
     // get the first expression
@@ -3890,9 +3994,14 @@ compile_expr6(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
      */
     for (;;)
     {
-	op = skipwhite(*arg);
+	op = may_peek_next_line(cctx, *arg, &next);
 	if (*op != '*' && *op != '/' && *op != '%')
 	    break;
+	if (next != NULL)
+	{
+	    *arg = next_line_from_context(cctx, TRUE);
+	    op = skipwhite(*arg);
+	}
 
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(op[1]))
 	{
@@ -3950,6 +4059,7 @@ compile_expr6(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 compile_expr5(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 {
     char_u	*op;
+    char_u	*next;
     int		oplen;
     int		ppconst_used = ppconst->pp_used;
 
@@ -3962,10 +4072,15 @@ compile_expr5(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
      */
     for (;;)
     {
-	op = skipwhite(*arg);
-	if (*op != '+' && *op != '-' && !(*op == '.' && (*(*arg + 1) == '.')))
+	op = may_peek_next_line(cctx, *arg, &next);
+	if (*op != '+' && *op != '-' && !(*op == '.' && *(op + 1) == '.'))
 	    break;
 	oplen = (*op == '.' ? 2 : 1);
+	if (next != NULL)
+	{
+	    *arg = next_line_from_context(cctx, TRUE);
+	    op = skipwhite(*arg);
+	}
 
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(op[oplen]))
 	{
@@ -4059,6 +4174,7 @@ compile_expr4(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 {
     exptype_T	type = EXPR_UNKNOWN;
     char_u	*p;
+    char_u	*next;
     int		len = 2;
     int		type_is = FALSE;
     int		ppconst_used = ppconst->pp_used;
@@ -4067,7 +4183,7 @@ compile_expr4(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
     if (compile_expr5(arg, cctx, ppconst) == FAIL)
 	return FAIL;
 
-    p = skipwhite(*arg);
+    p = may_peek_next_line(cctx, *arg, &next);
     type = get_compare_type(p, &len, &type_is);
 
     /*
@@ -4077,6 +4193,11 @@ compile_expr4(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
     {
 	int ic = FALSE;  // Default: do not ignore case
 
+	if (next != NULL)
+	{
+	    *arg = next_line_from_context(cctx, TRUE);
+	    p = skipwhite(*arg);
+	}
 	if (type_is && (p[len] == '?' || p[len] == '#'))
 	{
 	    semsg(_(e_invexpr2), *arg);
@@ -4153,7 +4274,8 @@ compile_and_or(
 	ppconst_T *ppconst,
 	int	ppconst_used UNUSED)
 {
-    char_u	*p = skipwhite(*arg);
+    char_u	*next;
+    char_u	*p = may_peek_next_line(cctx, *arg, &next);
     int		opchar = *op;
 
     if (p[0] == opchar && p[1] == opchar)
@@ -4167,6 +4289,12 @@ compile_and_or(
 	ga_init2(&end_ga, sizeof(int), 10);
 	while (p[0] == opchar && p[1] == opchar)
 	{
+	    if (next != NULL)
+	    {
+		*arg = next_line_from_context(cctx, TRUE);
+		p = skipwhite(*arg);
+	    }
+
 	    if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(p[2]))
 	    {
 		semsg(_(e_white_both), op);
@@ -4197,7 +4325,8 @@ compile_and_or(
 		ga_clear(&end_ga);
 		return FAIL;
 	    }
-	    p = skipwhite(*arg);
+
+	    p = may_peek_next_line(cctx, *arg, &next);
 	}
 	generate_ppconst(cctx, ppconst);
 
@@ -4281,24 +4410,31 @@ compile_expr1(char_u **arg,  cctx_T *cctx, ppconst_T *ppconst)
 {
     char_u	*p;
     int		ppconst_used = ppconst->pp_used;
+    char_u	*next;
 
     // Evaluate the first expression.
     if (compile_expr2(arg, cctx, ppconst) == FAIL)
 	return FAIL;
 
-    p = skipwhite(*arg);
+    p = may_peek_next_line(cctx, *arg, &next);
     if (*p == '?')
     {
 	garray_T	*instr = &cctx->ctx_instr;
 	garray_T	*stack = &cctx->ctx_type_stack;
 	int		alt_idx = instr->ga_len;
-	int		end_idx;
+	int		end_idx = 0;
 	isn_T		*isn;
-	type_T		*type1;
+	type_T		*type1 = NULL;
 	type_T		*type2;
 	int		has_const_expr = FALSE;
 	int		const_value = FALSE;
 	int		save_skip = cctx->ctx_skip;
+
+	if (next != NULL)
+	{
+	    *arg = next_line_from_context(cctx, TRUE);
+	    p = skipwhite(*arg);
+	}
 
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(p[1]))
 	{
@@ -4314,7 +4450,8 @@ compile_expr1(char_u **arg,  cctx_T *cctx, ppconst_T *ppconst)
 	    const_value = tv2bool(&ppconst->pp_tv[ppconst_used]);
 	    clear_tv(&ppconst->pp_tv[ppconst_used]);
 	    --ppconst->pp_used;
-	    cctx->ctx_skip = save_skip == TRUE || !const_value;
+	    cctx->ctx_skip = save_skip == SKIP_YES || !const_value
+							 ? SKIP_YES : SKIP_NOT;
 	}
 	else
 	{
@@ -4346,12 +4483,18 @@ compile_expr1(char_u **arg,  cctx_T *cctx, ppconst_T *ppconst)
 	}
 
 	// Check for the ":".
-	p = skipwhite(*arg);
+	p = may_peek_next_line(cctx, *arg, &next);
 	if (*p != ':')
 	{
 	    emsg(_(e_missing_colon));
 	    return FAIL;
 	}
+	if (next != NULL)
+	{
+	    *arg = next_line_from_context(cctx, TRUE);
+	    p = skipwhite(*arg);
+	}
+
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(p[1]))
 	{
 	    semsg(_(e_white_both), ":");
@@ -4360,7 +4503,8 @@ compile_expr1(char_u **arg,  cctx_T *cctx, ppconst_T *ppconst)
 
 	// evaluate the third expression
 	if (has_const_expr)
-	    cctx->ctx_skip = save_skip == TRUE || const_value;
+	    cctx->ctx_skip = save_skip == SKIP_YES || const_value
+							 ? SKIP_YES : SKIP_NOT;
 	*arg = skipwhite(p + 1);
 	if (may_get_next_line(p + 1, arg, cctx) == FAIL)
 	    return FAIL;
@@ -4423,9 +4567,19 @@ compile_return(char_u *arg, int set_return_type, cctx_T *cctx)
 	stack_type = ((type_T **)stack->ga_data)[stack->ga_len - 1];
 	if (set_return_type)
 	    cctx->ctx_ufunc->uf_ret_type = stack_type;
-	else if (need_type(stack_type, cctx->ctx_ufunc->uf_ret_type, -1, cctx)
+	else
+	{
+	    if (cctx->ctx_ufunc->uf_ret_type->tt_type == VAR_VOID
+		    && stack_type->tt_type != VAR_VOID
+		    && stack_type->tt_type != VAR_UNKNOWN)
+	    {
+		emsg(_("E1096: Returning a value in a function without a return type"));
+		return NULL;
+	    }
+	    if (need_type(stack_type, cctx->ctx_ufunc->uf_ret_type, -1, cctx)
 								       == FAIL)
 	    return NULL;
+	}
     }
     else
     {
@@ -4488,13 +4642,13 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx)
     eap->arg = name_end;
     eap->getline = exarg_getline;
     eap->cookie = cctx;
-    eap->skip = cctx->ctx_skip == TRUE;
+    eap->skip = cctx->ctx_skip == SKIP_YES;
     eap->forceit = FALSE;
     ufunc = def_function(eap, name);
 
     if (ufunc == NULL)
 	return NULL;
-    if (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+    if (ufunc->uf_def_status == UF_TO_BE_COMPILED
 	    && compile_def_function(ufunc, TRUE, cctx) == FAIL)
 	return NULL;
 
@@ -4605,6 +4759,24 @@ generate_loadvar(
     }
 }
 
+    void
+vim9_declare_error(char_u *name)
+{
+    char *scope = "";
+
+    switch (*name)
+    {
+	case 'g': scope = _("global"); break;
+	case 'b': scope = _("buffer"); break;
+	case 'w': scope = _("window"); break;
+	case 't': scope = _("tab"); break;
+	case 'v': scope = "v:"; break;
+	case '$': semsg(_(e_declare_env_var), name); return;
+	default: return;
+    }
+    semsg(_(e_declare_var), scope, name);
+}
+
 /*
  * Compile declaration and assignment:
  * "let var", "let var = expr", "const var = expr" and "var = expr"
@@ -4695,7 +4867,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	    return NULL;
 	end = p;
 
-	if (cctx->ctx_skip != TRUE)
+	if (cctx->ctx_skip != SKIP_YES)
 	{
 	    type_T	*stacktype;
 
@@ -4708,8 +4880,8 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	    }
 	    if (need_type(stacktype, &t_list_any, -1, cctx) == FAIL)
 		goto theend;
-	    // TODO: check length of list to be var_count (or more if
-	    // "semicolon" set)
+	    generate_CHECKLEN(cctx, semicolon ? var_count - 1 : var_count,
+								    semicolon);
 	}
     }
 
@@ -4754,7 +4926,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	if (!heredoc)
 	    type = &t_any;
 
-	if (cctx->ctx_skip != TRUE)
+	if (cctx->ctx_skip != SKIP_YES)
 	{
 	    if (*var_start == '&')
 	    {
@@ -4801,8 +4973,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		type = &t_string;
 		if (is_decl)
 		{
-		    semsg(_("E1065: Cannot declare an environment variable: %s"),
-									 name);
+		    vim9_declare_error(name);
 		    goto theend;
 		}
 	    }
@@ -4826,8 +4997,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		dest = dest_global;
 		if (is_decl)
 		{
-		    semsg(_("E1016: Cannot declare a global variable: %s"),
-									 name);
+		    vim9_declare_error(name);
 		    goto theend;
 		}
 	    }
@@ -4836,8 +5006,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		dest = dest_buffer;
 		if (is_decl)
 		{
-		    semsg(_("E1078: Cannot declare a buffer variable: %s"),
-									 name);
+		    vim9_declare_error(name);
 		    goto theend;
 		}
 	    }
@@ -4846,8 +5015,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		dest = dest_window;
 		if (is_decl)
 		{
-		    semsg(_("E1079: Cannot declare a window variable: %s"),
-									 name);
+		    vim9_declare_error(name);
 		    goto theend;
 		}
 	    }
@@ -4856,7 +5024,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		dest = dest_tab;
 		if (is_decl)
 		{
-		    semsg(_("E1080: Cannot declare a tab variable: %s"), name);
+		    vim9_declare_error(name);
 		    goto theend;
 		}
 	    }
@@ -4879,7 +5047,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		type = typval2type(vtv);
 		if (is_decl)
 		{
-		    semsg(_("E1064: Cannot declare a v: variable: %s"), name);
+		    vim9_declare_error(name);
 		    goto theend;
 		}
 	    }
@@ -4980,7 +5148,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	    goto theend;
 	}
 
-	if (lvar == NULL && dest == dest_local && cctx->ctx_skip != TRUE)
+	if (lvar == NULL && dest == dest_local && cctx->ctx_skip != SKIP_YES)
 	{
 	    if (oplen > 1 && !heredoc)
 	    {
@@ -5034,8 +5202,19 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 
 	if (!heredoc)
 	{
-	    if (oplen > 0)
+	    if (cctx->ctx_skip == SKIP_YES)
 	    {
+		if (oplen > 0 && var_count == 0)
+		{
+		    // skip over the "=" and the expression
+		    p = skipwhite(op + oplen);
+		    compile_expr0(&p, cctx);
+		}
+	    }
+	    else if (oplen > 0)
+	    {
+		type_T	*stacktype;
+
 		// For "var = expr" evaluate the expression.
 		if (var_count == 0)
 		{
@@ -5066,6 +5245,12 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		    if (r == FAIL)
 			goto theend;
 		}
+		else if (semicolon && var_idx == var_count - 1)
+		{
+		    // For "[var; var] = expr" get the rest of the list
+		    if (generate_SLICE(cctx, var_count - 1) == FAIL)
+			goto theend;
+		}
 		else
 		{
 		    // For "[var, var] = expr" get the "var_idx" item from the
@@ -5074,52 +5259,47 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 			return FAIL;
 		}
 
-		if (cctx->ctx_skip != TRUE)
+		stacktype = stack->ga_len == 0 ? &t_void
+			  : ((type_T **)stack->ga_data)[stack->ga_len - 1];
+		if (lvar != NULL && (is_decl || !has_type))
 		{
-		    type_T	*stacktype;
-
-		    stacktype = stack->ga_len == 0 ? &t_void
-			      : ((type_T **)stack->ga_data)[stack->ga_len - 1];
-		    if (lvar != NULL && (is_decl || !has_type))
+		    if (new_local && !has_type)
 		    {
-			if (new_local && !has_type)
+			if (stacktype->tt_type == VAR_VOID)
 			{
-			    if (stacktype->tt_type == VAR_VOID)
-			    {
-				emsg(_(e_cannot_use_void));
-				goto theend;
-			    }
-			    else
-			    {
-				// An empty list or dict has a &t_void member,
-				// for a variable that implies &t_any.
-				if (stacktype == &t_list_empty)
-				    lvar->lv_type = &t_list_any;
-				else if (stacktype == &t_dict_empty)
-				    lvar->lv_type = &t_dict_any;
-				else
-				    lvar->lv_type = stacktype;
-			    }
+			    emsg(_(e_cannot_use_void));
+			    goto theend;
 			}
 			else
 			{
-			    type_T *use_type = lvar->lv_type;
-
-			    if (has_index)
-			    {
-				use_type = use_type->tt_member;
-				if (use_type == NULL)
-				    use_type = &t_void;
-			    }
-			    if (need_type(stacktype, use_type, -1, cctx)
-								       == FAIL)
-				goto theend;
+			    // An empty list or dict has a &t_void member,
+			    // for a variable that implies &t_any.
+			    if (stacktype == &t_list_empty)
+				lvar->lv_type = &t_list_any;
+			    else if (stacktype == &t_dict_empty)
+				lvar->lv_type = &t_dict_any;
+			    else
+				lvar->lv_type = stacktype;
 			}
 		    }
-		    else if (*p != '=' && need_type(stacktype, member_type, -1,
-								 cctx) == FAIL)
-			goto theend;
+		    else
+		    {
+			type_T *use_type = lvar->lv_type;
+
+			if (has_index)
+			{
+			    use_type = use_type->tt_member;
+			    if (use_type == NULL)
+				use_type = &t_void;
+			}
+			if (need_type(stacktype, use_type, -1, cctx)
+								   == FAIL)
+			    goto theend;
+		    }
 		}
+		else if (*p != '=' && need_type(stacktype, member_type, -1,
+							     cctx) == FAIL)
+		    goto theend;
 	    }
 	    else if (cmdidx == CMD_const)
 	    {
@@ -5180,6 +5360,10 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	    if (var_count == 0)
 		end = p;
 	}
+
+	// no need to parse more when skipping
+	if (cctx->ctx_skip == SKIP_YES)
+	    break;
 
 	if (oplen > 0 && *op != '=')
 	{
@@ -5373,8 +5557,11 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
     }
 
     // for "[var, var] = expr" drop the "expr" value
-    if (var_count > 0 && generate_instr_drop(cctx, ISN_DROP, 1) == NULL)
-	goto theend;
+    if (var_count > 0 && !semicolon)
+    {
+	    if (generate_instr_drop(cctx, ISN_DROP, 1) == NULL)
+	    goto theend;
+    }
 
     ret = end;
 
@@ -5466,7 +5653,7 @@ compile_unletlock(char_u *arg, exarg_T *eap, cctx_T *cctx)
     static char_u *
 compile_import(char_u *arg, cctx_T *cctx)
 {
-    return handle_import(arg, &cctx->ctx_imports, 0, cctx);
+    return handle_import(arg, &cctx->ctx_imports, 0, NULL, cctx);
 }
 
 /*
@@ -5604,6 +5791,7 @@ compile_if(char_u *arg, cctx_T *cctx)
     garray_T	*instr = &cctx->ctx_instr;
     int		instr_count = instr->ga_len;
     scope_T	*scope;
+    skip_T	skip_save = cctx->ctx_skip;
     ppconst_T	ppconst;
 
     CLEAR_FIELD(ppconst);
@@ -5612,17 +5800,18 @@ compile_if(char_u *arg, cctx_T *cctx)
 	clear_ppconst(&ppconst);
 	return NULL;
     }
-    if (instr->ga_len == instr_count && ppconst.pp_used == 1)
+    if (cctx->ctx_skip == SKIP_YES)
+	clear_ppconst(&ppconst);
+    else if (instr->ga_len == instr_count && ppconst.pp_used == 1)
     {
 	// The expression results in a constant.
-	// TODO: how about nesting?
-	cctx->ctx_skip = tv2bool(&ppconst.pp_tv[0]) ? FALSE : TRUE;
+	cctx->ctx_skip = tv2bool(&ppconst.pp_tv[0]) ? SKIP_NOT : SKIP_YES;
 	clear_ppconst(&ppconst);
     }
     else
     {
 	// Not a constant, generate instructions for the expression.
-	cctx->ctx_skip = MAYBE;
+	cctx->ctx_skip = SKIP_UNKNOWN;
 	if (generate_ppconst(cctx, &ppconst) == FAIL)
 	    return NULL;
     }
@@ -5630,8 +5819,11 @@ compile_if(char_u *arg, cctx_T *cctx)
     scope = new_scope(cctx, IF_SCOPE);
     if (scope == NULL)
 	return NULL;
+    scope->se_skip_save = skip_save;
+    // "is_had_return" will be reset if any block does not end in :return
+    scope->se_u.se_if.is_had_return = TRUE;
 
-    if (cctx->ctx_skip == MAYBE)
+    if (cctx->ctx_skip == SKIP_UNKNOWN)
     {
 	// "where" is set when ":elseif", "else" or ":endif" is found
 	scope->se_u.se_if.is_if_label = instr->ga_len;
@@ -5659,8 +5851,10 @@ compile_elseif(char_u *arg, cctx_T *cctx)
 	return NULL;
     }
     unwind_locals(cctx, scope->se_local_count);
+    if (!cctx->ctx_had_return)
+	scope->se_u.se_if.is_had_return = FALSE;
 
-    if (cctx->ctx_skip == MAYBE)
+    if (cctx->ctx_skip == SKIP_UNKNOWN)
     {
 	if (compile_jump_to_end(&scope->se_u.se_if.is_end_label,
 						    JUMP_ALWAYS, cctx) == FAIL)
@@ -5677,18 +5871,20 @@ compile_elseif(char_u *arg, cctx_T *cctx)
 	clear_ppconst(&ppconst);
 	return NULL;
     }
-    if (instr->ga_len == instr_count && ppconst.pp_used == 1)
+    if (scope->se_skip_save == SKIP_YES)
+	clear_ppconst(&ppconst);
+    else if (instr->ga_len == instr_count && ppconst.pp_used == 1)
     {
 	// The expression results in a constant.
 	// TODO: how about nesting?
-	cctx->ctx_skip = tv2bool(&ppconst.pp_tv[0]) ? FALSE : TRUE;
+	cctx->ctx_skip = tv2bool(&ppconst.pp_tv[0]) ? SKIP_NOT : SKIP_YES;
 	clear_ppconst(&ppconst);
 	scope->se_u.se_if.is_if_label = -1;
     }
     else
     {
 	// Not a constant, generate instructions for the expression.
-	cctx->ctx_skip = MAYBE;
+	cctx->ctx_skip = SKIP_UNKNOWN;
 	if (generate_ppconst(cctx, &ppconst) == FAIL)
 	    return NULL;
 
@@ -5714,28 +5910,35 @@ compile_else(char_u *arg, cctx_T *cctx)
 	return NULL;
     }
     unwind_locals(cctx, scope->se_local_count);
+    if (!cctx->ctx_had_return)
+	scope->se_u.se_if.is_had_return = FALSE;
+    scope->se_u.se_if.is_seen_else = TRUE;
 
-    // jump from previous block to the end, unless the else block is empty
-    if (cctx->ctx_skip == MAYBE)
+    if (scope->se_skip_save != SKIP_YES)
     {
-	if (compile_jump_to_end(&scope->se_u.se_if.is_end_label,
-						    JUMP_ALWAYS, cctx) == FAIL)
-	    return NULL;
-    }
-
-    if (cctx->ctx_skip == MAYBE)
-    {
-	if (scope->se_u.se_if.is_if_label >= 0)
+	// jump from previous block to the end, unless the else block is empty
+	if (cctx->ctx_skip == SKIP_UNKNOWN)
 	{
-	    // previous "if" or "elseif" jumps here
-	    isn = ((isn_T *)instr->ga_data) + scope->se_u.se_if.is_if_label;
-	    isn->isn_arg.jump.jump_where = instr->ga_len;
-	    scope->se_u.se_if.is_if_label = -1;
+	    if (!cctx->ctx_had_return
+		    && compile_jump_to_end(&scope->se_u.se_if.is_end_label,
+						    JUMP_ALWAYS, cctx) == FAIL)
+		return NULL;
 	}
-    }
 
-    if (cctx->ctx_skip != MAYBE)
-	cctx->ctx_skip = !cctx->ctx_skip;
+	if (cctx->ctx_skip == SKIP_UNKNOWN)
+	{
+	    if (scope->se_u.se_if.is_if_label >= 0)
+	    {
+		// previous "if" or "elseif" jumps here
+		isn = ((isn_T *)instr->ga_data) + scope->se_u.se_if.is_if_label;
+		isn->isn_arg.jump.jump_where = instr->ga_len;
+		scope->se_u.se_if.is_if_label = -1;
+	    }
+	}
+
+	if (cctx->ctx_skip != SKIP_UNKNOWN)
+	    cctx->ctx_skip = cctx->ctx_skip == SKIP_YES ? SKIP_NOT : SKIP_YES;
+    }
 
     return p;
 }
@@ -5755,6 +5958,8 @@ compile_endif(char_u *arg, cctx_T *cctx)
     }
     ifscope = &scope->se_u.se_if;
     unwind_locals(cctx, scope->se_local_count);
+    if (!cctx->ctx_had_return)
+	ifscope->is_had_return = FALSE;
 
     if (scope->se_u.se_if.is_if_label >= 0)
     {
@@ -5764,7 +5969,11 @@ compile_endif(char_u *arg, cctx_T *cctx)
     }
     // Fill in the "end" label in jumps at the end of the blocks.
     compile_fill_jump_to_end(&ifscope->is_end_label, cctx);
-    cctx->ctx_skip = FALSE;
+    cctx->ctx_skip = scope->se_skip_save;
+
+    // If all the blocks end in :return and there is an :else then the
+    // had_return flag is set.
+    cctx->ctx_had_return = ifscope->is_had_return && ifscope->is_seen_else;
 
     drop_scope(cctx);
     return arg;
@@ -5852,15 +6061,15 @@ compile_for(char_u *arg, cctx_T *cctx)
 	return NULL;
     }
 
-    // now we know the type of "var"
+    // Now that we know the type of "var", check that it is a list, now or at
+    // runtime.
     vartype = ((type_T **)stack->ga_data)[stack->ga_len - 1];
-    if (vartype->tt_type != VAR_LIST)
+    if (need_type(vartype, &t_list_any, -1, cctx) == FAIL)
     {
-	emsg(_("E1024: need a List to iterate over"));
 	drop_scope(cctx);
 	return NULL;
     }
-    if (vartype->tt_member->tt_type != VAR_ANY)
+    if (vartype->tt_type == VAR_LIST && vartype->tt_member->tt_type != VAR_ANY)
 	var_lvar->lv_type = vartype->tt_member;
 
     // "for_end" is set when ":endfor" is found
@@ -6362,12 +6571,33 @@ compile_exec(char_u *line, exarg_T *eap, cctx_T *cctx)
 {
     char_u  *p;
     int	    has_expr = FALSE;
+    char_u  *nextcmd = (char_u *)"";
 
-    if (cctx->ctx_skip == TRUE)
+    if (cctx->ctx_skip == SKIP_YES)
 	goto theend;
 
     if (eap->cmdidx >= 0 && eap->cmdidx < CMD_SIZE)
-	has_expr = (excmd_get_argt(eap->cmdidx) & (EX_XFILE | EX_EXPAND));
+    {
+	long	argt = excmd_get_argt(eap->cmdidx);
+	int	usefilter = FALSE;
+
+	has_expr = argt & (EX_XFILE | EX_EXPAND);
+
+	// If the command can be followed by a bar, find the bar and truncate
+	// it, so that the following command can be compiled.
+	// The '|' is overwritten with a NUL, it is put back below.
+	if ((eap->cmdidx == CMD_write || eap->cmdidx == CMD_read)
+							   && *eap->arg == '!')
+	    // :w !filter or :r !filter or :r! filter
+	    usefilter = TRUE;
+	if ((argt & EX_TRLBAR) && !usefilter)
+	{
+	    separate_nextcmd(eap);
+	    if (eap->nextcmd != NULL)
+		nextcmd = eap->nextcmd;
+	}
+    }
+
     if (eap->cmdidx == CMD_syntax && STRNCMP(eap->arg, "include ", 8) == 0)
     {
 	// expand filename in "syntax include [@group] filename"
@@ -6426,17 +6656,33 @@ compile_exec(char_u *line, exarg_T *eap, cctx_T *cctx)
 	generate_EXEC(cctx, line);
 
 theend:
-    return (char_u *)"";
+    if (*nextcmd != NUL)
+    {
+	// the parser expects a pointer to the bar, put it back
+	--nextcmd;
+	*nextcmd = '|';
+    }
+
+    return nextcmd;
 }
 
 /*
  * Add a function to the list of :def functions.
- * This "sets ufunc->uf_dfunc_idx" but the function isn't compiled yet.
+ * This sets "ufunc->uf_dfunc_idx" but the function isn't compiled yet.
  */
     static int
 add_def_function(ufunc_T *ufunc)
 {
     dfunc_T *dfunc;
+
+    if (def_functions.ga_len == 0)
+    {
+	// The first position is not used, so that a zero uf_dfunc_idx means it
+	// wasn't set.
+	if (ga_grow(&def_functions, 1) == FAIL)
+	    return FAIL;
+	++def_functions.ga_len;
+    }
 
     // Add the function to "def_functions".
     if (ga_grow(&def_functions, 1) == FAIL)
@@ -6467,7 +6713,6 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
     char_u	*line = NULL;
     char_u	*p;
     char	*errormsg = NULL;	// error message
-    int		had_return = FALSE;
     cctx_T	cctx;
     garray_T	*instr;
     int		called_emsg_before = called_emsg;
@@ -6478,7 +6723,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 
     // When using a function that was compiled before: Free old instructions.
     // Otherwise add a new entry in "def_functions".
-    if (ufunc->uf_dfunc_idx >= 0)
+    if (ufunc->uf_dfunc_idx > 0)
     {
 	dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
 							 + ufunc->uf_dfunc_idx;
@@ -6562,6 +6807,8 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
     {
 	exarg_T	ea;
 	int	starts_with_colon = FALSE;
+	char_u	*cmd;
+	int	save_msg_scroll = msg_scroll;
 
 	// Bail out on the first error to avoid a flood of errors and report
 	// the right line number when inside try/catch.
@@ -6571,7 +6818,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 	if (line != NULL && *line == '|')
 	    // the line continues after a '|'
 	    ++line;
-	else if (line != NULL && *line != NUL
+	else if (line != NULL && *skipwhite(line) != NUL
 		&& !(*line == '#' && (line == cctx.ctx_line_start
 						    || VIM_ISWHITE(line[-1]))))
 	{
@@ -6580,14 +6827,13 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 	}
 	else
 	{
-	    line = next_line_from_context(&cctx);
+	    line = next_line_from_context(&cctx, FALSE);
 	    if (cctx.ctx_lnum >= ufunc->uf_lines.ga_len)
 		// beyond the last line
 		break;
 	}
 	emsg_before = called_emsg;
 
-	had_return = FALSE;
 	CLEAR_FIELD(ea);
 	ea.cmdlinep = &line;
 	ea.cmd = skipwhite(line);
@@ -6651,6 +6897,8 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 	    line = (char_u *)"";
 	    continue;
 	}
+	// TODO: use modifiers in the command
+	undo_cmdmod(&ea, save_msg_scroll);
 
 	// Skip ":call" to get to the function name.
 	if (checkforcmd(&ea.cmd, "call", 3))
@@ -6721,45 +6969,60 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 	/*
 	 * COMMAND after range
 	 */
+	cmd = ea.cmd;
 	ea.cmd = skip_range(ea.cmd, NULL);
+	if (ea.cmd > cmd && !starts_with_colon)
+	{
+	    emsg(_(e_colon_required));
+	    goto erret;
+	}
 	p = find_ex_command(&ea, NULL, starts_with_colon ? NULL
 		   : (void *(*)(char_u *, size_t, cctx_T *))lookup_local,
 									&cctx);
 
 	if (p == ea.cmd && ea.cmdidx != CMD_SIZE)
 	{
-	    if (cctx.ctx_skip == TRUE)
+	    if (cctx.ctx_skip == SKIP_YES)
 	    {
 		line += STRLEN(line);
 		continue;
 	    }
 
 	    // Expression or function call.
-	    if (ea.cmdidx == CMD_eval)
+	    if (ea.cmdidx != CMD_eval)
 	    {
-		p = ea.cmd;
-		if (compile_expr0(&p, &cctx) == FAIL)
-		    goto erret;
-
-		// drop the return value
-		generate_instr_drop(&cctx, ISN_DROP, 1);
-		line = p;
-		continue;
+		// CMD_let cannot happen, compile_assignment() above is used
+		iemsg("Command from find_ex_command() not handled");
+		goto erret;
 	    }
-	    // CMD_let cannot happen, compile_assignment() above is used
-	    iemsg("Command from find_ex_command() not handled");
-	    goto erret;
 	}
 
 	p = skipwhite(p);
 
-	if (cctx.ctx_skip == TRUE
+	if (cctx.ctx_skip == SKIP_YES
+		&& ea.cmdidx != CMD_if
 		&& ea.cmdidx != CMD_elseif
 		&& ea.cmdidx != CMD_else
 		&& ea.cmdidx != CMD_endif)
 	{
 	    line = (char_u *)"";
 	    continue;
+	}
+
+	if (ea.cmdidx != CMD_elseif
+		&& ea.cmdidx != CMD_else
+		&& ea.cmdidx != CMD_endif
+		&& ea.cmdidx != CMD_endfor
+		&& ea.cmdidx != CMD_endwhile
+		&& ea.cmdidx != CMD_catch
+		&& ea.cmdidx != CMD_finally
+		&& ea.cmdidx != CMD_endtry)
+	{
+	    if (cctx.ctx_had_return)
+	    {
+		emsg(_("E1095: Unreachable code after :return"));
+		goto erret;
+	    }
 	}
 
 	switch (ea.cmdidx)
@@ -6775,7 +7038,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 
 	    case CMD_return:
 		    line = compile_return(p, set_return_type, &cctx);
-		    had_return = TRUE;
+		    cctx.ctx_had_return = TRUE;
 		    break;
 
 	    case CMD_let:
@@ -6800,9 +7063,11 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		    break;
 	    case CMD_elseif:
 		    line = compile_elseif(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 	    case CMD_else:
 		    line = compile_else(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 	    case CMD_endif:
 		    line = compile_endif(p, &cctx);
@@ -6813,6 +7078,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		    break;
 	    case CMD_endwhile:
 		    line = compile_endwhile(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 
 	    case CMD_for:
@@ -6820,6 +7086,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		    break;
 	    case CMD_endfor:
 		    line = compile_endfor(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 	    case CMD_continue:
 		    line = compile_continue(p, &cctx);
@@ -6833,15 +7100,28 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		    break;
 	    case CMD_catch:
 		    line = compile_catch(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 	    case CMD_finally:
 		    line = compile_finally(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 	    case CMD_endtry:
 		    line = compile_endtry(p, &cctx);
+		    cctx.ctx_had_return = FALSE;
 		    break;
 	    case CMD_throw:
 		    line = compile_throw(p, &cctx);
+		    break;
+
+	    case CMD_eval:
+		    if (compile_expr0(&p, &cctx) == FAIL)
+			goto erret;
+
+		    // drop the return value
+		    generate_instr_drop(&cctx, ISN_DROP, 1);
+
+		    line = skipwhite(p);
 		    break;
 
 	    case CMD_echo:
@@ -6852,8 +7132,9 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		    line = compile_mult_expr(p, ea.cmdidx, &cctx);
 		    break;
 
+	    // TODO: other commands with an expression argument
+
 	    default:
-		    // TODO: other commands with an expression argument
 		    // Not recognized, execute with do_cmdline_cmd().
 		    ea.arg = p;
 		    line = compile_exec(line, &ea, &cctx);
@@ -6883,7 +7164,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 	goto erret;
     }
 
-    if (!had_return)
+    if (!cctx.ctx_had_return)
     {
 	if (ufunc->uf_ret_type->tt_type != VAR_VOID)
 	{
@@ -6906,6 +7187,7 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 	dfunc->df_closure_count = cctx.ctx_closure_count;
 	if (cctx.ctx_outer_used)
 	    ufunc->uf_flags |= FC_CLOSURE;
+	ufunc->uf_def_status = UF_COMPILED;
     }
 
     ret = OK;
@@ -6925,7 +7207,7 @@ erret:
 	if (!dfunc->df_deleted
 			    && ufunc->uf_dfunc_idx == def_functions.ga_len - 1)
 	    --def_functions.ga_len;
-	ufunc->uf_dfunc_idx = UF_NOT_COMPILED;
+	ufunc->uf_def_status = UF_NOT_COMPILED;
 
 	while (cctx.ctx_scope != NULL)
 	    drop_scope(&cctx);
@@ -7073,6 +7355,7 @@ delete_instr(isn_T *isn)
 	case ISN_CATCH:
 	case ISN_CHECKNR:
 	case ISN_CHECKTYPE:
+	case ISN_CHECKLEN:
 	case ISN_COMPAREANY:
 	case ISN_COMPAREBLOB:
 	case ISN_COMPAREBOOL:
@@ -7095,6 +7378,7 @@ delete_instr(isn_T *isn)
 	case ISN_FOR:
 	case ISN_INDEX:
 	case ISN_GETITEM:
+	case ISN_SLICE:
 	case ISN_MEMBER:
 	case ISN_JUMP:
 	case ISN_LOAD:
@@ -7151,17 +7435,19 @@ delete_def_function_contents(dfunc_T *dfunc)
 }
 
 /*
- * When a user function is deleted, delete any associated def function.
+ * When a user function is deleted, clear the contents of any associated def
+ * function.  The position in def_functions can be re-used.
  */
     void
-delete_def_function(ufunc_T *ufunc)
+clear_def_function(ufunc_T *ufunc)
 {
-    if (ufunc->uf_dfunc_idx >= 0)
+    if (ufunc->uf_dfunc_idx > 0)
     {
 	dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
 							 + ufunc->uf_dfunc_idx;
 
 	delete_def_function_contents(dfunc);
+	ufunc->uf_def_status = UF_NOT_COMPILED;
     }
 }
 

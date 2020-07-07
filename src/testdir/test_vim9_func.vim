@@ -3,6 +3,7 @@
 source check.vim
 source view_util.vim
 source vim9.vim
+source screendump.vim
 
 func Test_def_basic()
   def SomeFunc(): string
@@ -29,6 +30,31 @@ def Test_return_something()
   assert_equal('string', ReturnString())
   assert_equal(123, ReturnNumber())
   assert_fails('call ReturnGlobal()', 'E1029: Expected number but got string')
+enddef
+
+def Test_missing_return()
+  CheckDefFailure(['def Missing(): number',
+                   '  if g:cond',
+                   '    echo "no return"',
+                   '  else',
+                   '    return 0',
+                   '  endif'
+                   'enddef'], 'E1027:')
+  CheckDefFailure(['def Missing(): number',
+                   '  if g:cond',
+                   '    return 1',
+                   '  else',
+                   '    echo "no return"',
+                   '  endif'
+                   'enddef'], 'E1027:')
+  CheckDefFailure(['def Missing(): number',
+                   '  if g:cond',
+                   '    return 1',
+                   '  else',
+                   '    return 2',
+                   '  endif'
+                   '  return 3'
+                   'enddef'], 'E1095:')
 enddef
 
 let s:nothing = 0
@@ -261,14 +287,14 @@ enddef
 
 def Test_error_in_nested_function()
   " Error in called function requires unwinding the call stack.
-  assert_fails('call FuncWithForwardCall()', 'E1013')
+  assert_fails('call FuncWithForwardCall()', 'E1096')
 enddef
 
 def Test_return_type_wrong()
   CheckScriptFailure(['def Func(): number', 'return "a"', 'enddef', 'defcompile'], 'expected number but got string')
   CheckScriptFailure(['def Func(): string', 'return 1', 'enddef', 'defcompile'], 'expected string but got number')
-  CheckScriptFailure(['def Func(): void', 'return "a"', 'enddef', 'defcompile'], 'expected void but got string')
-  CheckScriptFailure(['def Func()', 'return "a"', 'enddef', 'defcompile'], 'expected void but got string')
+  CheckScriptFailure(['def Func(): void', 'return "a"', 'enddef', 'defcompile'], 'E1096: Returning a value in a function without a return type')
+  CheckScriptFailure(['def Func()', 'return "a"', 'enddef', 'defcompile'], 'E1096: Returning a value in a function without a return type')
 
   CheckScriptFailure(['def Func(): number', 'return', 'enddef', 'defcompile'], 'E1003:')
 
@@ -298,7 +324,7 @@ def Test_vim9script_call()
     str->MyFunc()
     assert_equal('barfoo', var)
 
-    let g:value = 'value'
+    g:value = 'value'
     g:value->MyFunc()
     assert_equal('value', var)
 
@@ -328,6 +354,22 @@ def Test_vim9script_call()
     assert_equal('text', var)
     ("some")->MyFunc()
     assert_equal('some', var)
+
+    MyFunc(
+        'continued'
+        )
+    assert_equal('continued',
+            var
+            )
+
+    call MyFunc(
+        'more'
+          ..
+          'lines'
+        )
+    assert_equal(
+        'morelines',
+        var)
   END
   writefile(lines, 'Xcall.vim')
   source Xcall.vim
@@ -553,6 +595,29 @@ def Test_func_type()
   Ref2 = FuncOneArgRetNumber
   assert_equal(13, Ref2(13))
   assert_equal(13, funcResult)
+enddef
+
+def Test_repeat_return_type()
+  let res = 0
+  for n in repeat([1], 3)
+    res += n
+  endfor
+  assert_equal(3, res)
+
+  res = 0
+  for n in add([1, 2], 3)
+    res += n
+  endfor
+  assert_equal(6, res)
+enddef
+
+def Test_argv_return_type()
+  next fileone filetwo
+  let res = ''
+  for name in argv()
+    res ..= name
+  endfor
+  assert_equal('fileonefiletwo', res)
 enddef
 
 def Test_func_type_part()
@@ -806,6 +871,121 @@ def Test_call_closure_not_compiled()
   g:Ref = {s ->  s .. text}
   assert_equal('sometext', GetResult(g:Ref))
 enddef
+
+def Test_sort_return_type()
+  let res: list<number>
+  res = [1, 2, 3]->sort()
+enddef
+
+def Test_getqflist_return_type()
+  let l = getqflist()
+  assert_equal([], l)
+
+  let d = getqflist(#{items: 0})
+  assert_equal(#{items: []}, d)
+enddef
+
+def Test_getloclist_return_type()
+  let l = getloclist(1)
+  assert_equal([], l)
+
+  let d = getloclist(1, #{items: 0})
+  assert_equal(#{items: []}, d)
+enddef
+
+def Test_copy_return_type()
+  let l = copy([1, 2, 3])
+  let res = 0
+  for n in l
+    res += n
+  endfor
+  assert_equal(6, res)
+
+  let dl = deepcopy([1, 2, 3])
+  res = 0
+  for n in dl
+    res += n
+  endfor
+  assert_equal(6, res)
+enddef
+
+def Test_extend_return_type()
+  let l = extend([1, 2], [3])
+  let res = 0
+  for n in l
+    res += n
+  endfor
+  assert_equal(6, res)
+enddef
+
+def Test_insert_return_type()
+  let l = insert([2, 1], 3)
+  let res = 0
+  for n in l
+    res += n
+  endfor
+  assert_equal(6, res)
+enddef
+
+def Test_reverse_return_type()
+  let l = reverse([1, 2, 3])
+  let res = 0
+  for n in l
+    res += n
+  endfor
+  assert_equal(6, res)
+enddef
+
+def Test_remove_return_type()
+  let l = remove(#{one: [1, 2], two: [3, 4]}, 'one')
+  let res = 0
+  for n in l
+    res += n
+  endfor
+  assert_equal(3, res)
+enddef
+
+def Test_filter_return_type()
+  let l = filter([1, 2, 3], {-> 1})
+  let res = 0
+  for n in l
+    res += n
+  endfor
+  assert_equal(6, res)
+enddef
+
+def Line_continuation_in_def(dir: string = ''): string
+    let path: string = empty(dir)
+            \ ? 'empty'
+            \ : 'full'
+    return path
+enddef
+
+def Test_line_continuation_in_def()
+  assert_equal('full', Line_continuation_in_def('.'))
+enddef
+
+func Test_silent_echo()
+  CheckScreendump
+
+  let lines =<< trim END
+    vim9script
+    def EchoNothing()
+      silent echo ''
+    enddef
+    defcompile
+  END
+  call writefile(lines, 'XTest_silent_echo')
+
+  " Check that the balloon shows up after a mouse move
+  let buf = RunVimInTerminal('-S XTest_silent_echo', {'rows': 6})
+  call term_sendkeys(buf, ":abc")
+  call VerifyScreenDump(buf, 'Test_vim9_silent_echo', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('XTest_silent_echo')
+endfunc
 
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

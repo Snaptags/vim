@@ -487,10 +487,10 @@ call_ufunc(ufunc_T *ufunc, int argcount, ectx_T *ectx, isn_T *iptr)
     int		error;
     int		idx;
 
-    if (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+    if (ufunc->uf_def_status == UF_TO_BE_COMPILED
 	    && compile_def_function(ufunc, FALSE, NULL) == FAIL)
 	return FAIL;
-    if (ufunc->uf_dfunc_idx >= 0)
+    if (ufunc->uf_def_status == UF_COMPILED)
     {
 	// The function has been compiled, can call it quickly.  For a function
 	// that was defined later: we can call it directly next time.
@@ -671,8 +671,8 @@ call_def_function(
 // Like STACK_TV_VAR but use the outer scope
 #define STACK_OUT_TV_VAR(idx) (((typval_T *)ectx.ec_outer_stack->ga_data) + ectx.ec_outer_frame + STACK_FRAME_SIZE + idx)
 
-    if (ufunc->uf_dfunc_idx == UF_NOT_COMPILED
-	    || (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+    if (ufunc->uf_def_status == UF_NOT_COMPILED
+	    || (ufunc->uf_def_status == UF_TO_BE_COMPILED
 			  && compile_def_function(ufunc, FALSE, NULL) == FAIL))
     {
 	if (called_emsg == called_emsg_before)
@@ -1089,7 +1089,7 @@ call_def_function(
 		    // compilation: don't set SOURCING_LNUM.
 		    if (GA_GROW(&ectx.ec_stack, 1) == FAIL)
 			goto failed;
-		    if (get_option_tv(&name, &optval, TRUE) == FAIL)
+		    if (eval_option(&name, &optval, TRUE) == FAIL)
 			goto failed;
 		    *STACK_TV_BOT(0) = optval;
 		    ++ectx.ec_stack.ga_len;
@@ -1105,7 +1105,7 @@ call_def_function(
 		    if (GA_GROW(&ectx.ec_stack, 1) == FAIL)
 			goto failed;
 		    // name is always valid, checked when compiling
-		    (void)get_env_tv(&name, &optval, TRUE);
+		    (void)eval_env_var(&name, &optval, TRUE);
 		    *STACK_TV_BOT(0) = optval;
 		    ++ectx.ec_stack.ga_len;
 		}
@@ -2085,6 +2085,7 @@ call_def_function(
 		    list_T	*list;
 		    varnumber_T	n;
 		    listitem_T	*li;
+		    typval_T	temp_tv;
 
 		    // list index: list is at stack-2, index at stack-1
 		    tv = STACK_TV_BOT(-2);
@@ -2109,8 +2110,37 @@ call_def_function(
 			goto failed;
 		    }
 		    --ectx.ec_stack.ga_len;
-		    clear_tv(STACK_TV_BOT(-1));
-		    copy_tv(&li->li_tv, STACK_TV_BOT(-1));
+		    // Clear the list after getting the item, to avoid that it
+		    // make the item invalid.
+		    tv = STACK_TV_BOT(-1);
+		    temp_tv = *tv;
+		    copy_tv(&li->li_tv, tv);
+		    clear_tv(&temp_tv);
+		}
+		break;
+
+	    case ISN_SLICE:
+		{
+		    list_T	*list;
+		    int		count = iptr->isn_arg.number;
+
+		    // type will have been checked to be a list
+		    tv = STACK_TV_BOT(-1);
+		    list = tv->vval.v_list;
+
+		    // no error for short list, expect it to be checked earlier
+		    if (list != NULL && list->lv_len >= count)
+		    {
+			list_T	*newlist = list_slice(list,
+						      count, list->lv_len - 1);
+
+			if (newlist != NULL)
+			{
+			    list_unref(list);
+			    tv->vval.v_list = newlist;
+			    ++newlist->lv_refcount;
+			}
+		    }
 		}
 		break;
 
@@ -2119,18 +2149,10 @@ call_def_function(
 		    listitem_T	*li;
 		    int		index = iptr->isn_arg.number;
 
-		    // get list item: list is at stack-1, push item
+		    // Get list item: list is at stack-1, push item.
+		    // List type and length is checked for when compiling.
 		    tv = STACK_TV_BOT(-1);
-		    if (tv->v_type != VAR_LIST)
-		    {
-			emsg(_(e_listreq));
-			goto failed;
-		    }
-		    if ((li = list_find(tv->vval.v_list, index)) == NULL)
-		    {
-			semsg(_(e_listidx), index);
-			goto failed;
-		    }
+		    li = list_find(tv->vval.v_list, index);
 
 		    if (GA_GROW(&ectx.ec_stack, 1) == FAIL)
 			goto failed;
@@ -2144,6 +2166,7 @@ call_def_function(
 		    dict_T	*dict;
 		    char_u	*key;
 		    dictitem_T	*di;
+		    typval_T	temp_tv;
 
 		    // dict member: dict is at stack-2, key at stack-1
 		    tv = STACK_TV_BOT(-2);
@@ -2159,10 +2182,14 @@ call_def_function(
 			semsg(_(e_dictkey), key);
 			goto failed;
 		    }
-		    --ectx.ec_stack.ga_len;
 		    clear_tv(tv);
-		    clear_tv(STACK_TV_BOT(-1));
-		    copy_tv(&di->di_tv, STACK_TV_BOT(-1));
+		    --ectx.ec_stack.ga_len;
+		    // Clear the dict after getting the item, to avoid that it
+		    // make the item invalid.
+		    tv = STACK_TV_BOT(-1);
+		    temp_tv = *tv;
+		    copy_tv(&di->di_tv, tv);
+		    clear_tv(&temp_tv);
 		}
 		break;
 
@@ -2171,6 +2198,7 @@ call_def_function(
 		{
 		    dict_T	*dict;
 		    dictitem_T	*di;
+		    typval_T	temp_tv;
 
 		    tv = STACK_TV_BOT(-1);
 		    if (tv->v_type != VAR_DICT || tv->vval.v_dict == NULL)
@@ -2186,8 +2214,11 @@ call_def_function(
 			semsg(_(e_dictkey), iptr->isn_arg.string);
 			goto failed;
 		    }
-		    clear_tv(tv);
+		    // Clear the dict after getting the item, to avoid that it
+		    // make the item invalid.
+		    temp_tv = *tv;
 		    copy_tv(&di->di_tv, tv);
+		    clear_tv(&temp_tv);
 		}
 		break;
 
@@ -2238,6 +2269,25 @@ call_def_function(
 			semsg(_("E1029: Expected %s but got %s"),
 				    vartype_name(ct->ct_type),
 				    vartype_name(tv->v_type));
+			goto failed;
+		    }
+		}
+		break;
+
+	    case ISN_CHECKLEN:
+		{
+		    int	    min_len = iptr->isn_arg.checklen.cl_min_len;
+		    list_T  *list = NULL;
+
+		    tv = STACK_TV_BOT(-1);
+		    if (tv->v_type == VAR_LIST)
+			    list = tv->vval.v_list;
+		    if (list == NULL || list->lv_len < min_len
+			    || (list->lv_len > min_len
+					&& !iptr->isn_arg.checklen.cl_more_OK))
+		    {
+			semsg(_("E1093: Expected %d items but got %d"),
+				     min_len, list == NULL ? 0 : list->lv_len);
 			goto failed;
 		    }
 		}
@@ -2343,10 +2393,10 @@ ex_disassemble(exarg_T *eap)
 	semsg(_("E1061: Cannot find function %s"), eap->arg);
 	return;
     }
-    if (ufunc->uf_dfunc_idx == UF_TO_BE_COMPILED
+    if (ufunc->uf_def_status == UF_TO_BE_COMPILED
 	    && compile_def_function(ufunc, FALSE, NULL) == FAIL)
 	return;
-    if (ufunc->uf_dfunc_idx < 0)
+    if (ufunc->uf_def_status != UF_COMPILED)
     {
 	semsg(_("E1062: Function %s is not compiled"), eap->arg);
 	return;
@@ -2814,6 +2864,8 @@ ex_disassemble(exarg_T *eap)
 	    // expression operations
 	    case ISN_CONCAT: smsg("%4d CONCAT", current); break;
 	    case ISN_INDEX: smsg("%4d INDEX", current); break;
+	    case ISN_SLICE: smsg("%4d SLICE %lld",
+					 current, iptr->isn_arg.number); break;
 	    case ISN_GETITEM: smsg("%4d ITEM %lld",
 					 current, iptr->isn_arg.number); break;
 	    case ISN_MEMBER: smsg("%4d MEMBER", current); break;
@@ -2826,6 +2878,10 @@ ex_disassemble(exarg_T *eap)
 				      vartype_name(iptr->isn_arg.type.ct_type),
 				      iptr->isn_arg.type.ct_off);
 				break;
+	    case ISN_CHECKLEN: smsg("%4d CHECKLEN %s%d", current,
+				iptr->isn_arg.checklen.cl_more_OK ? ">= " : "",
+				iptr->isn_arg.checklen.cl_min_len);
+			       break;
 	    case ISN_2BOOL: if (iptr->isn_arg.number)
 				smsg("%4d INVERT (!val)", current);
 			    else

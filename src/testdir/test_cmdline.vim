@@ -191,6 +191,10 @@ func Test_highlight_completion()
   call assert_equal('"hi default', getreg(':'))
   call feedkeys(":hi c\<S-Tab>\<Home>\"\<CR>", 'xt')
   call assert_equal('"hi clear', getreg(':'))
+  call feedkeys(":hi clear Aardig Aard\<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"hi clear Aardig Aardig', getreg(':'))
+  call feedkeys(":hi Aardig \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"hi Aardig \t", getreg(':'))
 
   " A cleared group does not show up in completions.
   hi Anders ctermfg=green
@@ -199,6 +203,14 @@ func Test_highlight_completion()
   call assert_equal(['Anders'], getcompletion('A', 'highlight'))
   hi clear Anders
   call assert_equal([], getcompletion('A', 'highlight'))
+endfunc
+
+" Test for command-line expansion of "hi Ni " (easter egg)
+func Test_highlight_easter_egg()
+  call test_override('ui_delay', 1)
+  call feedkeys(":hi Ni \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal("\"hi Ni \<Tab>", @:)
+  call test_override('ALL', 0)
 endfunc
 
 func Test_getcompletion()
@@ -392,6 +404,7 @@ func Test_getcompletion()
   call delete('Xtags')
   set tags&
 
+  call assert_fails("call getcompletion('\\\\@!\\\\@=', 'buffer')", 'E871:')
   call assert_fails('call getcompletion("", "burp")', 'E475:')
   call assert_fails('call getcompletion("abc", [])', 'E475:')
 endfunc
@@ -604,10 +617,20 @@ func Test_cmdline_complete_bang()
 endfunc
 
 func Test_cmdline_complete_languages()
+  let lang = substitute(execute('language time'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:lc_time)
+
+  let lang = substitute(execute('language ctype'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:ctype)
+
+  let lang = substitute(execute('language collate'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:collate)
+
   let lang = substitute(execute('language messages'), '.*"\(.*\)"$', '\1', '')
+  call assert_equal(lang, v:lang)
 
   call feedkeys(":language \<c-a>\<c-b>\"\<cr>", 'tx')
-  call assert_match('^"language .*\<ctype\>.*\<messages\>.*\<time\>', @:)
+  call assert_match('^"language .*\<collate\>.*\<ctype\>.*\<messages\>.*\<time\>', @:)
 
   call assert_match('^"language .*\<' . lang . '\>', @:)
 
@@ -618,6 +641,9 @@ func Test_cmdline_complete_languages()
   call assert_match('^"language .*\<' . lang . '\>', @:)
 
   call feedkeys(":language time \<c-a>\<c-b>\"\<cr>", 'tx')
+  call assert_match('^"language .*\<' . lang . '\>', @:)
+
+  call feedkeys(":language collate \<c-a>\<c-b>\"\<cr>", 'tx')
   call assert_match('^"language .*\<' . lang . '\>', @:)
 endfunc
 
@@ -1555,5 +1581,23 @@ func Test_zero_line_search()
   q!
 endfunc
 
+func Test_read_shellcmd()
+  CheckUnix
+  if executable('ls')
+    " There should be ls in the $PATH
+    call feedkeys(":r! l\<c-a>\<c-b>\"\<cr>", 'tx')
+    call assert_match('^"r! .*\<ls\>', @:)
+  endif
+
+  if executable('rm')
+    call feedkeys(":r! ++enc=utf-8 r\<c-a>\<c-b>\"\<cr>", 'tx')
+    call assert_notmatch('^"r!.*\<runtest.vim\>', @:)
+    call assert_match('^"r!.*\<rm\>', @:)
+
+    call feedkeys(":r ++enc=utf-8 !rm\<c-a>\<c-b>\"\<cr>", 'tx')
+    call assert_notmatch('^"r.*\<runtest.vim\>', @:)
+    call assert_match('^"r ++enc\S\+ !.*\<rm\>', @:)
+  endif
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

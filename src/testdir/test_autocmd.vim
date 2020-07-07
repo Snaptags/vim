@@ -2526,4 +2526,118 @@ func Test_autocmd_sigusr1()
   unlet g:sigusr1_passed
 endfunc
 
+" Test for BufReadPre autocmd deleting the file
+func Test_BufReadPre_delfile()
+  augroup TestAuCmd
+    au!
+    autocmd BufReadPre Xfile call delete('Xfile')
+  augroup END
+  call writefile([], 'Xfile')
+  call assert_fails('new Xfile', 'E200:')
+  call assert_equal('Xfile', @%)
+  call assert_equal(1, &readonly)
+  call delete('Xfile')
+  augroup TestAuCmd
+    au!
+  augroup END
+  close!
+endfunc
+
+" Test for BufReadPre autocmd changing the current buffer
+func Test_BufReadPre_changebuf()
+  augroup TestAuCmd
+    au!
+    autocmd BufReadPre Xfile edit Xsomeotherfile
+  augroup END
+  call writefile([], 'Xfile')
+  call assert_fails('new Xfile', 'E201:')
+  call assert_equal('Xsomeotherfile', @%)
+  call assert_equal(1, &readonly)
+  call delete('Xfile')
+  augroup TestAuCmd
+    au!
+  augroup END
+  close!
+endfunc
+
+" Test for BufWipeouti autocmd changing the current buffer when reading a file
+" in an empty buffer with 'f' flag in 'cpo'
+func Test_BufDelete_changebuf()
+  new
+  augroup TestAuCmd
+    au!
+    autocmd BufWipeout * let bufnr = bufadd('somefile') | exe "b " .. bufnr
+  augroup END
+  let save_cpo = &cpo
+  set cpo+=f
+  call assert_fails('r Xfile', 'E484:')
+  call assert_equal('somefile', @%)
+  let &cpo = save_cpo
+  augroup TestAuCmd
+    au!
+  augroup END
+  close!
+endfunc
+
+" Test for the temporary internal window used to execute autocmds
+func Test_autocmd_window()
+  %bw!
+  edit one.txt
+  tabnew two.txt
+  let g:blist = []
+  augroup aucmd_win_test1
+    au!
+    au BufEnter * call add(g:blist, [expand('<afile>'),
+          \ win_gettype(bufwinnr(expand('<afile>')))])
+  augroup END
+
+  doautoall BufEnter
+  call assert_equal([['one.txt', 'autocmd'], ['two.txt', '']], g:blist)
+
+  augroup aucmd_win_test1
+    au!
+  augroup END
+  augroup! aucmd_win_test1
+  %bw!
+endfunc
+
+" Test for trying to close the temporary window used for executing an autocmd
+func Test_close_autocmd_window()
+  %bw!
+  edit one.txt
+  tabnew two.txt
+  augroup aucmd_win_test2
+    au!
+    au BufEnter * if expand('<afile>') == 'one.txt' | 1close | endif
+  augroup END
+
+  call assert_fails('doautoall BufEnter', 'E813:')
+
+  augroup aucmd_win_test2
+    au!
+  augroup END
+  augroup! aucmd_win_test2
+  %bwipe!
+endfunc
+
+" Test for trying to close the tab that has the temporary window for exeucing
+" an autocmd.
+func Test_close_autocmd_tab()
+  edit one.txt
+  tabnew two.txt
+   augroup aucmd_win_test
+    au!
+    au BufEnter * if expand('<afile>') == 'one.txt' | tabfirst | tabonly | endif
+  augroup END
+
+  call assert_fails('doautoall BufEnter', 'E813:')
+
+  tabonly
+  augroup aucmd_win_test
+    au!
+  augroup END
+  augroup! aucmd_win_test
+  %bwipe!
+endfunc
+
 " vim: shiftwidth=2 sts=2 expandtab
