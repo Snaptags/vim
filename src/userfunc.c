@@ -123,7 +123,7 @@ one_function_arg(char_u *arg, garray_T *newargs, garray_T *argtypes, int skip)
 		return arg;
 	    }
 	    type = skipwhite(p);
-	    p = skip_type(type);
+	    p = skip_type(type, TRUE);
 	    type = vim_strnsave(type, p - type);
 	}
 	else if (*skipwhite(p) != '=')
@@ -266,10 +266,20 @@ get_function_args(
 	    else if (any_default)
 	    {
 		emsg(_("E989: Non-default argument follows default argument"));
-		mustend = TRUE;
+		goto err_ret;
 	    }
 	    if (*p == ',')
+	    {
 		++p;
+		// Don't give this error when skipping, it makes the "->" not
+		// found in "{k,v -> x}" and give a confusing error.
+		if (!skip && in_vim9script()
+				      && !IS_WHITE_OR_NUL(*p) && *p != endchar)
+		{
+		    semsg(_(e_white_after), ",");
+		    goto err_ret;
+		}
+	    }
 	    else
 		mustend = TRUE;
 	}
@@ -389,8 +399,8 @@ get_lambda_tv(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
     partial_T   *pt = NULL;
     int		varargs;
     int		ret;
-    char_u	*start;
-    char_u	*s, *e;
+    char_u	*s;
+    char_u	*start, *end;
     int		*old_eval_lavars = eval_lavars_used;
     int		eval_lavars = FALSE;
     char_u	*tofree = NULL;
@@ -399,10 +409,10 @@ get_lambda_tv(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
     ga_init(&newlines);
 
     // First, check if this is a lambda expression. "->" must exist.
-    start = skipwhite(*arg + 1);
-    ret = get_function_args(&start, '-', NULL, NULL, NULL, NULL, TRUE,
+    s = skipwhite(*arg + 1);
+    ret = get_function_args(&s, '-', NULL, NULL, NULL, NULL, TRUE,
 								   NULL, NULL);
-    if (ret == FAIL || *start != '>')
+    if (ret == FAIL || *s != '>')
 	return NOTDONE;
 
     // Parse the arguments again.
@@ -423,8 +433,8 @@ get_lambda_tv(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 
     // Get the start and the end of the expression.
     *arg = skipwhite_and_linebreak(*arg + 1, evalarg);
-    s = *arg;
-    ret = skip_expr_concatenate(&s, arg, evalarg);
+    start = *arg;
+    ret = skip_expr_concatenate(arg, &start, &end, evalarg);
     if (ret == FAIL)
 	goto errret;
     if (evalarg != NULL)
@@ -434,7 +444,6 @@ get_lambda_tv(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	evalarg->eval_tofree = NULL;
     }
 
-    e = *arg;
     *arg = skipwhite_and_linebreak(*arg, evalarg);
     if (**arg != '}')
     {
@@ -463,13 +472,13 @@ get_lambda_tv(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    goto errret;
 
 	// Add "return " before the expression.
-	len = 7 + (int)(e - s) + 1;
+	len = 7 + (int)(end - start) + 1;
 	p = alloc(len);
 	if (p == NULL)
 	    goto errret;
 	((char_u **)(newlines.ga_data))[newlines.ga_len++] = p;
 	STRCPY(p, "return ");
-	vim_strncpy(p + 7, s, e - s);
+	vim_strncpy(p + 7, start, end - start);
 	if (strstr((char *)p + 7, "a:") == NULL)
 	    // No a: variables are used for sure.
 	    flags |= FC_NOARGS;
@@ -509,7 +518,10 @@ get_lambda_tv(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
     }
 
     eval_lavars_used = old_eval_lavars;
-    vim_free(tofree);
+    if (evalarg != NULL && evalarg->eval_tofree == NULL)
+	evalarg->eval_tofree = tofree;
+    else
+	vim_free(tofree);
     return OK;
 
 errret:
@@ -517,7 +529,10 @@ errret:
     ga_clear_strings(&newlines);
     vim_free(fp);
     vim_free(pt);
-    vim_free(tofree);
+    if (evalarg != NULL && evalarg->eval_tofree == NULL)
+	evalarg->eval_tofree = tofree;
+    else
+	vim_free(tofree);
     eval_lavars_used = old_eval_lavars;
     return FAIL;
 }
@@ -1069,10 +1084,7 @@ func_clear_items(ufunc_T *fp)
     VIM_CLEAR(fp->uf_arg_types);
     VIM_CLEAR(fp->uf_def_arg_idx);
     VIM_CLEAR(fp->uf_va_name);
-    while (fp->uf_type_list.ga_len > 0)
-	vim_free(((type_T **)fp->uf_type_list.ga_data)
-						  [--fp->uf_type_list.ga_len]);
-    ga_clear(&fp->uf_type_list);
+    clear_type_list(&fp->uf_type_list);
 
 #ifdef FEAT_LUA
     if (fp->uf_cb_free != NULL)
@@ -1136,6 +1148,8 @@ func_clear_free(ufunc_T *fp, int force)
     func_clear(fp, force);
     if (force || fp->uf_dfunc_idx == 0)
 	func_free(fp, force);
+    else
+	fp->uf_flags |= FC_DEAD;
 }
 
 
@@ -1700,7 +1714,7 @@ free_all_functions(void)
     ufunc_T	*fp;
     long_u	skipped = 0;
     long_u	todo = 1;
-    long_u	used;
+    int		changed;
 
     // Clean up the current_funccal chain and the funccal stack.
     while (current_funccal != NULL)
@@ -1731,9 +1745,9 @@ free_all_functions(void)
 		    ++skipped;
 		else
 		{
-		    used = func_hashtab.ht_used;
+		    changed = func_hashtab.ht_changed;
 		    func_clear(fp, TRUE);
-		    if (used != func_hashtab.ht_used)
+		    if (changed != func_hashtab.ht_changed)
 		    {
 			skipped = 0;
 			break;
@@ -2110,7 +2124,7 @@ theend:
     return ret;
 }
 
-    static char_u *
+    char_u *
 printable_func_name(ufunc_T *fp)
 {
     return fp->uf_name_exp != NULL ? fp->uf_name_exp : fp->uf_name;
@@ -2376,8 +2390,7 @@ trans_function_name(
     }
 
     // In Vim9 script a user function is script-local by default.
-    vim9script = ASCII_ISUPPER(*start)
-			     && current_sctx.sc_version == SCRIPT_VERSION_VIM9;
+    vim9script = ASCII_ISUPPER(*start) && in_vim9script();
 
     /*
      * Copy the function name to allocated memory.
@@ -2457,7 +2470,7 @@ untrans_function_name(char_u *name)
 {
     char_u *p;
 
-    if (*name == K_SPECIAL && current_sctx.sc_version == SCRIPT_VERSION_VIM9)
+    if (*name == K_SPECIAL && in_vim9script())
     {
 	p = vim_strchr(name, '_');
 	if (p != NULL)
@@ -2473,12 +2486,11 @@ untrans_function_name(char_u *name)
     static void
 list_functions(regmatch_T *regmatch)
 {
-    long_u	used = func_hashtab.ht_used;
-    long_u	todo = used;
-    hashitem_T	*ht_array = func_hashtab.ht_array;
+    int		changed = func_hashtab.ht_changed;
+    long_u	todo = func_hashtab.ht_used;
     hashitem_T	*hi;
 
-    for (hi = ht_array; todo > 0 && !got_int; ++hi)
+    for (hi = func_hashtab.ht_array; todo > 0 && !got_int; ++hi)
     {
 	if (!HASHITEM_EMPTY(hi))
 	{
@@ -2493,8 +2505,7 @@ list_functions(regmatch_T *regmatch)
 			    && vim_regexec(regmatch, fp->uf_name, 0)))
 	    {
 		list_func_head(fp, FALSE);
-		if (used != func_hashtab.ht_used
-			|| ht_array != func_hashtab.ht_array)
+		if (changed != func_hashtab.ht_changed)
 		{
 		    emsg(_("E454: function list was modified"));
 		    return;
@@ -2546,12 +2557,7 @@ def_function(exarg_T *eap, char_u *name_arg)
     int		is_heredoc = FALSE;
     char_u	*skip_until = NULL;
     char_u	*heredoc_trimmed = NULL;
-
-    if (in_vim9script() && eap->forceit)
-    {
-	emsg(_(e_nobang));
-	return NULL;
-    }
+    int		vim9script = in_vim9script();
 
     /*
      * ":function" without argument: list functions.
@@ -2654,7 +2660,7 @@ def_function(exarg_T *eap, char_u *name_arg)
     {
 	if (!ends_excmd(*skipwhite(p)))
 	{
-	    emsg(_(e_trailing));
+	    semsg(_(e_trailing_arg), p);
 	    goto ret_free;
 	}
 	eap->nextcmd = check_nextcmd(p);
@@ -2722,6 +2728,13 @@ def_function(exarg_T *eap, char_u *name_arg)
     }
     p = skipwhite(p + 1);
 
+    // In Vim9 script only global functions can be redefined.
+    if (vim9script && eap->forceit && !is_global)
+    {
+	emsg(_(e_nobang));
+	goto ret_free;
+    }
+
     ga_init2(&newlines, (int)sizeof(char_u *), 3);
 
     if (!eap->skip && name_arg == NULL)
@@ -2765,7 +2778,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 	if (*p == ':')
 	{
 	    ret_type = skipwhite(p + 1);
-	    p = skip_type(ret_type);
+	    p = skip_type(ret_type, FALSE);
 	    if (p > ret_type)
 	    {
 		ret_type = vim_strnsave(ret_type, p - ret_type);
@@ -2777,6 +2790,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 		ret_type = NULL;
 	    }
 	}
+	p = skipwhite(p);
     }
     else
 	// find extra arguments "range", "dict", "abort" and "closure"
@@ -2817,9 +2831,12 @@ def_function(exarg_T *eap, char_u *name_arg)
     // Makes 'exe "func Test()\n...\nendfunc"' work.
     if (*p == '\n')
 	line_arg = p + 1;
-    else if (*p != NUL && *p != '"' && !(eap->cmdidx == CMD_def && *p == '#')
-						    && !eap->skip && !did_emsg)
-	emsg(_(e_trailing));
+    else if (*p != NUL
+	    && !(*p == '"' && !(vim9script || eap->cmdidx == CMD_def))
+	    && !(*p == '#' && (vim9script || eap->cmdidx == CMD_def))
+	    && !eap->skip
+	    && !did_emsg)
+	semsg(_(e_trailing_arg), p);
 
     /*
      * Read the body of the function, until "}", ":endfunction" or ":enddef" is
@@ -3377,7 +3394,7 @@ def_function(exarg_T *eap, char_u *name_arg)
     fp->uf_varargs = varargs;
     if (sandbox)
 	flags |= FC_SANDBOX;
-    if (in_vim9script() && !ASCII_ISUPPER(*fp->uf_name))
+    if (vim9script && !ASCII_ISUPPER(*fp->uf_name))
 	flags |= FC_VIM9;
     fp->uf_flags = flags;
     fp->uf_calls = 0;
@@ -3433,8 +3450,8 @@ ex_function(exarg_T *eap)
     void
 ex_defcompile(exarg_T *eap UNUSED)
 {
-    long_u	ht_used = func_hashtab.ht_used;
-    int		todo = (int)ht_used;
+    long	todo = (long)func_hashtab.ht_used;
+    int		changed = func_hashtab.ht_changed;
     hashitem_T	*hi;
     ufunc_T	*ufunc;
 
@@ -3449,12 +3466,12 @@ ex_defcompile(exarg_T *eap UNUSED)
 	    {
 		compile_def_function(ufunc, FALSE, NULL);
 
-		if (func_hashtab.ht_used != ht_used)
+		if (func_hashtab.ht_changed != changed)
 		{
-		    // another function has been defined, need to start over
+		    // a function has been added or removed, need to start over
+		    todo = (long)func_hashtab.ht_used;
+		    changed = func_hashtab.ht_changed;
 		    hi = func_hashtab.ht_array;
-		    ht_used = func_hashtab.ht_used;
-		    todo = (int)ht_used;
 		    --hi;
 		}
 	    }
@@ -3553,6 +3570,7 @@ get_expanded_name(char_u *name, int check)
 get_user_func_name(expand_T *xp, int idx)
 {
     static long_u	done;
+    static int		changed;
     static hashitem_T	*hi;
     ufunc_T		*fp;
 
@@ -3560,8 +3578,9 @@ get_user_func_name(expand_T *xp, int idx)
     {
 	done = 0;
 	hi = func_hashtab.ht_array;
+	changed = func_hashtab.ht_changed;
     }
-    if (done < func_hashtab.ht_used)
+    if (changed == func_hashtab.ht_changed && done < func_hashtab.ht_used)
     {
 	if (done++ > 0)
 	    ++hi;
@@ -3613,7 +3632,7 @@ ex_delfunction(exarg_T *eap)
     if (!ends_excmd(*skipwhite(p)))
     {
 	vim_free(name);
-	emsg(_(e_trailing));
+	semsg(_(e_trailing_arg), p);
 	return;
     }
     eap->nextcmd = check_nextcmd(p);
@@ -3961,7 +3980,7 @@ ex_call(exarg_T *eap)
 	    if (!failed)
 	    {
 		emsg_severe = TRUE;
-		emsg(_(e_trailing));
+		semsg(_(e_trailing_arg), arg);
 	    }
 	}
 	else

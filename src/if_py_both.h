@@ -1792,11 +1792,10 @@ DictionaryContains(DictionaryObject *self, PyObject *keyObject)
 
 typedef struct
 {
-    hashitem_T	*ht_array;
-    long_u	ht_used;
-    hashtab_T	*ht;
-    hashitem_T	*hi;
-    long_u	todo;
+    int		dii_changed;
+    hashtab_T	*dii_ht;
+    hashitem_T	*dii_hi;
+    long_u	dii_todo;
 } dictiterinfo_T;
 
     static PyObject *
@@ -1804,23 +1803,22 @@ DictionaryIterNext(dictiterinfo_T **dii)
 {
     PyObject	*ret;
 
-    if (!(*dii)->todo)
+    if (!(*dii)->dii_todo)
 	return NULL;
 
-    if ((*dii)->ht->ht_array != (*dii)->ht_array ||
-	    (*dii)->ht->ht_used != (*dii)->ht_used)
+    if ((*dii)->dii_ht->ht_changed != (*dii)->dii_changed)
     {
 	PyErr_SET_STRING(PyExc_RuntimeError,
 		N_("hashtab changed during iteration"));
 	return NULL;
     }
 
-    while (((*dii)->todo) && HASHITEM_EMPTY((*dii)->hi))
-	++((*dii)->hi);
+    while (((*dii)->dii_todo) && HASHITEM_EMPTY((*dii)->dii_hi))
+	++((*dii)->dii_hi);
 
-    --((*dii)->todo);
+    --((*dii)->dii_todo);
 
-    if (!(ret = PyBytes_FromString((char *)(*dii)->hi->hi_key)))
+    if (!(ret = PyBytes_FromString((char *)(*dii)->dii_hi->hi_key)))
 	return NULL;
 
     return ret;
@@ -1839,11 +1837,10 @@ DictionaryIter(DictionaryObject *self)
     }
 
     ht = &self->dict->dv_hashtab;
-    dii->ht_array = ht->ht_array;
-    dii->ht_used = ht->ht_used;
-    dii->ht = ht;
-    dii->hi = dii->ht_array;
-    dii->todo = dii->ht_used;
+    dii->dii_changed = ht->ht_changed;
+    dii->dii_ht = ht;
+    dii->dii_hi = ht->ht_array;
+    dii->dii_todo = ht->ht_used;
 
     return IterNew(dii,
 	    (destructorfun) PyMem_Free, (nextfun) DictionaryIterNext,
@@ -3374,7 +3371,7 @@ OptionsItem(OptionsObject *self, PyObject *keyObject)
     char_u	*stringval;
     PyObject	*todecref;
 
-    if (self->Check(self->from))
+    if (self->Check(self->fromObj))
 	return NULL;
 
     if (!(key = StringToChars(keyObject, &todecref)))
@@ -3565,7 +3562,7 @@ OptionsAssItem(OptionsObject *self, PyObject *keyObject, PyObject *valObject)
     int		ret = 0;
     PyObject	*todecref;
 
-    if (self->Check(self->from))
+    if (self->Check(self->fromObj))
 	return -1;
 
     if (!(key = StringToChars(keyObject, &todecref)))
@@ -4334,10 +4331,15 @@ GetBufferLineList(buf_T *buf, PyInt lo, PyInt hi)
 
     for (i = 0; i < n; ++i)
     {
-	PyObject	*string = LineToString(
-		(char *)ml_get_buf(buf, (linenr_T)(lo+i), FALSE));
+	linenr_T	lnum = (linenr_T)(lo + i);
+	char		*text;
+	PyObject	*string;
 
-	// Error check - was the Python string creation OK?
+	if (lnum > buf->b_ml.ml_line_count)
+	    text = "";
+	else
+	    text = (char *)ml_get_buf(buf, lnum, FALSE);
+	string = LineToString(text);
 	if (string == NULL)
 	{
 	    Py_DECREF(list);

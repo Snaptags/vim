@@ -208,6 +208,23 @@ def Test_method_call_linebreak()
   CheckScriptSuccess(lines)
 enddef
 
+def Test_dict_member()
+   let test: dict<list<number>> = {'data': [3, 1, 2]}
+   test.data->sort()
+   assert_equal(#{data: [1, 2, 3]}, test)
+   test.data
+      ->reverse()
+   assert_equal(#{data: [3, 2, 1]}, test)
+
+  let lines =<< trim END
+      vim9script
+      let test: dict<list<number>> = {'data': [3, 1, 2]}
+      test.data->sort()
+      assert_equal(#{data: [1, 2, 3]}, test)
+  END
+  CheckScriptSuccess(lines)
+enddef
+
 def Test_bar_after_command()
   def RedrawAndEcho()
     let x = 'did redraw'
@@ -246,6 +263,12 @@ def Test_bar_after_command()
     assert_equal(['hello there', 'again'], readfile('Xoutfile'))
     delete('Xoutfile')
   endif
+enddef
+
+def Test_filter_is_not_modifier()
+  let tags = [{'a': 1, 'b': 2}, {'x': 3, 'y': 4}]
+  filter(tags, { _, v -> has_key(v, 'x') ? 1 : 0 })
+  assert_equal([#{x: 3, y: 4}], tags)
 enddef
 
 def Test_eval_command()

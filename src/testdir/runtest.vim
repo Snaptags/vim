@@ -45,6 +45,11 @@
 " Without the +eval feature we can't run these tests, bail out.
 so small.vim
 
+" In the GUI we can always change the screen size.
+if has('gui_running')
+  set columns=80 lines=25
+endif
+
 " Check that the screen size is at least 24 x 80 characters.
 if &lines < 24 || &columns < 80 
   let error = 'Screen size too small! Tests require at least 24 lines with 80 characters, got ' .. &lines .. ' lines with ' .. &columns .. ' characters'
@@ -100,10 +105,22 @@ set nomore
 " Output all messages in English.
 lang mess C
 
+" suppress menu translation
+if has('gui_running') && exists('did_install_default_menus')
+  source $VIMRUNTIME/delmenu.vim
+  set langmenu=none
+  source $VIMRUNTIME/menu.vim
+endif
+
 " Always use forward slashes.
 set shellslash
 
 let s:srcdir = expand('%:p:h:h')
+
+if has('win32')
+  " avoid prompt that is long or contains a line break
+  let $PROMPT = '$P$G'
+endif
 
 " Prepare for calling test_garbagecollect_now().
 let v:testing = 1

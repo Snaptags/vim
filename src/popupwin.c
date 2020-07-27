@@ -740,8 +740,6 @@ apply_general_options(win_T *wp, dict_T *dict)
 	set_string_option_direct_in_win(wp, (char_u *)"wincolor", -1,
 						   str, OPT_FREE|OPT_LOCAL, 0);
 
-    set_string_option_direct_in_win(wp, (char_u *)"signcolumn", -1,
-					(char_u *)"no", OPT_FREE|OPT_LOCAL, 0);
     set_padding_border(dict, wp->w_popup_padding, "padding", 999);
     set_padding_border(dict, wp->w_popup_border, "border", 1);
 
@@ -946,6 +944,10 @@ apply_options(win_T *wp, dict_T *dict)
     int		nr;
 
     apply_move_options(wp, dict);
+
+    set_string_option_direct_in_win(wp, (char_u *)"signcolumn", -1,
+					(char_u *)"no", OPT_FREE|OPT_LOCAL, 0);
+
     apply_general_options(wp, dict);
 
     nr = dict_get_number(dict, (char_u *)"hidden");
@@ -1620,6 +1622,7 @@ parse_popup_option(win_T *wp, int is_preview)
 		if (is_preview)
 		    wp->w_minwidth = x;
 		wp->w_maxwidth = x;
+		wp->w_maxwidth_opt = x;
 	    }
 	}
 	else if (STRNCMP(s, "highlight:", 10) == 0)
@@ -3504,22 +3507,31 @@ may_update_popup_mask(int type)
 			wp = mouse_find_win(&line_cp, &col_cp, IGNORE_POPUP);
 			if (wp != NULL)
 			{
-			    if (wp != prev_wp)
-			    {
-				vim_memset(plines_cache, 0, sizeof(int) * Rows);
-				prev_wp = wp;
-			    }
-
-			    if (line_cp >= wp->w_height)
-				// In (or below) status line
-				wp->w_redr_status = TRUE;
+#if defined(FEAT_TERMINAL)
+			    // A terminal window needs to be redrawn.
+			    if (bt_terminal(wp->w_buffer))
+				redraw_win_later(wp, NOT_VALID);
 			    else
+#endif
 			    {
-				// compute the position in the buffer line from
-				// the position in the window
-				mouse_comp_pos(wp, &line_cp, &col_cp,
+				if (wp != prev_wp)
+				{
+				    vim_memset(plines_cache, 0,
+							   sizeof(int) * Rows);
+				    prev_wp = wp;
+				}
+
+				if (line_cp >= wp->w_height)
+				    // In (or below) status line
+				    wp->w_redr_status = TRUE;
+				else
+				{
+				    // compute the position in the buffer line
+				    // from the position in the window
+				    mouse_comp_pos(wp, &line_cp, &col_cp,
 							  &lnum, plines_cache);
-				redrawWinline(wp, lnum);
+				    redrawWinline(wp, lnum);
+				}
 			    }
 
 			    // This line is going to be redrawn, no need to
@@ -3846,6 +3858,11 @@ update_popups(void (*win_update)(win_T *wp))
 	// Back to the normal zindex.
 	screen_zindex = 0;
     }
+
+#if defined(FEAT_SEARCH_EXTRA)
+    // In case win_update() called start_search_hl().
+    end_search_hl();
+#endif
 }
 
 /*
@@ -4016,6 +4033,18 @@ popup_hide_info(void)
 
     if (wp != NULL)
 	popup_hide(wp);
+}
+
+/*
+ * Close any info popup.
+ */
+    void
+popup_close_info(void)
+{
+    win_T *wp = popup_find_info_window();
+
+    if (wp != NULL)
+	popup_close_with_retval(wp, -1);
 }
 #endif
 

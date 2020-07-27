@@ -1,4 +1,4 @@
-*eval.txt*	For Vim version 8.2.  Last change: 2020 Jun 30
+*eval.txt*	For Vim version 8.2.  Last change: 2020 Jul 21
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -94,8 +94,9 @@ the Number.  Examples:
 	Number 0	-->	String "0" ~
 	Number -1	-->	String "-1" ~
 							*octal*
-Conversion from a String to a Number is done by converting the first digits to
-a number.  Hexadecimal "0xf9", Octal "017" or "0o17", and Binary "0b10"
+Conversion from a String to a Number only happens in legacy Vim script, not in
+Vim9 script.  It is done by converting the first digits to a number.
+Hexadecimal "0xf9", Octal "017" or "0o17", and Binary "0b10"
 numbers are recognized (NOTE: when using |scriptversion-4| octal with a
 leading "0" is not recognized).  If the String doesn't start with digits, the
 result is zero.
@@ -1993,6 +1994,8 @@ v:mouse_col	Column number for a mouse click obtained with |getchar()|.
 					*v:none* *none-variable* *None*
 v:none		An empty String. Used to put an empty item in JSON.  See
 		|json_encode()|.
+		This can also be used as a function argument to use the
+		default value, see |none-function_argument|.
 		When used as a number this evaluates to zero.
 		When used as a string this evaluates to "v:none". >
 			echo v:none
@@ -2831,7 +2834,7 @@ stridx({haystack}, {needle} [, {start}])
 string({expr})			String	String representation of {expr} value
 strlen({expr})			Number	length of the String {expr}
 strpart({str}, {start} [, {len}])
-				String	{len} characters of {str} at {start}
+				String	{len} bytes of {str} at byte {start}
 strptime({format}, {timestring})
 				Number	Convert {timestring} to unix timestamp
 strridx({haystack}, {needle} [, {start}])
@@ -3036,7 +3039,8 @@ append({lnum}, {text})					*append()*
 			:let failed = append(line('$'), "# THE END")
 			:let failed = append(0, ["Chapter 1", "the beginning"])
 
-<		Can also be used as a |method| after a List: >
+<		Can also be used as a |method| after a List, the base is
+		passed as the second argument: >
 			mylist->append(lnum)
 
 
@@ -3058,7 +3062,8 @@ appendbufline({expr}, {lnum}, {text})			*appendbufline()*
 		error message is given. Example: >
 			:let failed = appendbufline(13, 0, "# THE START")
 <
-		Can also be used as a |method| after a List: >
+<		Can also be used as a |method| after a List, the base is
+		passed as the second argument: >
 			mylist->appendbufline(buf, lnum)
 
 
@@ -3902,6 +3907,7 @@ deepcopy({expr} [, {noref}])				*deepcopy()* *E698*
 		changing an item in the copy does not change the contents of
 		the original |List|.
 		A |Dictionary| is copied in a similar way as a |List|.
+
 		When {noref} is omitted or zero a contained |List| or
 		|Dictionary| is only copied once.  All references point to
 		this single copy.  With {noref} set to 1 every occurrence of a
@@ -4838,12 +4844,14 @@ get({list}, {idx} [, {default}])			*get()*
 		Get item {idx} from |List| {list}.  When this item is not
 		available return {default}.  Return zero when {default} is
 		omitted.
-		Can also be used as a |method|: >
+		Preferably used as a |method|: >
 			mylist->get(idx)
 get({blob}, {idx} [, {default}])
 		Get byte {idx} from |Blob| {blob}.  When this byte is not
 		available return {default}.  Return -1 when {default} is
 		omitted.
+		Preferably used as a |method|: >
+			myblob->get(idx)
 get({dict}, {key} [, {default}])
 		Get item with key {key} from |Dictionary| {dict}.  When this
 		item is not available return {default}.  Return zero when
@@ -4851,6 +4859,8 @@ get({dict}, {key} [, {default}])
 			let val = get(g:, 'var_name', 'default')
 <		This gets the value of g:var_name if it exists, and uses
 		'default' when it does not exist.
+		Preferably used as a |method|: >
+			mydict->get(key)
 get({func}, {what})
 		Get an item with from Funcref {func}.  Possible values for
 		{what} are:
@@ -4858,7 +4868,9 @@ get({func}, {what})
 			"func"	The function
 			"dict"	The dictionary
 			"args"	The list with arguments
-
+		Preferably used as a |method|: >
+			myfunc->get(what)
+<
 							*getbufinfo()*
 getbufinfo([{expr}])
 getbufinfo([{dict}])
@@ -4920,8 +4932,11 @@ getbufinfo([{dict}])
 <
 		To get buffer-local options use: >
 			getbufvar({bufnr}, '&option_name')
-
 <
+		Can also be used as a |method|: >
+			GetBufnr()->getbufinfo()
+<
+
 							*getbufline()*
 getbufline({expr}, {lnum} [, {end}])
 		Return a |List| with the lines starting from {lnum} to {end}
@@ -5023,8 +5038,9 @@ getchar([expr])						*getchar()*
 		When the user clicks a mouse button, the mouse event will be
 		returned.  The position can then be found in |v:mouse_col|,
 		|v:mouse_lnum|, |v:mouse_winid| and |v:mouse_win|.
-		|getmousepos()| can also be used.  This example positions the
-		mouse as it would normally happen: >
+		|getmousepos()| can also be used.  Mouse move events will be
+		ignored.
+		This example positions the mouse as it would normally happen: >
 			let c = getchar()
 			if c == "\<LeftMouse>" && v:mouse_win > 0
 			  exe v:mouse_win . "wincmd w"
@@ -9012,6 +9028,8 @@ setloclist({nr}, {list} [, {action} [, {what}]])		*setloclist()*
 		Otherwise, same as |setqflist()|.
 		Also see |location-list|.
 
+		For {action} see |setqflist-action|.
+
 		If the optional {what} dictionary argument is supplied, then
 		only the items listed in {what} are set. Refer to |setqflist()|
 		for the list of supported keys in {what}.
@@ -9090,7 +9108,7 @@ setqflist({list} [, {action} [, {what}]])		*setqflist()*
 		only the items listed in {what} are set. The first {list}
 		argument is ignored.  See below for the supported items in
 		{what}.
-
+							*setqflist-what*
 		When {what} is not present, the items in {list} or used.  Each
 		item must be a dictionary.  Non-dictionary items in {list} are
 		ignored.  Each dictionary item can contain the following
@@ -9127,7 +9145,7 @@ setqflist({list} [, {action} [, {what}]])		*setqflist()*
 		Note that the list is not exactly the same as what
 		|getqflist()| returns.
 
-		{action} values:				*E927*
+		{action} values:		*setqflist-action* *E927*
 		'a'	The items from {list} are added to the existing
 			quickfix list. If there is no existing list, then a
 			new list is created.
@@ -9168,7 +9186,8 @@ setqflist({list} [, {action} [, {what}]])		*setqflist()*
 				the last quickfix list.
 		    quickfixtextfunc
 				function to get the text to display in the
-				quickfix window.  Refer to
+				quickfix window.  The value can be the name of
+				a function or a funcref or a lambda.  Refer to
 				|quickfix-window-function| for an explanation
 				of how to write the function and an example.
 		    title	quickfix list title text. See |quickfix-title|
@@ -11693,7 +11712,7 @@ The argument default expressions are evaluated at the time of the function
 call, not definition.  Thus it is possible to use an expression which is
 invalid the moment the function is defined.  The expressions are also only
 evaluated when arguments are not specified during a call.
-
+						*none-function_argument*
 You can pass |v:none| to use the default expression.  Note that this means you
 cannot pass v:none as an ordinary value when an argument has a default
 expression.

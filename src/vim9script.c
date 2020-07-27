@@ -22,7 +22,9 @@ static char e_needs_vim9[] = N_("E1042: export can only be used in vim9script");
     int
 in_vim9script(void)
 {
-    // TODO: go up the stack?
+    // Do not go up the stack, a ":function" inside vim9script uses legacy
+    // syntax.  "sc_version" is also set when compiling a ":def" function in
+    // legacy script.
     return current_sctx.sc_version == SCRIPT_VERSION_VIM9;
 }
 
@@ -67,7 +69,7 @@ ex_vim9script(exarg_T *eap)
     void
 ex_export(exarg_T *eap)
 {
-    if (current_sctx.sc_version != SCRIPT_VERSION_VIM9)
+    if (!in_vim9script())
     {
 	emsg(_(e_needs_vim9));
 	return;
@@ -126,7 +128,7 @@ free_imports(int sid)
     }
     ga_clear(&si->sn_imports);
     ga_clear(&si->sn_var_vals);
-    ga_clear(&si->sn_type_list);
+    clear_type_list(&si->sn_type_list);
 }
 
 /*
@@ -196,11 +198,11 @@ find_exported(
 	char_u	*funcname;
 
 	// it could be a user function.
-	if (STRLEN(name) < sizeof(buffer) - 10)
+	if (STRLEN(name) < sizeof(buffer) - 15)
 	    funcname = buffer;
 	else
 	{
-	    funcname = alloc(STRLEN(name) + 10);
+	    funcname = alloc(STRLEN(name) + 15);
 	    if (funcname == NULL)
 		return -1;
 	}
@@ -463,7 +465,10 @@ handle_import(
 		imported->imp_var_vals_idx = idx;
 	    }
 	    else
+	    {
+		imported->imp_type = ufunc->uf_func_type;
 		imported->imp_funcname = ufunc->uf_name;
+	    }
 	}
     }
 erret:
@@ -555,7 +560,7 @@ check_script_var_type(typval_T *dest, typval_T *value, char_u *name)
 		semsg(_(e_readonlyvar), name);
 		return FAIL;
 	    }
-	    return check_type(sv->sv_type, typval2type(value), TRUE);
+	    return check_typval_type(sv->sv_type, value);
 	}
     }
     iemsg("check_script_var_type(): not found");

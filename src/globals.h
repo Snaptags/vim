@@ -220,6 +220,10 @@ EXTERN int	emsg_skip INIT(= 0);	    // don't display errors for
 					    // expression that is skipped
 EXTERN int	emsg_severe INIT(= FALSE);  // use message of next of several
 					    // emsg() calls for throw
+// used by assert_fails()
+EXTERN int	emsg_assert_fails_used INIT(= FALSE);
+EXTERN char_u	*emsg_assert_fails_msg INIT(= NULL);
+
 EXTERN int	did_endif INIT(= FALSE);    // just had ":endif"
 #endif
 EXTERN int	did_emsg;		    // set by emsg() when the message
@@ -1726,6 +1730,7 @@ EXTERN char e_longname[]	INIT(= N_("E75: Name too long"));
 EXTERN char e_toomsbra[]	INIT(= N_("E76: Too many ["));
 EXTERN char e_toomany[]	INIT(= N_("E77: Too many file names"));
 EXTERN char e_trailing[]	INIT(= N_("E488: Trailing characters"));
+EXTERN char e_trailing_arg[]	INIT(= N_("E488: Trailing characters: %s"));
 EXTERN char e_umark[]		INIT(= N_("E78: Unknown mark"));
 EXTERN char e_wildexpand[]	INIT(= N_("E79: Cannot expand wildcards"));
 EXTERN char e_winheight[]	INIT(= N_("E591: 'winheight' cannot be smaller than 'winminheight'"));
@@ -1885,7 +1890,7 @@ EXTERN listitem_T range_list_item;
 // Passed to an eval() function to enable evaluation.
 EXTERN evalarg_T EVALARG_EVALUATE
 # ifdef DO_INIT
-	= {EVAL_EVALUATE, 0, NULL, NULL, {0, 0, 0, 0, NULL}, NULL}
+	= {EVAL_EVALUATE, 0, NULL, NULL, NULL, {0, 0, 0, 0, NULL}, NULL, NULL}
 # endif
 	;
 #endif
