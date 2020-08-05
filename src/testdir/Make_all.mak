@@ -8,25 +8,19 @@ NO_PLUGINS = --noplugin --not-a-term
 NO_INITS = -U NONE $(NO_PLUGINS)
 
 # The first script creates small.vim.
-SCRIPTS_FIRST = \
-	test1.out
+SCRIPTS_FIRST = test1.out
 
 # Tests that run on all systems.
-SCRIPTS_ALL = \
-	test42.out \
-	test70.out
+SCRIPTS_ALL =
 
 # Tests that run on most systems, but not on Amiga.
-SCRIPTS_MORE1 = \
-	test52.out
+SCRIPTS_MORE1 =
 
 # Tests that run on most systems, but not on Amiga and DOS/Windows.
-SCRIPTS_MORE2 = \
-	test49.out
+SCRIPTS_MORE2 = test49.out
 
 # Tests that run on most systems, but not on VMS
-SCRIPTS_MORE4 = \
-	test59.out
+SCRIPTS_MORE4 =
 
 # Tests specifically for MS-Windows.
 SCRIPTS_WIN32 =
@@ -194,6 +188,7 @@ NEW_TESTS = \
 	test_modeless \
 	test_modeline \
 	test_move \
+	test_mzscheme \
 	test_nested_function \
 	test_netbeans \
 	test_normal \
@@ -247,6 +242,7 @@ NEW_TESTS = \
 	test_source \
 	test_source_utf8 \
 	test_spell \
+	test_spell_utf8 \
 	test_spellfile \
 	test_startup \
 	test_startup_utf8 \
@@ -426,6 +422,7 @@ NEW_TESTS_RES = \
 	test_mksession.res \
 	test_modeless.res \
 	test_modeline.res \
+	test_mzscheme.res \
 	test_nested_function.res \
 	test_netbeans.res \
 	test_normal.res \
@@ -468,6 +465,7 @@ NEW_TESTS_RES = \
 	test_sound.res \
 	test_source.res \
 	test_spell.res \
+	test_spell_utf8.res \
 	test_spellfile.res \
 	test_startup.res \
 	test_stat.res \

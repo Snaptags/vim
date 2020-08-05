@@ -300,7 +300,7 @@ eval_expr_typval(typval_T *expr, typval_T *argv, int argc, typval_T *rettv)
 	s = skipwhite(s);
 	if (eval1_emsg(&s, rettv, NULL) == FAIL)
 	    return FAIL;
-	if (*s != NUL)  // check for trailing chars after expr
+	if (*skipwhite(s) != NUL)  // check for trailing chars after expr
 	{
 	    clear_tv(rettv);
 	    semsg(_(e_invexpr2), s);
@@ -903,6 +903,7 @@ get_lval(
 		    clear_tv(&var1);
 		    return NULL;
 		}
+		p = skipwhite(p);
 	    }
 
 	    // Optionally get the second index [ :expr].
@@ -1913,27 +1914,28 @@ eval_func(
     char_u *
 eval_next_non_blank(char_u *arg, evalarg_T *evalarg, int *getnext)
 {
+    char_u *p = skipwhite(arg);
+
     *getnext = FALSE;
     if (in_vim9script()
 	    && evalarg != NULL
 	    && (evalarg->eval_cookie != NULL || evalarg->eval_cctx != NULL)
-	    && (*arg == NUL || (VIM_ISWHITE(arg[-1])
-						  && vim9_comment_start(arg))))
+	    && (*p == NUL || (VIM_ISWHITE(p[-1]) && vim9_comment_start(p))))
     {
-	char_u *p;
+	char_u *next;
 
 	if (evalarg->eval_cookie != NULL)
-	    p = getline_peek(evalarg->eval_getline, evalarg->eval_cookie);
+	    next = getline_peek(evalarg->eval_getline, evalarg->eval_cookie);
 	else
-	    p = peek_next_line_from_context(evalarg->eval_cctx);
+	    next = peek_next_line_from_context(evalarg->eval_cctx);
 
-	if (p != NULL)
+	if (next != NULL)
 	{
 	    *getnext = TRUE;
-	    return skipwhite(p);
+	    return skipwhite(next);
 	}
     }
-    return arg;
+    return p;
 }
 
 /*
@@ -2039,6 +2041,7 @@ eval0(
 
     p = skipwhite(arg);
     ret = eval1(&p, rettv, evalarg);
+    p = skipwhite(p);
 
     if (ret == FAIL || !ends_excmd2(arg, p))
     {
@@ -2107,6 +2110,8 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 
 	if (getnext)
 	    *arg = eval_next_line(evalarg_used);
+	else
+	    *arg = p;
 
 	result = FALSE;
 	if (evaluate)
@@ -2142,6 +2147,8 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	}
 	if (getnext)
 	    *arg = eval_next_line(evalarg_used);
+	else
+	    *arg = p;
 
 	/*
 	 * Get the third variable.  Recursive!
@@ -2234,10 +2241,26 @@ eval2(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	{
 	    if (getnext)
 		*arg = eval_next_line(evalarg_used);
+	    else
+	    {
+		if (evaluate && in_vim9script() && !VIM_ISWHITE(p[-1]))
+		{
+		    error_white_both(p, 2);
+		    clear_tv(rettv);
+		    return FAIL;
+		}
+		*arg = p;
+	    }
 
 	    /*
 	     * Get the second variable.
 	     */
+	    if (evaluate && in_vim9script() && !IS_WHITE_OR_NUL((*arg)[2]))
+	    {
+		error_white_both(p, 2);
+		clear_tv(rettv);
+		return FAIL;
+	    }
 	    *arg = skipwhite_and_linebreak(*arg + 2, evalarg_used);
 	    evalarg_used->eval_flags = !result ? orig_flags
 						 : orig_flags & ~EVAL_EVALUATE;
@@ -2349,10 +2372,26 @@ eval3(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	{
 	    if (getnext)
 		*arg = eval_next_line(evalarg_used);
+	    else
+	    {
+		if (evaluate && in_vim9script() && !VIM_ISWHITE(p[-1]))
+		{
+		    error_white_both(p, 2);
+		    clear_tv(rettv);
+		    return FAIL;
+		}
+		*arg = p;
+	    }
 
 	    /*
 	     * Get the second variable.
 	     */
+	    if (evaluate && in_vim9script() && !IS_WHITE_OR_NUL((*arg)[2]))
+	    {
+		error_white_both(p, 2);
+		clear_tv(rettv);
+		return FAIL;
+	    }
 	    *arg = skipwhite_and_linebreak(*arg + 2, evalarg_used);
 	    evalarg_used->eval_flags = result ? orig_flags
 						 : orig_flags & ~EVAL_EVALUATE;
@@ -2411,7 +2450,7 @@ eval3(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
  *	var1 isnot var2
  *
  * "arg" must point to the first non-white of the expression.
- * "arg" is advanced to the next non-white after the recognized expression.
+ * "arg" is advanced to just after the recognized expression.
  *
  * Return OK or FAIL.
  */
@@ -2420,9 +2459,9 @@ eval4(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 {
     char_u	*p;
     int		getnext;
-    int		i;
     exptype_T	type = EXPR_UNKNOWN;
     int		len = 2;
+    int		type_is = FALSE;
 
     /*
      * Get the first variable.
@@ -2431,44 +2470,7 @@ eval4(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	return FAIL;
 
     p = eval_next_non_blank(*arg, evalarg, &getnext);
-    switch (p[0])
-    {
-	case '=':   if (p[1] == '=')
-			type = EXPR_EQUAL;
-		    else if (p[1] == '~')
-			type = EXPR_MATCH;
-		    break;
-	case '!':   if (p[1] == '=')
-			type = EXPR_NEQUAL;
-		    else if (p[1] == '~')
-			type = EXPR_NOMATCH;
-		    break;
-	case '>':   if (p[1] != '=')
-		    {
-			type = EXPR_GREATER;
-			len = 1;
-		    }
-		    else
-			type = EXPR_GEQUAL;
-		    break;
-	case '<':   if (p[1] != '=')
-		    {
-			type = EXPR_SMALLER;
-			len = 1;
-		    }
-		    else
-			type = EXPR_SEQUAL;
-		    break;
-	case 'i':   if (p[1] == 's')
-		    {
-			if (p[2] == 'n' && p[3] == 'o' && p[4] == 't')
-			    len = 5;
-			i = p[len];
-			if (!isalnum(i) && i != '_')
-			    type = len == 2 ? EXPR_IS : EXPR_ISNOT;
-		    }
-		    break;
-    }
+    type = get_compare_type(p, &len, &type_is);
 
     /*
      * If there is a comparative operator, use it.
@@ -2478,9 +2480,24 @@ eval4(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	typval_T    var2;
 	int	    ic;
 	int	    vim9script = in_vim9script();
+	int	    evaluate = evalarg == NULL
+				   ? 0 : (evalarg->eval_flags & EVAL_EVALUATE);
 
 	if (getnext)
 	    *arg = eval_next_line(evalarg);
+	else if (evaluate && vim9script && !VIM_ISWHITE(**arg))
+	{
+	    error_white_both(p, len);
+	    clear_tv(rettv);
+	    return FAIL;
+	}
+
+	if (vim9script && type_is && (p[len] == '?' || p[len] == '#'))
+	{
+	    semsg(_(e_invexpr2), p);
+	    clear_tv(rettv);
+	    return FAIL;
+	}
 
 	// extra question mark appended: ignore case
 	if (p[len] == '?')
@@ -2501,13 +2518,19 @@ eval4(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	/*
 	 * Get the second variable.
 	 */
+	if (evaluate && vim9script && !IS_WHITE_OR_NUL(p[len]))
+	{
+	    error_white_both(p, 1);
+	    clear_tv(rettv);
+	    return FAIL;
+	}
 	*arg = skipwhite_and_linebreak(p + len, evalarg);
 	if (eval5(arg, &var2, evalarg) == FAIL)
 	{
 	    clear_tv(rettv);
 	    return FAIL;
 	}
-	if (evalarg != NULL && (evalarg->eval_flags & EVAL_EVALUATE))
+	if (evaluate)
 	{
 	    int ret;
 
@@ -2571,7 +2594,7 @@ eval_addlist(typval_T *tv1, typval_T *tv2)
  *	..	string concatenation
  *
  * "arg" must point to the first non-white of the expression.
- * "arg" is advanced to the next non-white after the recognized expression.
+ * "arg" is advanced to just after the recognized expression.
  *
  * Return OK or FAIL.
  */
@@ -2593,6 +2616,7 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	int	    getnext;
 	char_u	    *p;
 	int	    op;
+	int	    oplen;
 	int	    concat;
 	typval_T    var2;
 
@@ -2603,9 +2627,20 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	if (op != '+' && op != '-' && !concat)
 	    break;
 
+	evaluate = evalarg == NULL ? 0 : (evalarg->eval_flags & EVAL_EVALUATE);
+	oplen = (concat && p[1] == '.') ? 2 : 1;
 	if (getnext)
 	    *arg = eval_next_line(evalarg);
-	evaluate = evalarg == NULL ? 0 : (evalarg->eval_flags & EVAL_EVALUATE);
+	else
+	{
+	    if (evaluate && in_vim9script() && !VIM_ISWHITE(**arg))
+	    {
+		error_white_both(p, oplen);
+		clear_tv(rettv);
+		return FAIL;
+	    }
+	    *arg = p;
+	}
 	if ((op != '+' || (rettv->v_type != VAR_LIST
 						 && rettv->v_type != VAR_BLOB))
 #ifdef FEAT_FLOAT
@@ -2630,9 +2665,13 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	/*
 	 * Get the second variable.
 	 */
-	if (op == '.' && *(*arg + 1) == '.')  // .. string concatenation
-	    ++*arg;
-	*arg = skipwhite_and_linebreak(*arg + 1, evalarg);
+	if (evaluate && in_vim9script() && !IS_WHITE_OR_NUL((*arg)[oplen]))
+	{
+	    error_white_both(p, oplen);
+	    clear_tv(rettv);
+	    return FAIL;
+	}
+	*arg = skipwhite_and_linebreak(*arg + oplen, evalarg);
 	if (eval6(arg, &var2, evalarg, op == '.') == FAIL)
 	{
 	    clear_tv(rettv);
@@ -2757,7 +2796,7 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
  *	%	number modulo
  *
  * "arg" must point to the first non-white of the expression.
- * "arg" is advanced to the next non-white after the recognized expression.
+ * "arg" is advanced to just after the recognized expression.
  *
  * Return OK or FAIL.
  */
@@ -2786,6 +2825,7 @@ eval6(
 	int	    evaluate;
 	int	    getnext;
 	typval_T    var2;
+	char_u	    *p;
 	int	    op;
 	varnumber_T n1, n2;
 #ifdef FEAT_FLOAT
@@ -2793,19 +2833,30 @@ eval6(
 #endif
 	int	    error;
 
-	op = *eval_next_non_blank(*arg, evalarg, &getnext);
+	p = eval_next_non_blank(*arg, evalarg, &getnext);
+	op = *p;
 	if (op != '*' && op != '/' && op != '%')
 	    break;
 
+	evaluate = evalarg == NULL ? 0 : (evalarg->eval_flags & EVAL_EVALUATE);
 	if (getnext)
 	    *arg = eval_next_line(evalarg);
+	else
+	{
+	    if (evaluate && in_vim9script() && !VIM_ISWHITE(**arg))
+	    {
+		error_white_both(p, 1);
+		clear_tv(rettv);
+		return FAIL;
+	    }
+	    *arg = p;
+	}
 
 #ifdef FEAT_FLOAT
 	f1 = 0;
 	f2 = 0;
 #endif
 	error = FALSE;
-	evaluate = evalarg == NULL ? 0 : (evalarg->eval_flags & EVAL_EVALUATE);
 	if (evaluate)
 	{
 #ifdef FEAT_FLOAT
@@ -2828,7 +2879,13 @@ eval6(
 	/*
 	 * Get the second variable.
 	 */
-	*arg = skipwhite(*arg + 1);
+	if (evaluate && in_vim9script() && !IS_WHITE_OR_NUL((*arg)[1]))
+	{
+	    error_white_both(p, 1);
+	    clear_tv(rettv);
+	    return FAIL;
+	}
+	*arg = skipwhite_and_linebreak(*arg + 1, evalarg);
 	if (eval7(arg, &var2, evalarg, FALSE) == FAIL)
 	    return FAIL;
 
@@ -2941,7 +2998,7 @@ eval6(
  *  trailing ->name()	method call
  *
  * "arg" must point to the first non-white of the expression.
- * "arg" is advanced to the next non-white after the recognized expression.
+ * "arg" is advanced to just after the recognized expression.
  *
  * Return OK or FAIL.
  */
@@ -3144,8 +3201,6 @@ eval7(
 	}
 	vim_free(alias);
     }
-
-    *arg = skipwhite(*arg);
 
     // Handle following '[', '(' and '.' for expr[expr], expr.name,
     // expr(expr), expr->name(expr)
@@ -3373,6 +3428,7 @@ eval_method(
     }
     else
     {
+	*arg = skipwhite(*arg);
 	if (**arg != '(')
 	{
 	    if (verbose)
@@ -3464,7 +3520,7 @@ eval_index(
 	 * dict.name
 	 */
 	key = *arg + 1;
-	for (len = 0; ASCII_ISALNUM(key[len]) || key[len] == '_'; ++len)
+	for (len = 0; eval_isdictc(key[len]); ++len)
 	    ;
 	if (len == 0)
 	    return FAIL;
@@ -4856,7 +4912,7 @@ get_env_len(char_u **arg)
 
 /*
  * Get the length of the name of a function or internal variable.
- * "arg" is advanced to the first non-white character after the name.
+ * "arg" is advanced to after the name.
  * Return 0 if something is wrong.
  */
     int
@@ -4882,7 +4938,7 @@ get_id_len(char_u **arg)
 	return 0;
 
     len = (int)(p - *arg);
-    *arg = skipwhite(p);
+    *arg = p;
 
     return len;
 }
@@ -4997,7 +5053,7 @@ find_name_end(
 		    && (eval_isnamec(*p)
 			|| (*p == '{' && !vim9script)
 			|| ((flags & FNE_INCL_BR) && (*p == '['
-					|| (*p == '.' && eval_isnamec1(p[1]))))
+					 || (*p == '.' && eval_isdictc(p[1]))))
 			|| mb_nest != 0
 			|| br_nest != 0); MB_PTR_ADV(p))
     {
@@ -5128,7 +5184,7 @@ make_expanded_name(
     int
 eval_isnamec(int c)
 {
-    return (ASCII_ISALNUM(c) || c == '_' || c == ':' || c == AUTOLOAD_CHAR);
+    return ASCII_ISALNUM(c) || c == '_' || c == ':' || c == AUTOLOAD_CHAR;
 }
 
 /*
@@ -5138,7 +5194,17 @@ eval_isnamec(int c)
     int
 eval_isnamec1(int c)
 {
-    return (ASCII_ISALPHA(c) || c == '_');
+    return ASCII_ISALPHA(c) || c == '_';
+}
+
+/*
+ * Return TRUE if character "c" can be used as the first character of a
+ * dictionary key.
+ */
+    int
+eval_isdictc(int c)
+{
+    return ASCII_ISALNUM(c) || c == '_';
 }
 
 /*
@@ -5171,9 +5237,8 @@ handle_subscript(
 	// the next line then consume the line break.
 	p = eval_next_non_blank(*arg, evalarg, &getnext);
 	if (getnext
-	    && ((rettv->v_type == VAR_DICT && *p == '.'
-						       && ASCII_ISALPHA(p[1]))
-		|| (*p == '-' && p[1] == '>'
+	    && ((rettv->v_type == VAR_DICT && *p == '.' && eval_isdictc(p[1]))
+		|| (p[0] == '-' && p[1] == '>'
 				     && (p[2] == '{' || ASCII_ISALPHA(p[2])))))
 	{
 	    *arg = eval_next_line(evalarg);
@@ -5199,8 +5264,9 @@ handle_subscript(
 	    dict_unref(selfdict);
 	    selfdict = NULL;
 	}
-	else if (**arg == '-' && (*arg)[1] == '>')
+	else if (p[0] == '-' && p[1] == '>')
 	{
+	    *arg = p;
 	    if (ret == OK)
 	    {
 		if ((*arg)[2] == '{')

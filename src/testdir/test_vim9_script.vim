@@ -61,6 +61,14 @@ def Test_assignment()
   assert_equal('foobar', $ENVVAR)
   $ENVVAR = ''
 
+  let lines =<< trim END
+    vim9script
+    $ENVVAR = 'barfoo'
+    assert_equal('barfoo', $ENVVAR)
+    $ENVVAR = ''
+  END
+  call CheckScriptSuccess(lines)
+
   s:appendToMe ..= 'yyy'
   assert_equal('xxxyyy', s:appendToMe)
   s:addToMe += 222
@@ -80,6 +88,15 @@ def Test_assignment()
   set ts=10
   &ts %= 4
   assert_equal(2, &ts)
+
+  lines =<< trim END
+    vim9script
+    &ts = 6
+    &ts += 3
+    assert_equal(9, &ts)
+  END
+  call CheckScriptSuccess(lines)
+
   call CheckDefFailure(['&notex += 3'], 'E113:')
   call CheckDefFailure(['&ts ..= "xxx"'], 'E1019:')
   call CheckDefFailure(['&ts = [7]'], 'E1013:')
@@ -91,6 +108,9 @@ def Test_assignment()
   # test freeing ISN_STOREOPT
   call CheckDefFailure(['&ts = 3', 'let asdf'], 'E1022:')
   &ts = 8
+
+  call CheckDefFailure(['let s:var = 123'], 'E1101:')
+  call CheckDefFailure(['let s:var: number'], 'E1101:')
 
   g:inc_counter += 1
   assert_equal(2, g:inc_counter)
@@ -106,11 +126,41 @@ def Test_assignment()
   call CheckDefFailure(['@a += "more"'], 'E1013:')
   call CheckDefFailure(['@a += 123'], 'E1013:')
 
+  lines =<< trim END
+    vim9script
+    @c = 'areg'
+    @c ..= 'add'
+    assert_equal('aregadd', @c)
+  END
+  call CheckScriptSuccess(lines)
+
   v:errmsg = 'none'
   v:errmsg ..= 'again'
   assert_equal('noneagain', v:errmsg)
   call CheckDefFailure(['v:errmsg += "more"'], 'E1013:')
   call CheckDefFailure(['v:errmsg += 123'], 'E1013:')
+
+  # single letter variables
+  a = 123
+  assert_equal(123, a)
+  let b: number
+  b = 123
+  assert_equal(123, b)
+  let g: number
+  g = 123
+  assert_equal(123, g)
+  let s: number
+  s = 123
+  assert_equal(123, s)
+  let t: number
+  t = 123
+  assert_equal(123, t)
+  let v: number
+  v = 123
+  assert_equal(123, v)
+  let w: number
+  w = 123
+  assert_equal(123, w)
 enddef
 
 def Test_vim9_single_char_vars()
@@ -194,10 +244,60 @@ def Test_assignment_dict()
   # overwrite
   dict3['key'] = 'another'
 
-  call CheckDefExecFailure(['let dd = {}', 'dd[""] = 6'], 'E713:')
+  # empty key can be used
+  let dd = {}
+  dd[""] = 6
+  assert_equal({'': 6}, dd)
 
   # type becomes dict<any>
   let somedict = rand() > 0 ? #{a: 1, b: 2} : #{a: 'a', b: 'b'}
+
+  # assignment to script-local dict
+  let lines =<< trim END
+    vim9script
+    let test: dict<any> = {}
+    def FillDict(): dict<any>
+      test['a'] = 43
+      return test
+    enddef
+    assert_equal(#{a: 43}, FillDict())
+  END
+  call CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    let test: dict<any>
+    def FillDict(): dict<any>
+      test['a'] = 43
+      return test
+    enddef
+    FillDict()
+  END
+  call CheckScriptFailure(lines, 'E1103:')
+
+  # assignment to global dict
+  lines =<< trim END
+    vim9script
+    g:test = {}
+    def FillDict(): dict<any>
+      g:test['a'] = 43
+      return g:test
+    enddef
+    assert_equal(#{a: 43}, FillDict())
+  END
+  call CheckScriptSuccess(lines)
+
+  # assignment to buffer dict
+  lines =<< trim END
+    vim9script
+    b:test = {}
+    def FillDict(): dict<any>
+      b:test['a'] = 43
+      return b:test
+    enddef
+    assert_equal(#{a: 43}, FillDict())
+  END
+  call CheckScriptSuccess(lines)
 enddef
 
 def Test_assignment_local()
@@ -308,6 +408,42 @@ def Test_assignment_var_list()
   assert_equal(['three'], vrem)
 enddef
 
+def Test_assignment_vim9script()
+  let lines =<< trim END
+    vim9script
+    def Func(): list<number>
+      return [1, 2]
+    enddef
+    let var1: number
+    let var2: number
+    [var1, var2] =
+          Func()
+    assert_equal(1, var1)
+    assert_equal(2, var2)
+    let ll =
+          Func()
+    assert_equal([1, 2], ll)
+
+    @/ = 'text'
+    assert_equal('text', @/)
+    @0 = 'zero'
+    assert_equal('zero', @0)
+    @1 = 'one'
+    assert_equal('one', @1)
+    @9 = 'nine'
+    assert_equal('nine', @9)
+    @- = 'minus'
+    assert_equal('minus', @-)
+    if has('clipboard_working')
+      @* = 'star'
+      assert_equal('star', @*)
+      @+ = 'plus'
+      assert_equal('plus', @+)
+    endif
+  END
+  CheckScriptSuccess(lines)
+enddef
+
 def Mess(): string
   v:foldstart = 123
   return 'xxx'
@@ -344,13 +480,22 @@ def Test_assignment_failure()
                             '[x, y; z] = [1]'], 'E1093:')
 
   call CheckDefFailure(['let somevar'], "E1022:")
-  call CheckDefFailure(['let &option'], 'E1052:')
+  call CheckDefFailure(['let &tabstop = 4'], 'E1052:')
   call CheckDefFailure(['&g:option = 5'], 'E113:')
+  call CheckScriptFailure(['vim9script', 'let &tabstop = 4'], 'E1052:')
 
   call CheckDefFailure(['let $VAR = 5'], 'E1016: Cannot declare an environment variable:')
+  call CheckScriptFailure(['vim9script', 'let $ENV = "xxx"'], 'E1016:')
 
-  call CheckDefFailure(['let @~ = 5'], 'E354:')
+  if has('dnd')
+    call CheckDefFailure(['let @~ = 5'], 'E1066:')
+  else
+    call CheckDefFailure(['let @~ = 5'], 'E354:')
+    call CheckDefFailure(['@~ = 5'], 'E354:')
+  endif
   call CheckDefFailure(['let @a = 5'], 'E1066:')
+  call CheckDefFailure(['let @/ = "x"'], 'E1066:')
+  call CheckScriptFailure(['vim9script', 'let @a = "abc"'], 'E1066:')
 
   call CheckDefFailure(['let g:var = 5'], 'E1016: Cannot declare a global variable:')
   call CheckDefFailure(['let w:var = 5'], 'E1016: Cannot declare a window variable:')
@@ -713,13 +858,6 @@ def Test_try_catch()
     n = 300
   endtry
   assert_equal(300, n)
-
-  try
-    d[''] = 3
-  catch /E713:/
-    n = 311
-  endtry
-  assert_equal(311, n)
 
   try
     unlet g:does_not_exist
@@ -1506,6 +1644,52 @@ def Test_import_compile_error()
   delete('Ximport.vim')
 enddef
 
+def Test_func_overrules_import_fails()
+  let export_lines =<< trim END
+      vim9script
+      export def Func()
+        echo 'imported'
+      enddef
+  END
+  writefile(export_lines, 'XexportedFunc.vim')
+
+  let lines =<< trim END
+    vim9script
+    import Func from './XexportedFunc.vim'
+    def Func()
+      echo 'local to function'
+    enddef
+  END
+  CheckScriptFailure(lines, 'E1073:')
+
+  lines =<< trim END
+    vim9script
+    import Func from './XexportedFunc.vim'
+    def Outer()
+      def Func()
+        echo 'local to function'
+      enddef
+    enddef
+    defcompile
+  END
+  CheckScriptFailure(lines, 'E1073:')
+
+  delete('XexportedFunc.vim')
+enddef
+
+def Test_func_redefine_fails()
+  let lines =<< trim END
+    vim9script
+    def Func()
+      echo 'one'
+    enddef
+    def Func()
+      echo 'two'
+    enddef
+  END
+  CheckScriptFailure(lines, 'E1073:')
+enddef
+
 def Test_fixed_size_list()
   # will be allocated as one piece of memory, check that changes work
   let l = [1, 2, 3, 4]
@@ -1513,6 +1697,24 @@ def Test_fixed_size_list()
   l->add(5)
   l->insert(99, 1)
   assert_equal([2, 99, 3, 4, 5], l)
+enddef
+
+def Test_no_insert_xit()
+  call CheckDefExecFailure(['a = 1'], 'E1100:')
+  call CheckDefExecFailure(['c = 1'], 'E1100:')
+  call CheckDefExecFailure(['i = 1'], 'E1100:')
+  call CheckDefExecFailure(['t = 1'], 'E1100:')
+  call CheckDefExecFailure(['x = 1'], 'E1100:')
+
+  CheckScriptFailure(['vim9script', 'a = 1'], 'E488:')
+  CheckScriptFailure(['vim9script', 'a'], 'E1100:')
+  CheckScriptFailure(['vim9script', 'c = 1'], 'E488:')
+  CheckScriptFailure(['vim9script', 'c'], 'E1100:')
+  CheckScriptFailure(['vim9script', 'i = 1'], 'E488:')
+  CheckScriptFailure(['vim9script', 'i'], 'E1100:')
+  CheckScriptFailure(['vim9script', 't'], 'E1100:')
+  CheckScriptFailure(['vim9script', 't = 1'], 'E1100:')
+  CheckScriptFailure(['vim9script', 'x = 1'], 'E1100:')
 enddef
 
 def IfElse(what: number): string
@@ -2246,6 +2448,10 @@ def Test_vim9_comment()
       ])
   CheckScriptFailure([
       'vim9script',
+      'function " comment',
+      ], 'E129:')
+  CheckScriptFailure([
+      'vim9script',
       'function# comment',
       ], 'E129:')
   CheckScriptSuccess([
@@ -2293,11 +2499,11 @@ def Test_vim9_comment()
       'func Test() " comment',
       'endfunc',
       ])
-  CheckScriptFailure([
+  CheckScriptSuccess([
       'vim9script',
       'func Test() " comment',
       'endfunc',
-      ], 'E488:')
+      ])
 
   CheckScriptSuccess([
       'def Test() # comment',

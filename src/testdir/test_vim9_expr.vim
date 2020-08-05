@@ -175,6 +175,23 @@ def Test_expr2_vimscript()
   END
   CheckScriptSuccess(lines)
 
+  # check white space
+  lines =<< trim END
+      vim9script
+      let var = v:true||v:true
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      let var = v:true ||v:true
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      let var = v:true|| v:true
+  END
+  CheckScriptFailure(lines, 'E1004:')
+
   # check keeping the value
   lines =<< trim END
       vim9script
@@ -278,6 +295,23 @@ def Test_expr3_vimscript()
       assert_equal(v:true, var)
   END
   CheckScriptSuccess(lines)
+
+  # check white space
+  lines =<< trim END
+      vim9script
+      let var = v:true&&v:true
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      let var = v:true &&v:true
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      let var = v:true&& v:true
+  END
+  CheckScriptFailure(lines, 'E1004:')
 
   # check keeping the value
   lines =<< trim END
@@ -726,6 +760,38 @@ def Test_expr4_vimscript()
     set noignorecase
   END
   CheckScriptSuccess(lines)
+
+  # check missing white space
+  lines =<< trim END
+    vim9script
+    echo 2>3
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+    vim9script
+    echo 2 >3
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+    vim9script
+    echo 2> 3
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+    vim9script
+    echo 2!=3
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+    vim9script
+    echo 2 !=3
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+    vim9script
+    echo 2!= 3
+  END
+  CheckScriptFailure(lines, 'E1004:')
 enddef
 
 func Test_expr4_fails()
@@ -831,7 +897,7 @@ def Test_expr5()
 enddef
 
 def Test_expr5_vim9script()
-  # only checks line continuation
+  # check line continuation
   let lines =<< trim END
       vim9script
       let var = 11
@@ -843,11 +909,77 @@ def Test_expr5_vim9script()
 
   lines =<< trim END
       vim9script
+      let var = 11 +
+		  77 -
+		  22
+      assert_equal(66, var)
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
       let var = 'one'
       		.. 'two'
       assert_equal('onetwo', var)
   END
   CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      echo 'abc' is# 'abc'
+  END
+  CheckScriptFailure(lines, 'E15:')
+
+  lines =<< trim END
+      vim9script
+      echo 'abc' is? 'abc'
+  END
+  CheckScriptFailure(lines, 'E15:')
+
+  lines =<< trim END
+      vim9script
+      echo 'abc' isnot# 'abc'
+  END
+  CheckScriptFailure(lines, 'E15:')
+
+  lines =<< trim END
+      vim9script
+      echo 'abc' isnot? 'abc'
+  END
+  CheckScriptFailure(lines, 'E15:')
+
+  # check white space
+  lines =<< trim END
+      vim9script
+      echo 5+6
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      echo 5 +6
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      echo 5+ 6
+  END
+  CheckScriptFailure(lines, 'E1004:')
+
+  lines =<< trim END
+      vim9script
+      echo 'a'..'b'
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      echo 'a' ..'b'
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      echo 'a'.. 'b'
+  END
+  CheckScriptFailure(lines, 'E1004:')
 enddef
 
 def Test_expr5_float()
@@ -942,7 +1074,7 @@ def Test_expr6()
 enddef
 
 def Test_expr6_vim9script()
-  # only checks line continuation
+  # check line continuation
   let lines =<< trim END
       vim9script
       let var = 11
@@ -959,6 +1091,32 @@ def Test_expr6_vim9script()
       assert_equal(5, var)
   END
   CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      let var = 11 *
+      		22 /
+		3
+      assert_equal(80, var)
+  END
+  CheckScriptSuccess(lines)
+
+  # check white space
+  lines =<< trim END
+      vim9script
+      echo 5*6
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      echo 5 *6
+  END
+  CheckScriptFailure(lines, 'E1004:')
+  lines =<< trim END
+      vim9script
+      echo 5* 6
+  END
+  CheckScriptFailure(lines, 'E1004:')
 enddef
 
 def Test_expr6_float()
@@ -1152,6 +1310,10 @@ def Test_expr7_list()
   assert_equal(g:list_mixed, [1, 'b', false,])
   assert_equal('b', g:list_mixed[1])
 
+  echo [1,
+  	2] [3,
+		4]
+
   call CheckDefExecFailure(["let x = g:anint[3]"], 'E714:')
   call CheckDefFailure(["let x = g:list_mixed[xxx]"], 'E1001:')
   call CheckDefFailure(["let x = [1,2,3]"], 'E1069:')
@@ -1169,6 +1331,10 @@ def Test_expr7_list_vim9script()
 		22,
 		]
       assert_equal([11, 22], l)
+
+      echo [1,
+	    2] [3,
+		    4]
   END
   CheckScriptSuccess(lines)
 
@@ -1310,6 +1476,11 @@ def Test_expr_member()
 		  ])
   assert_equal(1, d
   	.one)
+  d = {'1': 1, '_': 2}
+  assert_equal(1, d
+  	.1)
+  assert_equal(2, d
+  	._)
 
   # getting the one member should clear the dict after getting the item
   assert_equal('one', #{one: 'one'}.one)
@@ -1330,10 +1501,16 @@ def Test_expr_member_vim9script()
       vim9script
       let d = #{one:
       		'one',
-		two: 'two'}
+		two: 'two',
+		1: 1,
+		_: 2}
       assert_equal('one', d.one)
       assert_equal('one', d
                             .one)
+      assert_equal(1, d
+                            .1)
+      assert_equal(2, d
+                            ._)
       assert_equal('one', d[
 			    'one'
 			    ])
@@ -1387,6 +1564,22 @@ enddef
 def Test_expr7_register()
   @a = 'register a'
   assert_equal('register a', @a)
+
+  let fname = expand('%')
+  assert_equal(fname, @%)
+
+  feedkeys(":echo 'some'\<CR>", "xt")
+  assert_equal("echo 'some'", @:)
+
+  normal axyz
+  assert_equal("xyz", @.)
+  call CheckDefFailure(["@. = 'yes'"], 'E354:')
+
+  @/ = 'slash'
+  assert_equal('slash', @/)
+
+  @= = 'equal'
+  assert_equal('equal', @=)
 enddef
 
 def Test_expr7_namespace()
@@ -1627,8 +1820,9 @@ enddef
 def Test_expr7_method_call()
   new
   setline(1, ['first', 'last'])
-  eval 'second'->append(1)
-  assert_equal(['first', 'second', 'last'], getline(1, '$'))
+  'second'->append(1)
+  "third"->append(2)
+  assert_equal(['first', 'second', 'third', 'last'], getline(1, '$'))
   bwipe!
 
   let bufnr = bufnr()

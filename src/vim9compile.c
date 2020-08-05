@@ -291,14 +291,21 @@ lookup_script(char_u *name, size_t len)
     int
 check_defined(char_u *p, size_t len, cctx_T *cctx)
 {
+    int c = p[len];
+
+    p[len] = NUL;
     if (lookup_script(p, len) == OK
 	    || (cctx != NULL
 		&& (lookup_local(p, len, cctx) != NULL
-		    || find_imported(p, len, cctx) != NULL)))
+		    || lookup_arg(p, len, NULL, NULL, NULL, cctx) == OK))
+	    || find_imported(p, len, cctx) != NULL
+	    || find_func_even_dead(p, FALSE, cctx) != NULL)
     {
-	semsg("E1073: imported name already defined: %s", p);
+	p[len] = c;
+	semsg(_(e_already_defined), p);
 	return FAIL;
     }
+    p[len] = c;
     return OK;
 }
 
@@ -1518,6 +1525,27 @@ generate_FUNCREF(cctx_T *cctx, int dfunc_idx)
     ((type_T **)stack->ga_data)[stack->ga_len] = &t_func_any;
     // TODO: argument and return types
     ++stack->ga_len;
+
+    return OK;
+}
+
+/*
+ * Generate an ISN_NEWFUNC instruction.
+ */
+    static int
+generate_NEWFUNC(cctx_T *cctx, char_u *lambda_name, char_u *func_name)
+{
+    isn_T	*isn;
+    char_u	*name;
+
+    RETURN_OK_IF_SKIP(cctx);
+    name = vim_strsave(lambda_name);
+    if (name == NULL)
+	return FAIL;
+    if ((isn = generate_instr(cctx, ISN_NEWFUNC)) == NULL)
+	return FAIL;
+    isn->isn_arg.newfunc.nf_lambda = name;
+    isn->isn_arg.newfunc.nf_global = func_name;
 
     return OK;
 }
@@ -3537,7 +3565,7 @@ compile_get_register(char_u **arg, cctx_T *cctx)
 	semsg(_(e_syntax_at), *arg - 1);
 	return FAIL;
     }
-    if (!valid_yank_reg(**arg, TRUE))
+    if (!valid_yank_reg(**arg, FALSE))
     {
 	emsg_invreg(**arg);
 	return FAIL;
@@ -3633,7 +3661,7 @@ get_vim_constant(char_u **arg, typval_T *rettv)
     }
 }
 
-    static exptype_T
+    exptype_T
 get_compare_type(char_u *p, int *len, int *type_is)
 {
     exptype_T	type = EXPR_UNKNOWN;
@@ -3758,7 +3786,7 @@ compile_subscript(
 	    if (next != NULL &&
 		    ((next[0] == '-' && next[1] == '>'
 				 && (next[2] == '{' || ASCII_ISALPHA(next[2])))
-		    || (next[0] == '.' && ASCII_ISALPHA(next[1]))))
+		    || (next[0] == '.' && eval_isdictc(next[1]))))
 	    {
 		next = next_line_from_context(cctx, TRUE);
 		if (next == NULL)
@@ -3834,7 +3862,7 @@ compile_subscript(
 		    return FAIL;
 	    }
 	}
-	else if (*p == '[')
+	else if (**arg == '[')
 	{
 	    garray_T	*stack = &cctx->ctx_type_stack;
 	    type_T	**typep;
@@ -3922,7 +3950,7 @@ compile_subscript(
 		return FAIL;
 	    // dictionary member: dict.name
 	    p = *arg;
-	    if (eval_isnamec1(*p))
+	    if (eval_isdictc(*p))
 		while (eval_isnamec(*p))
 		    MB_PTR_ADV(p);
 	    if (p == *arg)
@@ -4216,6 +4244,18 @@ compile_expr7(
 }
 
 /*
+ * Give the "white on both sides" error, taking the operator from "p[len]".
+ */
+    void
+error_white_both(char_u *op, int len)
+{
+    char_u	buf[10];
+
+    vim_strncpy(buf, op, len);
+    semsg(_(e_white_both), buf);
+}
+
+/*
  *	*	number multiplication
  *	/	number division
  *	%	number modulo
@@ -4247,10 +4287,7 @@ compile_expr6(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(op[1]))
 	{
-	    char_u buf[3];
-
-	    vim_strncpy(buf, op, 1);
-	    semsg(_(e_white_both), buf);
+	    error_white_both(op, 1);
 	    return FAIL;
 	}
 	*arg = skipwhite(op + 1);
@@ -4326,10 +4363,7 @@ compile_expr5(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(op[oplen]))
 	{
-	    char_u buf[3];
-
-	    vim_strncpy(buf, op, oplen);
-	    semsg(_(e_white_both), buf);
+	    error_white_both(op, oplen);
 	    return FAIL;
 	}
 
@@ -4458,10 +4492,7 @@ compile_expr4(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 
 	if (!IS_WHITE_OR_NUL(**arg) || !IS_WHITE_OR_NUL(p[len]))
 	{
-	    char_u buf[7];
-
-	    vim_strncpy(buf, p, len);
-	    semsg(_(e_white_both), buf);
+	    error_white_both(p, len);
 	    return FAIL;
 	}
 
@@ -4875,18 +4906,30 @@ exarg_getline(
     static char_u *
 compile_nested_function(exarg_T *eap, cctx_T *cctx)
 {
+    int		is_global = *eap->arg == 'g' && eap->arg[1] == ':';
     char_u	*name_start = eap->arg;
-    char_u	*name_end = to_name_end(eap->arg, FALSE);
-    char_u	*name = get_lambda_name();
+    char_u	*name_end = to_name_end(eap->arg, TRUE);
+    char_u	*lambda_name;
     lvar_T	*lvar;
     ufunc_T	*ufunc;
+    int		r;
+
+    // Only g:Func() can use a namespace.
+    if (name_start[1] == ':' && !is_global)
+    {
+	semsg(_(e_namespace), name_start);
+	return NULL;
+    }
+    if (check_defined(name_start, name_end - name_start, cctx) == FAIL)
+	return NULL;
 
     eap->arg = name_end;
     eap->getline = exarg_getline;
     eap->cookie = cctx;
     eap->skip = cctx->ctx_skip == SKIP_YES;
     eap->forceit = FALSE;
-    ufunc = def_function(eap, name);
+    lambda_name = get_lambda_name();
+    ufunc = def_function(eap, lambda_name);
 
     if (ufunc == NULL)
 	return NULL;
@@ -4894,16 +4937,30 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx)
 	    && compile_def_function(ufunc, TRUE, cctx) == FAIL)
 	return NULL;
 
-    // Define a local variable for the function reference.
-    lvar = reserve_local(cctx, name_start, name_end - name_start,
-						    TRUE, ufunc->uf_func_type);
+    if (is_global)
+    {
+	char_u *func_name = vim_strnsave(name_start + 2,
+						    name_end - name_start - 2);
 
-    if (generate_FUNCREF(cctx, ufunc->uf_dfunc_idx) == FAIL
-	    || generate_STORE(cctx, ISN_STORE, lvar->lv_idx, NULL) == FAIL)
-	return NULL;
+	if (func_name == NULL)
+	    r = FAIL;
+	else
+	    r = generate_NEWFUNC(cctx, lambda_name, func_name);
+    }
+    else
+    {
+	// Define a local variable for the function reference.
+	lvar = reserve_local(cctx, name_start, name_end - name_start,
+						    TRUE, ufunc->uf_func_type);
+	if (lvar == NULL)
+	    return NULL;
+	if (generate_FUNCREF(cctx, ufunc->uf_dfunc_idx) == FAIL)
+	    return NULL;
+	r = generate_STORE(cctx, ISN_STORE, lvar->lv_idx, NULL);
+    }
 
     // TODO: warning for trailing text?
-    return (char_u *)"";
+    return r == FAIL ? NULL : (char_u *)"";
 }
 
 /*
@@ -5013,7 +5070,12 @@ vim9_declare_error(char_u *name)
 	case 'w': scope = _("window"); break;
 	case 't': scope = _("tab"); break;
 	case 'v': scope = "v:"; break;
-	case '$': semsg(_(e_declare_env_var), name); return;
+	case '$': semsg(_(e_declare_env_var), name);
+		  return;
+	case '&': semsg(_("E1052: Cannot declare an option: %s"), name);
+		  return;
+	case '@': semsg(_("E1066: Cannot declare a register: %s"), name);
+		  return;
 	default: return;
     }
     semsg(_(e_declare_var), scope, name);
@@ -5035,6 +5097,8 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
     char_u	*ret = NULL;
     int		var_count = 0;
     int		var_idx;
+    int		scriptvar_sid = 0;
+    int		scriptvar_idx = -1;
     int		semicolon = 0;
     garray_T	*instr = &cctx->ctx_instr;
     garray_T    *stack = &cctx->ctx_type_stack;
@@ -5071,10 +5135,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 
     if (oplen > 0 && (!VIM_ISWHITE(*sp) || !VIM_ISWHITE(op[oplen])))
     {
-	char_u  buf[4];
-
-	vim_strncpy(buf, op, oplen);
-	semsg(_(e_white_both), buf);
+	error_white_both(op, oplen);
 	return NULL;
     }
 
@@ -5153,9 +5214,14 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	int		has_index = FALSE;
 	int		instr_count = -1;
 
-	p = (*var_start == '&' || *var_start == '$'
-			     || *var_start == '@') ? var_start + 1 : var_start;
-	p = to_name_end(p, TRUE);
+	if (*var_start == '@')
+	    p = var_start + 2;
+	else
+	{
+	    p = (*var_start == '&' || *var_start == '$')
+						   ? var_start + 1 : var_start;
+	    p = to_name_end(p, TRUE);
+	}
 
 	// "a: type" is declaring variable "a" with a type, not "a:".
 	if (is_decl && var_end == var_start + 2 && var_end[-1] == ':')
@@ -5173,6 +5239,8 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 
 	if (cctx->ctx_skip != SKIP_YES)
 	{
+	    int	    declare_error = FALSE;
+
 	    if (*var_start == '&')
 	    {
 		int	    cc;
@@ -5184,11 +5252,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		    emsg(_(e_const_option));
 		    goto theend;
 		}
-		if (is_decl)
-		{
-		    semsg(_("E1052: Cannot declare an option: %s"), var_start);
-		    goto theend;
-		}
+		declare_error = is_decl;
 		p = var_start;
 		p = find_option_end(&p, &opt_flags);
 		if (p == NULL)
@@ -5216,64 +5280,40 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	    {
 		dest = dest_env;
 		type = &t_string;
-		if (is_decl)
-		{
-		    vim9_declare_error(name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
 	    else if (*var_start == '@')
 	    {
-		if (!valid_yank_reg(var_start[1], TRUE))
+		if (!valid_yank_reg(var_start[1], FALSE) || var_start[1] == '.')
 		{
 		    emsg_invreg(var_start[1]);
 		    goto theend;
 		}
 		dest = dest_reg;
 		type = &t_string;
-		if (is_decl)
-		{
-		    semsg(_("E1066: Cannot declare a register: %s"), name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
-	    else if (STRNCMP(var_start, "g:", 2) == 0)
+	    else if (varlen > 1 && STRNCMP(var_start, "g:", 2) == 0)
 	    {
 		dest = dest_global;
-		if (is_decl)
-		{
-		    vim9_declare_error(name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
-	    else if (STRNCMP(var_start, "b:", 2) == 0)
+	    else if (varlen > 1 && STRNCMP(var_start, "b:", 2) == 0)
 	    {
 		dest = dest_buffer;
-		if (is_decl)
-		{
-		    vim9_declare_error(name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
-	    else if (STRNCMP(var_start, "w:", 2) == 0)
+	    else if (varlen > 1 && STRNCMP(var_start, "w:", 2) == 0)
 	    {
 		dest = dest_window;
-		if (is_decl)
-		{
-		    vim9_declare_error(name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
-	    else if (STRNCMP(var_start, "t:", 2) == 0)
+	    else if (varlen > 1 && STRNCMP(var_start, "t:", 2) == 0)
 	    {
 		dest = dest_tab;
-		if (is_decl)
-		{
-		    vim9_declare_error(name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
-	    else if (STRNCMP(var_start, "v:", 2) == 0)
+	    else if (varlen > 1 && STRNCMP(var_start, "v:", 2) == 0)
 	    {
 		typval_T	*vtv;
 		int		di_flags;
@@ -5290,15 +5330,12 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		dest = dest_vimvar;
 		vtv = get_vim_var_tv(vimvaridx);
 		type = typval2type_vimvar(vtv, cctx->ctx_type_list);
-		if (is_decl)
-		{
-		    vim9_declare_error(name);
-		    goto theend;
-		}
+		declare_error = is_decl;
 	    }
 	    else
 	    {
-		int idx;
+		int	    idx;
+		imported_T  *import = NULL;
 
 		for (idx = 0; reserved[idx] != NULL; ++idx)
 		    if (STRCMP(reserved[idx], name) == 0)
@@ -5337,16 +5374,37 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 			goto theend;
 		    }
 		}
-		else if (STRNCMP(var_start, "s:", 2) == 0
+		else if ((varlen > 1 && STRNCMP(var_start, "s:", 2) == 0)
 			|| lookup_script(var_start, varlen) == OK
-			|| find_imported(var_start, varlen, cctx) != NULL)
+			|| (import = find_imported(var_start, varlen, cctx))
+								       != NULL)
 		{
-		    dest = dest_script;
+		    char_u	*rawname = name + (name[1] == ':' ? 2 : 0);
+
 		    if (is_decl)
 		    {
-			semsg(_("E1054: Variable already declared in the script: %s"),
+			if ((varlen > 1 && STRNCMP(var_start, "s:", 2) == 0))
+			    semsg(_("E1101: Cannot declare a script variable in a function: %s"),
+									 name);
+			else
+			    semsg(_("E1054: Variable already declared in the script: %s"),
 									 name);
 			goto theend;
+		    }
+		    dest = dest_script;
+
+		    // existing script-local variables should have a type
+		    scriptvar_sid = current_sctx.sc_sid;
+		    if (import != NULL)
+			scriptvar_sid = import->imp_sid;
+		    scriptvar_idx = get_script_item_idx(scriptvar_sid,
+								rawname, TRUE);
+		    if (scriptvar_idx >= 0)
+		    {
+			scriptitem_T *si = SCRIPT_ITEM(scriptvar_sid);
+			svar_T	     *sv = ((svar_T *)si->sn_var_vals.ga_data)
+							       + scriptvar_idx;
+			type = sv->sv_type;
 		    }
 		}
 		else if (name[1] == ':' && name[2] != NUL)
@@ -5360,6 +5418,12 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		    semsg(_("E1089: unknown variable: %s"), name);
 		    goto theend;
 		}
+	    }
+
+	    if (declare_error)
+	    {
+		vim9_declare_error(name);
+		goto theend;
 	    }
 	}
 
@@ -5427,11 +5491,9 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 	    {
 		has_index = TRUE;
 		if (type->tt_member == NULL)
-		{
-		    semsg(_("E1088: cannot use an index on %s"), name);
-		    goto theend;
-		}
-		member_type = type->tt_member;
+		    member_type = &t_any;
+		else
+		    member_type = type->tt_member;
 	    }
 	    else
 	    {
@@ -5660,6 +5722,18 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		emsg(_(e_missbrac));
 		goto theend;
 	    }
+	    if (type == &t_any)
+	    {
+		type_T	    *idx_type = ((type_T **)stack->ga_data)[
+							    stack->ga_len - 1];
+		// Index on variable of unknown type: guess the type from the
+		// index type: number is dict, otherwise dict.
+		// TODO: should do the assignment at runtime
+		if (idx_type->tt_type == VAR_NUMBER)
+		    type = &t_list_any;
+		else
+		    type = &t_dict_any;
+	    }
 	    if (type->tt_type == VAR_DICT
 		    && may_generate_2STRING(-1, cctx) == FAIL)
 		goto theend;
@@ -5727,21 +5801,7 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 		    break;
 		case dest_script:
 		    {
-			char_u	    *rawname = name + (name[1] == ':' ? 2 : 0);
-			imported_T  *import = NULL;
-			int	    sid = current_sctx.sc_sid;
-			int	    idx;
-
-			if (name[1] != ':')
-			{
-			    import = find_imported(name, 0, cctx);
-			    if (import != NULL)
-				sid = import->imp_sid;
-			}
-
-			idx = get_script_item_idx(sid, rawname, TRUE);
-			// TODO: specific type
-			if (idx < 0)
+			if (scriptvar_idx < 0)
 			{
 			    char_u *name_s = name;
 
@@ -5757,14 +5817,14 @@ compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
 				    vim_snprintf((char *)name_s, len,
 								 "s:%s", name);
 			    }
-			    generate_OLDSCRIPT(cctx, ISN_STORES, name_s, sid,
-								       &t_any);
+			    generate_OLDSCRIPT(cctx, ISN_STORES, name_s,
+							  scriptvar_sid, type);
 			    if (name_s != name)
 				vim_free(name_s);
 			}
 			else
 			    generate_VIM9SCRIPT(cctx, ISN_STORESCRIPT,
-							     sid, idx, &t_any);
+					   scriptvar_sid, scriptvar_idx, type);
 		    }
 		    break;
 		case dest_local:
@@ -7192,7 +7252,10 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		int	oplen;
 		int	heredoc;
 
-		var_end = find_name_end(pskip, NULL, NULL,
+		if (ea.cmd[0] == '@')
+		    var_end = ea.cmd + 2;
+		else
+		    var_end = find_name_end(pskip, NULL, NULL,
 						FNE_CHECK_START | FNE_INCL_BR);
 		oplen = assignment_len(skipwhite(var_end), &heredoc);
 		if (oplen > 0)
@@ -7408,6 +7471,14 @@ compile_def_function(ufunc_T *ufunc, int set_return_type, cctx_T *outer_cctx)
 		    break;
 
 	    // TODO: other commands with an expression argument
+
+	    case CMD_append:
+	    case CMD_change:
+	    case CMD_insert:
+	    case CMD_t:
+	    case CMD_xit:
+		    not_in_vim9(&ea);
+		    goto erret;
 
 	    case CMD_SIZE:
 		    semsg(_("E476: Invalid command: %s"), ea.cmd);
@@ -7627,6 +7698,24 @@ delete_instr(isn_T *isn)
 		dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
 					       + isn->isn_arg.funcref.fr_func;
 		func_ptr_unref(dfunc->df_ufunc);
+	    }
+	    break;
+
+	case ISN_NEWFUNC:
+	    {
+		char_u  *lambda = isn->isn_arg.newfunc.nf_lambda;
+		ufunc_T *ufunc = find_func_even_dead(lambda, TRUE, NULL);
+
+		if (ufunc != NULL)
+		{
+		    // Clear uf_dfunc_idx so that the function is deleted.
+		    clear_def_function(ufunc);
+		    ufunc->uf_dfunc_idx = 0;
+		    func_ptr_unref(ufunc);
+		}
+
+		vim_free(lambda);
+		vim_free(isn->isn_arg.newfunc.nf_global);
 	    }
 	    break;
 
