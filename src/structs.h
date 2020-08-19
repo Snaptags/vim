@@ -1594,7 +1594,9 @@ typedef struct
     int		uf_tml_execed;	// line being timed was executed
 # endif
     sctx_T	uf_script_ctx;	// SCTX where function was defined,
-				// used for s: variables
+				// used for s: variables; sc_version changed
+				// for :function
+    int		uf_script_ctx_version;  // original sc_version of SCTX
     int		uf_refcount;	// reference count, see func_name_refcount()
 
     funccall_T	*uf_scoped;	// l: local variables for closure
@@ -2527,9 +2529,6 @@ struct file_buffer
     int		b_dev_valid;	// TRUE when b_dev has a valid number
     dev_t	b_dev;		// device number
     ino_t	b_ino;		// inode number
-#endif
-#ifdef FEAT_CW_EDITOR
-    FSSpec	b_FSSpec;	// MacOS File Identification
 #endif
 #ifdef VMS
     char	 b_fab_rfm;	// Record format
@@ -3787,15 +3786,6 @@ struct VimMenu
 # ifdef FEAT_TOOLBAR
     BPictureButton *button;
 # endif
-#endif
-#ifdef FEAT_GUI_MAC
-//  MenuHandle	id;
-//  short	index;		    // the item index within the father menu
-    short	menu_id;	    // the menu id to which this item belongs
-    short	submenu_id;	    // the menu id of the children (could be
-				    // get through some tricks)
-    MenuHandle	menu_handle;
-    MenuHandle	submenu_handle;
 #endif
 #ifdef FEAT_GUI_PHOTON
     PtWidget_t	*id;

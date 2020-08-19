@@ -1789,7 +1789,7 @@ do_one_cmd(
 	    --ea.cmd;
 	else if (ea.cmd > cmd)
 	{
-	    emsg(_(e_colon_required));
+	    emsg(_(e_colon_required_before_a_range));
 	    goto doend;
 	}
 	p = find_ex_command(&ea, NULL, lookup_scriptvar, NULL);
@@ -2087,7 +2087,7 @@ do_one_cmd(
 	// Do allow ":checktime" (it is postponed).
 	// Do allow ":edit" (check for an argument later).
 	// Do allow ":file" with no arguments (check for an argument later).
-	if (!(ea.argt & EX_CMDWIN)
+	if (!(ea.argt & (EX_CMDWIN | EX_LOCK_OK))
 		&& ea.cmdidx != CMD_checktime
 		&& ea.cmdidx != CMD_edit
 		&& ea.cmdidx != CMD_file
@@ -5022,7 +5022,7 @@ check_more(
     int	    n = ARGCOUNT - curwin->w_arg_idx - 1;
 
     if (!forceit && only_one_window()
-	    && ARGCOUNT > 1 && !arg_had_last && n >= 0 && quitmore == 0)
+	    && ARGCOUNT > 1 && !arg_had_last && n > 0 && quitmore == 0)
     {
 	if (message)
 	{
@@ -5412,6 +5412,15 @@ get_tabpage_arg(exarg_T *eap)
 	{
 	    if (STRCMP(p, "$") == 0)
 		tab_number = LAST_TAB_NR;
+	    else if (STRCMP(p, "#") == 0)
+		if (valid_tabpage(lastused_tabpage))
+		    tab_number = tabpage_index(lastused_tabpage);
+		else
+		{
+		    eap->errmsg = ex_errmsg(e_invargval, eap->arg);
+		    tab_number = 0;
+		    goto theend;
+		}
 	    else if (p == p_save || *p_save == '-' || *p != NUL
 		    || tab_number > LAST_TAB_NR)
 	    {
@@ -5969,7 +5978,7 @@ ex_recover(exarg_T *eap)
     static void
 ex_wrongmodifier(exarg_T *eap)
 {
-    eap->errmsg = _(e_invcmd);
+    eap->errmsg = _(e_invalid_command);
 }
 
 /*
@@ -7334,7 +7343,7 @@ ex_submagic(exarg_T *eap)
     int		magic_save = p_magic;
 
     p_magic = (eap->cmdidx == CMD_smagic);
-    do_sub(eap);
+    ex_substitute(eap);
     p_magic = magic_save;
 }
 

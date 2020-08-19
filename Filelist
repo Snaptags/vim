@@ -45,6 +45,7 @@ SRC_ALL =	\
 		src/drawline.c \
 		src/drawscreen.c \
 		src/edit.c \
+		src/errors.h \
 		src/eval.c \
 		src/evalbuffer.c \
 		src/evalfunc.c \
@@ -149,6 +150,7 @@ SRC_ALL =	\
 		src/vim9compile.c \
 		src/vim9execute.c \
 		src/vim9script.c \
+		src/vim9type.c \
 		src/viminfo.c \
 		src/winclip.c \
 		src/window.c \
@@ -172,12 +174,12 @@ SRC_ALL =	\
 		src/testdir/setup_gui.vim \
 		src/testdir/shared.vim \
 		src/testdir/vim9.vim \
+		src/testdir/script_util.vim \
 		src/testdir/summarize.vim \
 		src/testdir/term_util.vim \
 		src/testdir/view_util.vim \
 		src/testdir/test[0-9]*.ok \
-		src/testdir/test[0-9]*a.ok \
-		src/testdir/test49.vim \
+		src/testdir/test77a.ok \
 		src/testdir/test83-tags? \
 		src/testdir/test77a.com \
 		src/testdir/test_*.vim \
@@ -303,6 +305,7 @@ SRC_ALL =	\
 		src/proto/vim9compile.pro \
 		src/proto/vim9execute.pro \
 		src/proto/vim9script.pro \
+		src/proto/vim9type.pro \
 		src/proto/viminfo.pro \
 		src/proto/winclip.pro \
 		src/proto/window.pro \
@@ -638,13 +641,11 @@ SRC_HAIKU =	\
 SRC_MAC =	\
 		src/INSTALLmac.txt \
 		src/dehqx.py \
-		src/gui_mac.c \
 		src/os_mac_rsrc/*.icns \
 		src/os_mac.h \
 		src/os_mac.rsr.hqx \
 		src/os_mac_conv.c \
 		src/os_macosx.m \
-		src/proto/gui_mac.pro \
 		src/proto/os_mac_conv.pro \
 
 # source files for VMS (in the extra archive)

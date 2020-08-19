@@ -1065,7 +1065,8 @@ source_level(void *cookie)
 }
 
 /*
- * Return the readahead line.
+ * Return the readahead line. Note that the pointer may become invalid when
+ * getting the next line, if it's concatenated with the next one.
  */
     char_u *
 source_nextline(void *cookie)
@@ -1900,7 +1901,7 @@ ex_scriptversion(exarg_T *eap UNUSED)
     }
     if (in_vim9script())
     {
-	emsg(_("E1040: Cannot use :scriptversion after :vim9script"));
+	emsg(_(e_cannot_use_scriptversion_after_vim9script));
 	return;
     }
 
@@ -1991,7 +1992,7 @@ autoload_name(char_u *name)
     if (scriptname == NULL)
 	return NULL;
     STRCPY(scriptname, "autoload/");
-    STRCAT(scriptname, name);
+    STRCAT(scriptname, name[0] == 'g' && name[1] == ':' ? name + 2: name);
     for (p = scriptname + 9; (p = vim_strchr(p, AUTOLOAD_CHAR)) != NULL;
 								    q = p, ++p)
 	*p = '/';
@@ -2012,6 +2013,7 @@ script_autoload(
     char_u	*scriptname, *tofree;
     int		ret = FALSE;
     int		i;
+    int		ret_sid;
 
     // If there is no '#' after name[0] there is no package name.
     p = vim_strchr(name, AUTOLOAD_CHAR);
@@ -2039,7 +2041,8 @@ script_autoload(
 	}
 
 	// Try loading the package from $VIMRUNTIME/autoload/<name>.vim
-	if (source_runtime(scriptname, 0) == OK)
+	// Use "ret_sid" to avoid loading the same script again.
+	if (source_in_path(p_rtp, scriptname, 0, &ret_sid) == OK)
 	    ret = TRUE;
     }
 

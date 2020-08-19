@@ -1,4 +1,4 @@
-*vim9.txt*	For Vim version 8.2.  Last change: 2020 Jul 25
+*vim9.txt*	For Vim version 8.2.  Last change: 2020 Aug 15
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -14,7 +14,7 @@ features in Vim9 script.
 THIS IS STILL UNDER DEVELOPMENT - ANYTHING CAN BREAK - ANYTHING CAN CHANGE
 
 
-1   What is Vim9 script?		|vim9-script|
+1.  What is Vim9 script?		|vim9-script|
 2.  Differences				|vim9-differences|
 3.  New style functions			|fast-functions|
 4.  Types				|vim9-types|
@@ -70,10 +70,10 @@ comments start with #. >
 	let count = 0  # number of occurrences
 
 The reason is that a double quote can also be the start of a string. In many
-places, especially halfway an expression with a line break, it's hard to tell
-what the meaning is, since both a string and a comment can be followed by
-arbitrary text.  To avoid confusion only # comments are recognized.  This is
-the same as in shell scripts and Python programs.
+places, especially halfway through an expression with a line break, it's hard
+to tell what the meaning is, since both a string and a comment can be followed
+by arbitrary text.  To avoid confusion only # comments are recognized.  This
+is the same as in shell scripts and Python programs.
 
 In Vi # is a command to list text with numbers.  In Vim9 script you can use
 `:number` for that. >
@@ -104,11 +104,11 @@ The argument types and return type need to be specified.  The "any" type can
 be used, type checking will then be done at runtime, like with legacy
 functions.
 
-Arguments are accessed by name, without "a:".  There is no "a:" dictionary or
-"a:000" list.  Just like any other language.
+Arguments are accessed by name, without "a:", just like any other language.
+There is no "a:" dictionary or "a:000" list.
 
 Variable arguments are defined as the last argument, with a name and have a
-list type, similar to Typescript.  For example, a list of numbers: >
+list type, similar to TypeScript.  For example, a list of numbers: >
   	def MyFunc(...itemlist: list<number>)
 	   for item in itemlist
 	     ...
@@ -119,11 +119,12 @@ Functions and variables are script-local by default ~
 When using `:function` or `:def` to specify a new function at the script level
 in a Vim9 script, the function is local to the script, as if "s:" was
 prefixed.  Using the "s:" prefix is optional.  To define or use a global
-function or variable the "g:" prefix must be used.  For functions in an
+function or variable the "g:" prefix should be used.  For functions in an
 autoload script the "name#" prefix is sufficient. >
 	def ThisFunction()          # script-local
 	def s:ThisFunction()        # script-local
 	def g:ThatFunction()	    # global
+	def ThatFunction()	    # global if no local ThatFunction()
 	def scriptname#function()   # autoload
 
 When using `:function` or `:def` to specify a new function inside a function,
@@ -132,18 +133,16 @@ script-local function inside a function. It is possible to define a global
 function, using the "g:" prefix.
 
 When referring to a function and no "s:" or "g:" prefix is used, Vim will
-search for the function in this order:
-- Local to the current scope and outer scopes up to the function scope.
-- Local to the current script file.
-- Imported functions, see `:import`.
+prefer using a local function (in the function scope, script scope or
+imported) before looking for a global function.
 In all cases the function must be defined before used.  That is when it is
 first called or when `:defcompile` causes the call to be compiled.
 
-The result is that functions and variables without a namespace can always be
+The result is that functions and variables without a namespace can usually be
 found in the script, either defined there or imported.  Global functions and
-variables could be defined anywhere (good luck finding where!).
+variables could be defined anywhere (good luck finding out where!).
 
-Global functions can be still be defined and deleted at nearly any time.  In
+Global functions can still be defined and deleted at nearly any time.  In
 Vim9 script script-local functions are defined once when the script is sourced
 and cannot be deleted or replaced.
 
@@ -193,7 +192,8 @@ declaration.  Global, window, tab, buffer and Vim variables can only be used
 without `:let`, because they are not really declared, they can also be deleted
 with `:unlet`.
 
-Variables cannot shadow previously defined variables.
+Variables and functions cannot shadow previously defined or imported variables
+and functions.
 Variables may shadow Ex commands, rename the variable if needed.
 
 Global variables and user defined functions must be prefixed with "g:", also
@@ -232,16 +232,16 @@ identifier or can't be an Ex command.  Examples: >
 	'foobar'->Process()
 	('foobar')->Process()
 
-In rare case there is ambiguity between a function name and an Ex command, use
-":" to make clear you want to use the Ex command.  For example, there is both
-the `:substitute` command and the `substitute()` function.  When the line
-starts with `substitute(` this will use the function. Prepend a colon to use
-the command instead: >
+In the rare case there is ambiguity between a function name and an Ex command,
+prepend ":" to make clear you want to use the Ex command.  For example, there
+is both the `:substitute` command and the `substitute()` function.  When the
+line starts with `substitute(` this will use the function. Prepend a colon to
+use the command instead: >
 	:substitute(pattern (replacement (
 
 Note that while variables need to be defined before they can be used,
-functions can be called before being defined.  This is required to be able
-have cyclic dependencies between functions.  It is slightly less efficient,
+functions can be called before being defined.  This is required to allow
+for cyclic dependencies between functions.  It is slightly less efficient,
 since the function has to be looked up by name.  And a typo in the function
 name will only be found when the function is called.
 
@@ -261,8 +261,8 @@ number of arguments and any return type.  The function can be defined later.
 Automatic line continuation ~
 
 In many cases it is obvious that an expression continues on the next line.  In
-those cases there is no need to prefix the line with a backslash.  For
-example, when a list spans multiple lines: >
+those cases there is no need to prefix the line with a backslash
+|line-continuation|.  For example, when a list spans multiple lines: >
 	let mylist = [
 		'one',
 		'two',
@@ -394,7 +394,7 @@ White space is not allowed:
 
 Conditions and expressions ~
 
-Conditions and expression are mostly working like they do in JavaScript.  A
+Conditions and expressions are mostly working like they do in JavaScript.  A
 difference is made where JavaScript does not work like most people expect.
 Specifically, an empty list is falsey.
 
@@ -426,12 +426,21 @@ The boolean operators "||" and "&&" do not change the value: >
 	2 && 0   == 0
 	[] && 2  == []
 
-When using `..` for string concatenation the arguments are always converted to
-string. >
+When using `..` for string concatenation arguments of simple types are always
+converted to string. >
 	'hello ' .. 123  == 'hello 123'
-	'hello ' .. v:true  == 'hello true'
+	'hello ' .. v:true  == 'hello v:true'
+
+Simple types are string, float, special and bool.  For other types |string()|
+can be used.
 
 In Vim9 script one can use "true" for v:true and "false" for v:false.
+
+Indexing a string with [idx] or [idx, idx] uses character indexes instead of
+byte indexes. Example: >
+	echo 'bár'[1]
+In legacy script this results in the character 0xc3 (an illegal byte), in Vim9
+script this results in the string 'á'.
 
 
 What to watch out for ~
@@ -451,6 +460,11 @@ Ex command ranges need to be prefixed with a colon. >
 	:%s/a/b		" Vim9: substitute on all lines
 	'text'->func()	" Vim9: method call
 	:'t		" legacy Vim: jump to mark m
+
+Some Ex commands can be confused with assignments in Vim9 script: >
+	g:name = value  # assignment
+	g:pattern:cmd	# invalid command - ERROR
+	:g:pattern:cmd	# :global command
 
 Functions defined with `:def` compile the whole function.  Legacy functions
 can bail out, and the following lines are not parsed: >
@@ -486,7 +500,7 @@ For a workaround, split it in two functions: >
 THIS IS STILL UNDER DEVELOPMENT - ANYTHING CAN BREAK - ANYTHING CAN CHANGE
 
 							*:def*
-:def[!] {name}([arguments])[: {return-type}
+:def[!] {name}([arguments])[: {return-type}]
 			Define a new function by the name {name}.  The body of
 			the function follows in the next lines, until the
 			matching `:enddef`.
@@ -614,6 +628,8 @@ called in the same way the declaration is the same.
 
 Custom types can be defined with `:type`: >
 	:type MyList list<string>
+Custom types must start with a capital letter, to avoid name clashes with
+builtin types added later, similarly to user functions.
 {not implemented yet}
 
 And classes and interfaces can be used as types: >
@@ -633,6 +649,35 @@ And classes and interfaces can be used as types: >
 {not implemented yet}
 
 
+Variable types and type casting				*variable-types*
+
+Variables declared in Vim9 script or in a `:def` function have a type, either
+specified explicitly or inferred from the initialization.
+
+Global, buffer, window and tab page variables do not have a specific type, the
+value can be changed at any time, possibly changing the type.  Therefore, in
+compiled code the "any" type is assumed.
+
+This can be a problem when the "any" type is undesired and the actual type is
+expected to always be the same.  For example, when declaring a list: >
+	let l: list<number> = [1, g:two]
+This will give an error, because "g:two" has type "any".  To avoid this, use a
+type cast: >
+	let l: list<number> = [1, <number>g:two]
+<							*type-casting*
+The compiled code will then check that "g:two" is a number at runtime and give
+an error if it isn't.  This is called type casting.
+
+The syntax of a type cast is:  "<" {type} ">".  There cannot be white space
+after the "<" or before the ">" (to avoid them being confused with
+smaller-than and bigger-than operators).
+
+The semantics is that, if needed, a runtime type check is performed.  The
+value is not actually changed.  If you need to change the type, e.g. to change
+it to a string, use the |string()| function.  Or use |str2nr()| to convert a
+string to a number.
+
+
 Type inference						*type-inference*
 
 In general: Whenever the type is clear it can be omitted.  For example, when
@@ -640,6 +685,12 @@ declaring a variable and giving it a value: >
 	let var = 0		" infers number type
 	let var = 'hello'	" infers string type
 
+The type of a list and dictionary comes from the common type of the values.
+If the values all have the same type, that type is used for the list or
+dictionary.  If there is a mix of types, the "any" type is used. >
+	[1, 2, 3]	list<number>
+	['a', 'b', 'c']	list<string>
+	[1, 'x', 3]	list<any>
 
 ==============================================================================
 
@@ -744,7 +795,7 @@ actually needed.  A recommended mechanism:
 
 <   This goes in .../plugin/anyname.vim.  "anyname.vim" can be freely chosen.
 
-2. In the autocommand script do the actual work.  You can import items from
+2. In the autoload script do the actual work.  You can import items from
    other files to split up functionality in appropriate pieces. >
 	vim9script
         import FilterFunc from "../import/someother.vim"
@@ -763,6 +814,9 @@ actually needed.  A recommended mechanism:
 	   ...
 <   This goes in .../import/someother.vim.
 
+When compiling a `:def` function and a function in an autoload script is
+encountered, the script is not loaded until the `:def` function is called.
+
 
 Import in legacy Vim script ~
 
@@ -776,7 +830,7 @@ namespace will be used for the imported item, even when "s:" is not specified.
 
 The :def command ~
 
-Plugin writers have asked for a much faster Vim script.  Investigation have
+Plugin writers have asked for a much faster Vim script.  Investigations have
 shown that keeping the existing semantics of function calls make this close to
 impossible, because of the overhead involved with calling a function, setting
 up the local function scope and executing lines.  There are many details that
@@ -806,7 +860,7 @@ an "add number" instruction can be used, which is faster.  The error can be
 given at compile time, no error handling is needed at runtime.
 
 The syntax for types is similar to Java, since it is easy to understand and
-widely used.  The type names are what was used in Vim before, with some
+widely used.  The type names are what were used in Vim before, with some
 additions such as "void" and "bool".
 
 
@@ -857,7 +911,7 @@ are doing.  Some details are unexpected and can be fixed.  For example how the
 	...
 	return result || 0	" returns 1
 
-Vim9 script works like JavaScript/Typescript, keep the value: >
+Vim9 script works like JavaScript/TypeScript, keep the value: >
 	let result = 44
 	...
 	return result || 0	" returns 44
@@ -874,7 +928,7 @@ A problem of legacy Vim script is that by default all functions and variables
 are global.  It is possible to make them script-local, but then they are not
 available in other scripts.
 
-In Vim9 script a mechanism very similar to the Javascript import and export
+In Vim9 script a mechanism very similar to the JavaScript import and export
 mechanism is supported.  It is a variant to the existing `:source` command
 that works like one would expect:
 - Instead of making everything global by default, everything is script-local,

@@ -393,6 +393,24 @@ ret_remove(int argcount UNUSED, type_T **argtypes)
     return &t_any;
 }
 
+    static type_T *
+ret_getreg(int argcount, type_T **argtypes UNUSED)
+{
+    // Assume that if the third argument is passed it's non-zero
+    if (argcount == 3)
+	return &t_list_string;
+    return &t_string;
+}
+
+    static type_T *
+ret_maparg(int argcount, type_T **argtypes UNUSED)
+{
+    // Assume that if the fourth argument is passed it's non-zero
+    if (argcount == 4)
+	return &t_dict_any;
+    return &t_string;
+}
+
 static type_T *ret_f_function(int argcount, type_T **argtypes);
 
 /*
@@ -476,7 +494,7 @@ static funcentry_T global_functions[] =
     {"assert_equal",	2, 3, FEARG_2,	  ret_number,	f_assert_equal},
     {"assert_equalfile", 2, 3, FEARG_1,	  ret_number,	f_assert_equalfile},
     {"assert_exception", 1, 2, 0,	  ret_number,	f_assert_exception},
-    {"assert_fails",	1, 3, FEARG_1,	  ret_number,	f_assert_fails},
+    {"assert_fails",	1, 4, FEARG_1,	  ret_number,	f_assert_fails},
     {"assert_false",	1, 2, FEARG_1,	  ret_number,	f_assert_false},
     {"assert_inrange",	3, 4, FEARG_3,	  ret_number,	f_assert_inrange},
     {"assert_match",	2, 3, FEARG_2,	  ret_number,	f_assert_match},
@@ -641,7 +659,7 @@ static funcentry_T global_functions[] =
     {"getpid",		0, 0, 0,	  ret_number,	f_getpid},
     {"getpos",		1, 1, FEARG_1,	  ret_list_number,	f_getpos},
     {"getqflist",	0, 1, 0,	  ret_list_or_dict_0,	f_getqflist},
-    {"getreg",		0, 3, FEARG_1,	  ret_string,	f_getreg},
+    {"getreg",		0, 3, FEARG_1,	  ret_getreg,	f_getreg},
     {"getreginfo",	0, 1, FEARG_1,	  ret_dict_any,	f_getreginfo},
     {"getregtype",	0, 1, FEARG_1,	  ret_string,	f_getregtype},
     {"gettabinfo",	0, 1, FEARG_1,	  ret_list_dict_any,	f_gettabinfo},
@@ -697,7 +715,7 @@ static funcentry_T global_functions[] =
     {"js_encode",	1, 1, FEARG_1,	  ret_string,	f_js_encode},
     {"json_decode",	1, 1, FEARG_1,	  ret_any,	f_json_decode},
     {"json_encode",	1, 1, FEARG_1,	  ret_string,	f_json_encode},
-    {"keys",		1, 1, FEARG_1,	  ret_list_any,	f_keys},
+    {"keys",		1, 1, FEARG_1,	  ret_list_string, f_keys},
     {"last_buffer_nr",	0, 0, 0,	  ret_number,	f_last_buffer_nr}, // obsolete
     {"len",		1, 1, FEARG_1,	  ret_number,	f_len},
     {"libcall",		3, 3, FEARG_3,	  ret_string,	f_libcall},
@@ -720,7 +738,7 @@ static funcentry_T global_functions[] =
 #endif
 			},
     {"map",		2, 2, FEARG_1,	  ret_any,	f_map},
-    {"maparg",		1, 4, FEARG_1,	  ret_string,	f_maparg},
+    {"maparg",		1, 4, FEARG_1,	  ret_maparg,	f_maparg},
     {"mapcheck",	1, 3, FEARG_1,	  ret_string,	f_mapcheck},
     {"mapset",		3, 3, FEARG_1,	  ret_void,	f_mapset},
     {"match",		2, 4, FEARG_1,	  ret_any,	f_match},
@@ -1028,7 +1046,7 @@ static funcentry_T global_functions[] =
     {"test_settime",	1, 1, FEARG_1,	  ret_void,	f_test_settime},
     {"test_srand_seed",	0, 1, FEARG_1,	  ret_void,	f_test_srand_seed},
     {"test_unknown",	0, 0, 0,	  ret_any,	f_test_unknown},
-    {"test_void",	0, 0, 0,	  ret_any,	f_test_void},
+    {"test_void",	0, 0, 0,	  ret_void,	f_test_void},
     {"timer_info",	0, 1, FEARG_1,	  ret_list_dict_any, TIMER_FUNC(f_timer_info)},
     {"timer_pause",	2, 2, FEARG_1,	  ret_void,	TIMER_FUNC(f_timer_pause)},
     {"timer_start",	2, 3, FEARG_1,	  ret_number,	TIMER_FUNC(f_timer_start)},
@@ -3902,13 +3920,7 @@ f_has(typval_T *argvars, typval_T *rettv)
 		0
 #endif
 		},
-	{"gui_mac",
-#ifdef FEAT_GUI_MAC
-		1
-#else
-		0
-#endif
-		},
+	{"gui_mac", 0},
 	{"gui_motif",
 #ifdef FEAT_GUI_MOTIF
 		1

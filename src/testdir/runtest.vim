@@ -46,7 +46,9 @@
 
 
 " Without the +eval feature we can't run these tests, bail out.
-so small.vim
+silent! while 0
+  qa!
+silent! endwhile
 
 " In the GUI we can always change the screen size.
 if has('gui_running')
@@ -91,6 +93,9 @@ set encoding=utf-8
 let s:test_script_fname = expand('%')
 au! SwapExists * call HandleSwapExists()
 func HandleSwapExists()
+  if exists('g:ignoreSwapExists')
+    return
+  endif
   " Ignore finding a swap file for the test script (the user might be
   " editing it and do ":make test_name") and the output file.
   " Report finding another swap file and chose 'q' to avoid getting stuck.

@@ -110,7 +110,7 @@ one_function_arg(char_u *arg, garray_T *newargs, garray_T *argtypes, int skip)
 
 	if (VIM_ISWHITE(*p) && *skipwhite(p) == ':')
 	{
-	    semsg(_("E1059: No white space allowed before colon: %s"),
+	    semsg(_(e_no_white_space_allowed_before_colon_str),
 					    arg_copy == NULL ? arg : arg_copy);
 	    p = skipwhite(p);
 	}
@@ -119,7 +119,7 @@ one_function_arg(char_u *arg, garray_T *newargs, garray_T *argtypes, int skip)
 	    ++p;
 	    if (!VIM_ISWHITE(*p))
 	    {
-		semsg(_(e_white_after), ":");
+		semsg(_(e_white_space_required_after), ":");
 		return arg;
 	    }
 	    type = skipwhite(p);
@@ -128,7 +128,7 @@ one_function_arg(char_u *arg, garray_T *newargs, garray_T *argtypes, int skip)
 	}
 	else if (*skipwhite(p) != '=')
 	{
-	    semsg(_("E1077: Missing argument type for %s"),
+	    semsg(_(e_missing_argument_type_for_str),
 					    arg_copy == NULL ? arg : arg_copy);
 	    return arg;
 	}
@@ -212,7 +212,7 @@ get_function_args(
 		// ...name: list<type>
 		if (!ASCII_ISALPHA(*p))
 		{
-		    emsg(_("E1055: Missing name after ..."));
+		    emsg(_(e_missing_name_after_dots));
 		    break;
 		}
 
@@ -276,7 +276,7 @@ get_function_args(
 		if (!skip && in_vim9script()
 				      && !IS_WHITE_OR_NUL(*p) && *p != endchar)
 		{
-		    semsg(_(e_white_after), ",");
+		    semsg(_(e_white_space_required_after), ",");
 		    goto err_ret;
 		}
 	    }
@@ -686,7 +686,10 @@ get_func_tv(
     while (--argcount >= 0)
 	clear_tv(&argvars[argcount]);
 
-    *arg = skipwhite(argp);
+    if (in_vim9script())
+	*arg = argp;
+    else
+	*arg = skipwhite(argp);
     return ret;
 }
 
@@ -791,6 +794,7 @@ find_func_even_dead(char_u *name, int is_global, cctx_T *cctx)
     {
 	int	vim9script = in_vim9script();
 	char_u	*after_script = NULL;
+	long	sid = 0;
 
 	if (vim9script)
 	{
@@ -800,18 +804,15 @@ find_func_even_dead(char_u *name, int is_global, cctx_T *cctx)
 		return func;
 	}
 
-	if (!vim9script
-		&& name[0] == K_SPECIAL
+	if (name[0] == K_SPECIAL
 		&& name[1] == KS_EXTRA
 		&& name[2] == KE_SNR)
 	{
-	    long sid;
-
 	    // Caller changes s: to <SNR>99_name.
 
 	    after_script = name + 3;
 	    sid = getdigits(&after_script);
-	    if (sid == current_sctx.sc_sid && *after_script == '_')
+	    if (*after_script == '_')
 		++after_script;
 	    else
 		after_script = NULL;
@@ -819,8 +820,11 @@ find_func_even_dead(char_u *name, int is_global, cctx_T *cctx)
 	if (vim9script || after_script != NULL)
 	{
 	    // Find imported function before global one.
-	    imported = find_imported(
-			  after_script == NULL ? name : after_script, 0, cctx);
+	    if (after_script != NULL && sid != current_sctx.sc_sid)
+		imported = find_imported_in_script(after_script, 0, sid);
+	    else
+		imported = find_imported(after_script == NULL
+					       ? name : after_script, 0, cctx);
 	    if (imported != NULL && imported->imp_funcname != NULL)
 	    {
 		hi = hash_find(&func_hashtab, imported->imp_funcname);
@@ -1086,7 +1090,6 @@ func_clear_items(ufunc_T *fp)
     ga_clear_strings(&(fp->uf_args));
     ga_clear_strings(&(fp->uf_def_args));
     ga_clear_strings(&(fp->uf_lines));
-    VIM_CLEAR(fp->uf_name_exp);
     VIM_CLEAR(fp->uf_arg_types);
     VIM_CLEAR(fp->uf_def_arg_idx);
     VIM_CLEAR(fp->uf_va_name);
@@ -1142,7 +1145,10 @@ func_free(ufunc_T *fp, int force)
 	func_remove(fp);
 
     if ((fp->uf_flags & FC_DEAD) == 0 || force)
+    {
+	VIM_CLEAR(fp->uf_name_exp);
 	vim_free(fp);
+    }
 }
 
 /*
@@ -1170,7 +1176,7 @@ copy_func(char_u *lambda, char_u *global)
     ufunc_T *fp;
 
     if (ufunc == NULL)
-	semsg(_("E1102: lambda function not found: %s"), lambda);
+	semsg(_(e_lambda_function_not_found_str), lambda);
     else
     {
 	// TODO: handle ! to overwrite
@@ -2128,8 +2134,8 @@ call_func(
 		char_u *p = untrans_function_name(rfname);
 
 		// If using Vim9 script try not local to the script.
-		// TODO: should not do this if the name started with "s:".
-		if (p != NULL)
+		// Don't do this if the name starts with "s:".
+		if (p != NULL && (funcname[0] != 's' || funcname[1] != ':'))
 		    fp = find_func(p, is_global, NULL);
 	    }
 
@@ -2881,7 +2887,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 	    }
 	    else
 	    {
-		semsg(_("E1056: expected a type: %s"), ret_type);
+		semsg(_(e_expected_type_str), ret_type);
 		ret_type = NULL;
 	    }
 	}
@@ -2961,6 +2967,18 @@ def_function(exarg_T *eap, char_u *name_arg)
     // Save the starting line number.
     sourcing_lnum_top = SOURCING_LNUM;
 
+    // Detect having skipped over comment lines to find the return
+    // type.  Add NULL lines to keep the line count correct.
+    sourcing_lnum_off = get_sourced_lnum(eap->getline, eap->cookie);
+    if (SOURCING_LNUM < sourcing_lnum_off)
+    {
+	sourcing_lnum_off -= SOURCING_LNUM;
+	if (ga_grow(&newlines, sourcing_lnum_off) == FAIL)
+	    goto erret;
+	while (sourcing_lnum_off-- > 0)
+	    ((char_u **)(newlines.ga_data))[newlines.ga_len++] = NULL;
+    }
+
     indent = 2;
     nesting = 0;
     nesting_def[nesting] = (eap->cmdidx == CMD_def);
@@ -3000,7 +3018,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 	if (theline == NULL)
 	{
 	    if (eap->cmdidx == CMD_def)
-		emsg(_("E1057: Missing :enddef"));
+		emsg(_(e_missing_enddef));
 	    else
 		emsg(_("E126: Missing :endfunction"));
 	    goto erret;
@@ -3101,7 +3119,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 		if (*skipwhite(p) == '(')
 		{
 		    if (nesting == MAX_FUNC_NESTING - 1)
-			emsg(_("E1058: function nesting too deep"));
+			emsg(_(e_function_nesting_too_deep));
 		    else
 		    {
 			++nesting;
@@ -3256,7 +3274,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 			  || fp->uf_script_ctx.sc_seq == current_sctx.sc_seq)))
 	    {
 		if (vim9script)
-		    emsg_funcname(e_already_defined, name);
+		    emsg_funcname(e_name_already_defined, name);
 		else
 		    emsg_funcname(e_funcexts, name);
 		goto erret;
@@ -3508,6 +3526,7 @@ def_function(exarg_T *eap, char_u *name_arg)
     fp->uf_calls = 0;
     fp->uf_cleared = FALSE;
     fp->uf_script_ctx = current_sctx;
+    fp->uf_script_ctx_version = current_sctx.sc_version;
     fp->uf_script_ctx.sc_lnum += sourcing_lnum_top;
     if (is_export)
     {
@@ -3766,7 +3785,7 @@ ex_delfunction(exarg_T *eap)
 	}
 	if (fp->uf_flags & FC_VIM9)
 	{
-	    semsg(_("E1084: Cannot delete Vim9 script function %s"), eap->arg);
+	    semsg(_(e_cannot_delete_vim9_script_function_str), eap->arg);
 	    return;
 	}
 
@@ -4083,6 +4102,7 @@ ex_call(exarg_T *eap)
     if (!failed || eap->cstack->cs_trylevel > 0)
     {
 	// Check for trailing illegal characters and a following command.
+	arg = skipwhite(arg);
 	if (!ends_excmd2(eap->arg, arg))
 	{
 	    if (!failed)

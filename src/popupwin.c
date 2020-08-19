@@ -438,9 +438,10 @@ apply_move_options(win_T *wp, dict_T *d)
     if (nr != MAXCOL)
 	wp->w_wantcol = nr;
 
-    di = dict_find(d, (char_u *)"fixed", -1);
-    if (di != NULL)
-	wp->w_popup_fixed = dict_get_number(d, (char_u *)"fixed") != 0;
+
+    nr = dict_get_bool(d, (char_u *)"fixed", -1);
+    if (nr != -1)
+	wp->w_popup_fixed = nr != 0;
 
     {
 	poppos_T ppt = get_pos_entry(d, TRUE);
@@ -674,37 +675,31 @@ apply_general_options(win_T *wp, dict_T *dict)
 	wp->w_popup_title = vim_strsave(str);
     }
 
-    di = dict_find(dict, (char_u *)"wrap", -1);
-    if (di != NULL)
-    {
-	nr = dict_get_number(dict, (char_u *)"wrap");
+    nr = dict_get_bool(dict, (char_u *)"wrap", -1);
+    if (nr != -1)
 	wp->w_p_wrap = nr != 0;
-    }
 
-    di = dict_find(dict, (char_u *)"drag", -1);
-    if (di != NULL)
+    nr = dict_get_bool(dict, (char_u *)"drag", -1);
+    if (nr != -1)
     {
-	nr = dict_get_number(dict, (char_u *)"drag");
 	if (nr)
 	    wp->w_popup_flags |= POPF_DRAG;
 	else
 	    wp->w_popup_flags &= ~POPF_DRAG;
     }
 
-    di = dict_find(dict, (char_u *)"posinvert", -1);
-    if (di != NULL)
+    nr = dict_get_bool(dict, (char_u *)"posinvert", -1);
+    if (nr != -1)
     {
-	nr = dict_get_number(dict, (char_u *)"posinvert");
 	if (nr)
 	    wp->w_popup_flags |= POPF_POSINVERT;
 	else
 	    wp->w_popup_flags &= ~POPF_POSINVERT;
     }
 
-    di = dict_find(dict, (char_u *)"resize", -1);
-    if (di != NULL)
+    nr = dict_get_bool(dict, (char_u *)"resize", -1);
+    if (nr != -1)
     {
-	nr = dict_get_number(dict, (char_u *)"resize");
 	if (nr)
 	    wp->w_popup_flags |= POPF_RESIZE;
 	else
@@ -902,10 +897,9 @@ apply_general_options(win_T *wp, dict_T *dict)
 	    set_callback(&wp->w_filter_cb, &callback);
 	}
     }
-    di = dict_find(dict, (char_u *)"mapping", -1);
-    if (di != NULL)
+    nr = dict_get_bool(dict, (char_u *)"mapping", -1);
+    if (nr != -1)
     {
-	nr = dict_get_number(dict, (char_u *)"mapping");
 	if (nr)
 	    wp->w_popup_flags |= POPF_MAPPING;
 	else
@@ -950,7 +944,7 @@ apply_options(win_T *wp, dict_T *dict)
 
     apply_general_options(wp, dict);
 
-    nr = dict_get_number(dict, (char_u *)"hidden");
+    nr = dict_get_bool(dict, (char_u *)"hidden", FALSE);
     if (nr > 0)
 	wp->w_popup_flags |= POPF_HIDDEN;
 
@@ -1130,9 +1124,11 @@ popup_adjust_position(win_T *wp)
     int		org_leftcol = wp->w_leftcol;
     int		org_leftoff = wp->w_popup_leftoff;
     int		minwidth, minheight;
+    int		maxheight = Rows;
     int		wantline = wp->w_wantline;  // adjusted for textprop
     int		wantcol = wp->w_wantcol;    // adjusted for textprop
     int		use_wantcol = wantcol != 0;
+    int		adjust_height_for_top_aligned = FALSE;
 
     wp->w_winrow = 0;
     wp->w_wincol = 0;
@@ -1277,6 +1273,9 @@ popup_adjust_position(win_T *wp)
     }
 #endif
 
+    if (wp->w_maxheight > 0)
+	maxheight = wp->w_maxheight;
+
     // start at the desired first line
     if (wp->w_firstline > 0)
 	wp->w_topline = wp->w_firstline;
@@ -1353,11 +1352,11 @@ popup_adjust_position(win_T *wp)
 	    ++lnum;
 
 	// do not use the width of lines we're not going to show
-	if (wp->w_maxheight > 0
+	if (maxheight > 0
 		   && (wp->w_firstline >= 0
 			       ? lnum - wp->w_topline
 			       : wp->w_buffer->b_ml.ml_line_count - lnum)
-		       + wrapped >= wp->w_maxheight)
+		       + wrapped >= maxheight)
 	    break;
     }
 
@@ -1449,13 +1448,11 @@ popup_adjust_position(win_T *wp)
 								 + 1 + wrapped;
     if (minheight > 0 && wp->w_height < minheight)
 	wp->w_height = minheight;
-    if (wp->w_maxheight > 0 && wp->w_height > wp->w_maxheight)
-	wp->w_height = wp->w_maxheight;
+    if (maxheight > 0 && wp->w_height > maxheight)
+	wp->w_height = maxheight;
     w_height_before_limit = wp->w_height;
     if (wp->w_height > Rows - wp->w_winrow)
 	wp->w_height = Rows - wp->w_winrow;
-    if (wp->w_height != org_height)
-	win_comp_scroll(wp);
 
     if (center_vert)
     {
@@ -1477,9 +1474,12 @@ popup_adjust_position(win_T *wp)
 	    wp->w_height = wantline - extra_height;
 	}
 	else
+	{
 	    // Not enough space and more space on the other side: make top
 	    // aligned.
 	    wp->w_winrow = (wantline < 0 ? 0 : wantline) + 1;
+	    adjust_height_for_top_aligned = TRUE;
+	}
     }
     else if (wp->w_popup_pos == POPPOS_TOPRIGHT
 		|| wp->w_popup_pos == POPPOS_TOPLEFT)
@@ -1499,12 +1499,32 @@ popup_adjust_position(win_T *wp)
 	    }
 	}
 	else
+	{
 	    wp->w_winrow = wantline - 1;
+	    adjust_height_for_top_aligned = TRUE;
+	}
     }
+
+    if (adjust_height_for_top_aligned && wp->w_want_scrollbar
+			  && wp->w_winrow + wp->w_height + extra_height > Rows)
+    {
+	// Bottom of the popup goes below the last line, reduce the height and
+	// add a scrollbar.
+	wp->w_height = Rows - wp->w_winrow - extra_height;
+#ifdef FEAT_TERMINAL
+	if (wp->w_buffer->b_term == NULL)
+#endif
+	    wp->w_has_scrollbar = TRUE;
+    }
+
+    // make sure w_winrow is valid
     if (wp->w_winrow >= Rows)
 	wp->w_winrow = Rows - 1;
     else if (wp->w_winrow < 0)
 	wp->w_winrow = 0;
+
+    if (wp->w_height != org_height)
+	win_comp_scroll(wp);
 
     wp->w_popup_last_changedtick = CHANGEDTICK(wp->w_buffer);
     if (win_valid(wp->w_popup_prop_win))
@@ -3134,7 +3154,7 @@ invoke_popup_filter(win_T *wp, int c)
     call_callback(&wp->w_filter_cb, -1, &rettv, 2, argv);
     if (win_valid_popup(wp) && old_lnum != wp->w_cursor.lnum)
 	popup_highlight_curline(wp);
-    res = tv_get_number(&rettv);
+    res = tv_get_bool(&rettv);
 
     vim_free(argv[1].vval.v_string);
     clear_tv(&rettv);
@@ -3183,7 +3203,14 @@ popup_do_filter(int c)
 	    res = invoke_popup_filter(wp, c);
 
     if (must_redraw > was_must_redraw)
+    {
+	int save_got_int = got_int;
+
+	// Reset got_int to avoid a function used in the statusline aborts.
+	got_int = FALSE;
 	redraw_after_callback(FALSE);
+	got_int |= save_got_int;
+    }
     recursive = FALSE;
     KeyTyped = save_KeyTyped;
     return res;

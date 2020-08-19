@@ -237,6 +237,7 @@ void mbyte_im_set_active(int active_arg);
 #  include "vim9compile.pro"
 #  include "vim9execute.pro"
 #  include "vim9script.pro"
+#  include "vim9type.pro"
 # endif
 # include "window.pro"
 
@@ -321,9 +322,6 @@ extern char *vim_SelFile(Widget toplevel, char *prompt, char *init_path, int (*s
 #  endif
 #  ifdef FEAT_GUI_HAIKU
 #   include "gui_haiku.pro"
-#  endif
-#  ifdef FEAT_GUI_MAC
-#   include "gui_mac.pro"
 #  endif
 #  ifdef FEAT_GUI_X11
 #   include "gui_x11.pro"

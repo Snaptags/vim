@@ -1,4 +1,4 @@
-*todo.txt*      For Vim version 8.2.  Last change: 2020 Jul 26
+*todo.txt*      For Vim version 8.2.  Last change: 2020 Aug 15
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -38,25 +38,35 @@ browser use: https://github.com/vim/vim/issues/1234
 							*known-bugs*
 -------------------- Known bugs and current work -----------------------
 
+What is the way to get the character under the cursor?  With or without
+composing characters.  getline(".") and then use col(".") somehow?
+Add charidx() perhaps?
+
 Making everything work:
-- more items in https://github.com/vim/vim/issues/6507
-- More "goto failed" with check for trylevel.
-- memory leak in test_vim9_script
-- Check that when sourcing a Vim9 script, only the global items can be used.
+- Slice of list: [1, 2, 3][1:2].
+- Slice of string: "abc"[1:2].  (#6709)
+- Run the same tests in :def and Vim9 script, like in Test_expr7_not()
 - :put with a "=" register argument doesn't work, need to find the expression
   and compile it. (#6397)
 - At the script level, keep script variables local to the block they are
   declared in?  Need to remember what variables were declared and delete them
   when leaving the block.
 - Implement { } block at the script level.
+- In autocmd: use legacy syntax, not whatever the current script uses?
 - need to check type when a declaration specifies a type: #6507
 	let nr: number = 'asdf'
+- Make sure that in vim9script a function call without namespace only finds
+  the script-local function, not a global one.
 - Make map() give an error if the resulting type is wrong.
   Add mapnew() to create a new List/Dict for the result, which can have a
   different value type.
+- When defining an :autocmd or :command, how to specify using Vim9 syntax?
+  - always do this when defined in a Vim9 script
+  - add some command modifier.
+- For an :autocmd and :command argument, if a following line starts with "|"
+  append it.  It's like line continuation. (#6702)
 - Implement "export {one, two three}".
 - ISN_CHECKTYPE could use check_argtype()
-- Slice of list: [1, 2, 3][1:2].
 - give error for variable name:
       let p = function('NoSuchFunc')
 - Give runtime error if function argument is wrong.
@@ -78,6 +88,7 @@ Making everything work:
       ret[i] = string(i)
 - Appending to dict item doesn't work:
     let d[i] ..= value
+- Using ".." at script level doesn't convert arguments to a string.
 - Compile replacement of :s command: s/pat/\=expr/
 - Compile redir to local variable: var_redir_start().
 - Compile builtin functions that access local variables:
@@ -102,8 +113,6 @@ Making everything work:
 New syntax and functionality:
 Improve error checking:
 - "echo Func()" is an error if Func() does not return anything.
-Test:
-- Using a Vim9 autoload script (functions must be global).
 Also:
 - For range: make table of first ASCII character with flag to quickly check if
   it can be a Vim9 command. E.g. "+" can, but "." can't.
@@ -116,8 +125,6 @@ Also:
 - Test each level of expressions properly, with type checking
 - Test try/catch and throw better, also nested.
   Test return inside try/finally jumps to finally and then returns.
-- call autoload function.
-- Implement more expressions, e.g. [a:b]
 - can use func as reference:
 	def SomeFunc() ...
 	map(list, SomeFunc)
@@ -154,6 +161,8 @@ Popup windows:
   positioned?  PopupNew?  Could be used to set some options or move it out of
   the way. (#5737)
   However, it may also cause trouble, changing the popup of another plugin.
+- Width is not computed correctly when minwidth and maxwidth are &columns
+  and padding and a scrollbar are used.  (#6676)
 - Add a way to use popup_menu() synchronously: instead of invoking the
   callback, return the choice. (Ben Jackson, #6534)
 - Use popup (or popup menu) for command line completion
@@ -169,7 +178,7 @@ Popup windows:
 - Figure out the size and position better if wrapping inserts indent
 
 Text properties:
-- :goto does not go to the right place when test properties are present.
+- :goto does not go to the right place when text properties are present.
   (#5930)
 - "cc" does not call inserted_bytes(). (Axel Forsman, #5763)
 - Get E685 with a sequence of commands. (#5674)
@@ -200,7 +209,7 @@ Terminal debugger:
   an already running program. (M. Kelly)
 - When only gdb window exists, on "quit" edit another buffer.
 - Use a sign group
-- Termdebug does not work when Vim was build with mzscheme: gdb hangs just
+- Termdebug does not work when Vim was built with mzscheme: gdb hangs just
   after "run".  Everything else works, including communication channel.  Not
   initializing mzscheme avoid the problem, thus it's not some #ifdef.
 - Add support for lldb?  issue #3565
@@ -255,9 +264,14 @@ Terminal emulator window:
 Error numbers available:
 E610, E611, E653
 
+Clean up empty entries in testdir/Make_all.mak
+
 Remove SPACE_IN_FILENAME ? It is only used for completion.
 
 Patch to use collaction based sorting. (Christian Brabandt, #6229)
+
+Add 'termguiattr' option, use "gui=" attributes in the terminal?  Would work
+with 'termguicolors'. #1740
 
 Can we detect true color support?  https://gist.github.com/XVilka/8346728
 Try setting a color then request the current color, like using t_u7.
@@ -333,6 +347,9 @@ character. (#6154)
 
 undo result wrong: Masato Nishihata, #4798
 
+After recovering from a swap file the undofile should not be used, it causes
+corruption.  (#6631)
+
 When 'lazyredraw' is set sometimes the title is not updated.
 (Jason Franklin, 2020 Feb 3)  Looks like a race condition.
 
@@ -392,6 +409,9 @@ Also put :argadd commands at the start for all buffers, so that their order
 remains equal?  Then %argdel to clean it up.  Do try this with 'hidden' set.
 Also #4994: window-local options not always restored, related to using :badd.
 Also #5326: netrw buffers are not restored.
+
+Alternate file is not set in the session file.  Use setwintabvar("@#") ?
+(#6714)
 
 When 'backupdir' has a path ending in double slash (meaning: use full path of
 the file) combined with 'patchmode' the file name is wrong. (#5791)
@@ -1471,7 +1491,7 @@ Zero-out krypt key information when no longer in use. (Ben Fritz, 2017 May 15)
 
 Add stronger encryption.  Could use libsodium (NaCl).
 https://github.com/jedisct1/libsodium/
-Possibly include the needed code so that it can be build everywhere.
+Possibly include the needed code so that it can be built everywhere.
 
 Add a way to restart a timer.  It's similar to timer_stop() and timer_start(),
 but the reference remains valid.
@@ -2854,9 +2874,6 @@ Jun 18)
 
 If the variable "g:x#y#z" exists completion after ":echo g:x#" doesn't work.
 
-Feature request: Command to go to previous tab, like what CTRL-W p does for
-windows. (Adam George)
-
 In debug mode, using CTRL-R = to evaluate a function causes stepping through
 the function. (Hari Krishna Dara, 2006 Jun 28)
 
@@ -3832,9 +3849,7 @@ Macintosh:
     two lines at a time.  "k" doesn't do this. (Cory T. Echols)
 8   When write_viminfo() is used while there are many orphaned viminfo
     tempfiles writing the viminfo file fails.  Give a clear error message so
-    that the user knows he has to delete the files.
-7   It's possible to redefine a script-local function with ":func
-    <SNR>123_Test()". (Krishna)  Disallow this.
+    that the user knows the files have to be deleted.
 
 
 I can't reproduce these (if you can, let me know how!):
@@ -4005,7 +4020,7 @@ Help:
 -   Support a way to view (and edit) .info files.
 -   Implement a "sticky" help window, some help text lines that are always
     displayed in a window with fixed height. (Guckes)  Use "~/.vimhelp" file,
-    user can edit it to insert his favorite commands, new account can contain a
+    user can edit it to insert favorite commands, new account can contain a
     default contents.
 -   Make 'winminheight' a local option, so that the user can set a minimal
     height for the help window (and other windows).
@@ -5673,7 +5688,7 @@ Buffer list:
     Also for other windows: ":inwin {winnr} {cmd}".  How to make sure that
     this works properly for all commands, and still be able to return to the
     current buffer/window?  E.g.: ":inbuf xxx only".
-8   Add File.{recent_files} menu entries: Recently edited files.
+8   Add File.{recent-files} menu entries: Recently edited files.
     Ron Aaron has a plugin for this: mru.vim.
 8   Unix: Check all uses of fnamecmp() and fnamencmp() if they should check
     inode too.
@@ -5772,7 +5787,7 @@ Modelines:
     .cpp files.
 -   Support the "abbreviate" command in modelines (Kearns).  Careful for
     characters after <Esc>, that is a security leak.
--   Add option setting to ask user if he wants to have the modelines executed
+-   Add an option setting to ask the user if the modelines are to be executed
     or not.  Same for .exrc in local dir.
 
 

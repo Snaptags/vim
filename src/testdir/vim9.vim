@@ -1,23 +1,37 @@
 " Utility functions for testing vim9 script
 
-" Check that "lines" inside ":def" results in an "error" message.
-func CheckDefFailure(lines, error)
+" Check that "lines" inside ":def" has no error.
+func CheckDefSuccess(lines)
   call writefile(['def Func()'] + a:lines + ['enddef', 'defcompile'], 'Xdef')
-  call assert_fails('so Xdef', a:error, a:lines)
+  so Xdef
+  call Func()
+  call delete('Xdef')
+endfunc
+
+" Check that "lines" inside ":def" results in an "error" message.
+" If "lnum" is given check that the error is reported for this line.
+" Add a line before and after to make it less likely that the line number is
+" accidentally correct.
+func CheckDefFailure(lines, error, lnum = -3)
+  call writefile(['def Func()', '# comment'] + a:lines + ['#comment', 'enddef', 'defcompile'], 'Xdef')
+  call assert_fails('so Xdef', a:error, a:lines, a:lnum + 1)
   call delete('Xdef')
 endfunc
 
 " Check that "lines" inside ":def" results in an "error" message when executed.
-func CheckDefExecFailure(lines, error)
-  call writefile(['def Func()'] + a:lines + ['enddef'], 'Xdef')
+" If "lnum" is given check that the error is reported for this line.
+" Add a line before and after to make it less likely that the line number is
+" accidentally correct.
+func CheckDefExecFailure(lines, error, lnum = -3)
+  call writefile(['def Func()', '# comment'] + a:lines + ['#comment', 'enddef'], 'Xdef')
   so Xdef
-  call assert_fails('call Func()', a:error, a:lines)
+  call assert_fails('call Func()', a:error, a:lines, a:lnum + 1)
   call delete('Xdef')
 endfunc
 
-def CheckScriptFailure(lines: list<string>, error: string)
+def CheckScriptFailure(lines: list<string>, error: string, lnum = -3)
   writefile(lines, 'Xdef')
-  assert_fails('so Xdef', error, lines)
+  assert_fails('so Xdef', error, lines, lnum)
   delete('Xdef')
 enddef
 
