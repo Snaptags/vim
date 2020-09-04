@@ -97,6 +97,7 @@ static void f_getreg(typval_T *argvars, typval_T *rettv);
 static void f_getreginfo(typval_T *argvars, typval_T *rettv);
 static void f_getregtype(typval_T *argvars, typval_T *rettv);
 static void f_gettagstack(typval_T *argvars, typval_T *rettv);
+static void f_gettext(typval_T *argvars, typval_T *rettv);
 static void f_haslocaldir(typval_T *argvars, typval_T *rettv);
 static void f_hasmapto(typval_T *argvars, typval_T *rettv);
 static void f_hlID(typval_T *argvars, typval_T *rettv);
@@ -564,6 +565,7 @@ static funcentry_T global_functions[] =
     {"ch_status",	1, 2, FEARG_1,	  ret_string,	JOB_FUNC(f_ch_status)},
     {"changenr",	0, 0, 0,	  ret_number,	f_changenr},
     {"char2nr",		1, 2, FEARG_1,	  ret_number,	f_char2nr},
+    {"charclass",	1, 1, FEARG_1,	  ret_number,	f_charclass},
     {"chdir",		1, 1, FEARG_1,	  ret_string,	f_chdir},
     {"cindent",		1, 1, FEARG_1,	  ret_number,	f_cindent},
     {"clearmatches",	0, 1, FEARG_1,	  ret_void,	f_clearmatches},
@@ -666,6 +668,7 @@ static funcentry_T global_functions[] =
     {"gettabvar",	2, 3, FEARG_1,	  ret_any,	f_gettabvar},
     {"gettabwinvar",	3, 4, FEARG_1,	  ret_any,	f_gettabwinvar},
     {"gettagstack",	0, 1, FEARG_1,	  ret_dict_any,	f_gettagstack},
+    {"gettext",		1, 1, FEARG_1,	  ret_string,	f_gettext},
     {"getwininfo",	0, 1, FEARG_1,	  ret_list_dict_any,	f_getwininfo},
     {"getwinpos",	0, 1, FEARG_1,	  ret_list_number,	f_getwinpos},
     {"getwinposx",	0, 0, 0,	  ret_number,	f_getwinposx},
@@ -886,6 +889,7 @@ static funcentry_T global_functions[] =
     {"serverlist",	0, 0, 0,	  ret_string,	f_serverlist},
     {"setbufline",	3, 3, FEARG_3,	  ret_number,	f_setbufline},
     {"setbufvar",	3, 3, FEARG_3,	  ret_void,	f_setbufvar},
+    {"setcellwidths",	1, 1, FEARG_1,	  ret_void,	f_setcellwidths},
     {"setcharsearch",	1, 1, FEARG_1,	  ret_void,	f_setcharsearch},
     {"setcmdpos",	1, 1, FEARG_1,	  ret_number,	f_setcmdpos},
     {"setenv",		2, 2, FEARG_2,	  ret_void,	f_setenv},
@@ -950,7 +954,7 @@ static funcentry_T global_functions[] =
     {"stridx",		2, 3, FEARG_1,	  ret_number,	f_stridx},
     {"string",		1, 1, FEARG_1,	  ret_string,	f_string},
     {"strlen",		1, 1, FEARG_1,	  ret_number,	f_strlen},
-    {"strpart",		2, 3, FEARG_1,	  ret_string,	f_strpart},
+    {"strpart",		2, 4, FEARG_1,	  ret_string,	f_strpart},
     {"strptime",	2, 2, FEARG_1,	  ret_number,
 #ifdef HAVE_STRPTIME
 	    f_strptime
@@ -2198,13 +2202,12 @@ execute_redir_str(char_u *value, int value_len)
  * Called by do_cmdline() to get the next line.
  * Returns allocated string, or NULL for end of function.
  */
-
     static char_u *
 get_list_line(
     int	    c UNUSED,
     void    *cookie,
     int	    indent UNUSED,
-    int	    do_concat UNUSED)
+    getline_opt_T options UNUSED)
 {
     listitem_T **p = (listitem_T **)cookie;
     listitem_T *item = *p;
@@ -2431,7 +2434,7 @@ f_expand(typval_T *argvars, typval_T *rettv)
     rettv->v_type = VAR_STRING;
     if (argvars[1].v_type != VAR_UNKNOWN
 	    && argvars[2].v_type != VAR_UNKNOWN
-	    && tv_get_number_chk(&argvars[2], &error)
+	    && tv_get_bool_chk(&argvars[2], &error)
 	    && !error)
 	rettv_list_set(rettv, NULL);
 
@@ -2455,7 +2458,7 @@ f_expand(typval_T *argvars, typval_T *rettv)
 	// When the optional second argument is non-zero, don't remove matches
 	// for 'wildignore' and don't put matches for 'suffixes' at the end.
 	if (argvars[1].v_type != VAR_UNKNOWN
-				    && tv_get_number_chk(&argvars[1], &error))
+				    && tv_get_bool_chk(&argvars[1], &error))
 	    options |= WILD_KEEP_ALL;
 	if (!error)
 	{
@@ -3078,12 +3081,7 @@ f_getchangelist(typval_T *argvars, typval_T *rettv)
     if (argvars[0].v_type == VAR_UNKNOWN)
 	buf = curbuf;
     else
-    {
-	(void)tv_get_number(&argvars[0]);    // issue errmsg if type error
-	++emsg_off;
-	buf = tv_get_buf(&argvars[0], FALSE);
-	--emsg_off;
-    }
+	buf = tv_get_buf_from_arg(&argvars[0]);
     if (buf == NULL)
 	return;
 
@@ -3338,9 +3336,9 @@ f_getreg(typval_T *argvars, typval_T *rettv)
 	error = strregname == NULL;
 	if (argvars[1].v_type != VAR_UNKNOWN)
 	{
-	    arg2 = (int)tv_get_number_chk(&argvars[1], &error);
+	    arg2 = (int)tv_get_bool_chk(&argvars[1], &error);
 	    if (!error && argvars[2].v_type != VAR_UNKNOWN)
-		return_list = (int)tv_get_number_chk(&argvars[2], &error);
+		return_list = (int)tv_get_bool_chk(&argvars[2], &error);
 	}
     }
     else
@@ -3434,6 +3432,26 @@ f_gettagstack(typval_T *argvars, typval_T *rettv)
     }
 
     get_tagstack(wp, rettv->vval.v_dict);
+}
+
+/*
+ * "gettext()" function
+ */
+    static void
+f_gettext(typval_T *argvars, typval_T *rettv)
+{
+    if (argvars[0].v_type != VAR_STRING
+	    || argvars[0].vval.v_string == NULL
+	    || *argvars[0].vval.v_string == NUL)
+    {
+	semsg(_(e_invarg2), tv_get_string(&argvars[0]));
+    }
+    else
+    {
+	rettv->v_type = VAR_STRING;
+	rettv->vval.v_string = vim_strsave(
+					(char_u *)_(argvars[0].vval.v_string));
+    }
 }
 
 // for VIM_VERSION_ defines
@@ -4790,7 +4808,7 @@ f_hasmapto(typval_T *argvars, typval_T *rettv)
     {
 	mode = tv_get_string_buf(&argvars[1], buf);
 	if (argvars[2].v_type != VAR_UNKNOWN)
-	    abbr = (int)tv_get_number(&argvars[2]);
+	    abbr = (int)tv_get_bool(&argvars[2]);
     }
 
     if (map_to_exists(name, mode, abbr))
@@ -4926,7 +4944,7 @@ f_index(typval_T *argvars, typval_T *rettv)
 	    item = list_find(l, (long)tv_get_number_chk(&argvars[2], &error));
 	    idx = l->lv_u.mat.lv_idx;
 	    if (argvars[3].v_type != VAR_UNKNOWN)
-		ic = (int)tv_get_number_chk(&argvars[3], &error);
+		ic = (int)tv_get_bool_chk(&argvars[3], &error);
 	    if (error)
 		item = NULL;
 	}
@@ -7428,7 +7446,7 @@ f_setreg(typval_T *argvars, typval_T *rettv)
 		regname = pointreg;
 	    }
 	}
-	else if (dict_get_number(d, (char_u *)"isunnamed"))
+	else if (dict_get_bool(d, (char_u *)"isunnamed", -1) > 0)
 	    pointreg = regname;
     }
     else
@@ -8271,10 +8289,8 @@ f_strpart(typval_T *argvars, typval_T *rettv)
     else
 	len = slen - n;	    // default len: all bytes that are available.
 
-    /*
-     * Only return the overlap between the specified part and the actual
-     * string.
-     */
+    // Only return the overlap between the specified part and the actual
+    // string.
     if (n < 0)
     {
 	len += n;
@@ -8286,6 +8302,16 @@ f_strpart(typval_T *argvars, typval_T *rettv)
 	len = 0;
     else if (n + len > slen)
 	len = slen - n;
+
+    if (argvars[2].v_type != VAR_UNKNOWN && argvars[3].v_type != VAR_UNKNOWN)
+    {
+	int off;
+
+	// length in characters
+	for (off = n; off < slen && len > 0; --len)
+	    off += mb_ptr2len(p + off);
+	len = off - n;
+    }
 
     rettv->v_type = VAR_STRING;
     rettv->vval.v_string = vim_strnsave(p + n, len);

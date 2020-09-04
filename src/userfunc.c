@@ -119,7 +119,7 @@ one_function_arg(char_u *arg, garray_T *newargs, garray_T *argtypes, int skip)
 	    ++p;
 	    if (!VIM_ISWHITE(*p))
 	    {
-		semsg(_(e_white_space_required_after), ":");
+		semsg(_(e_white_space_required_after_str), ":");
 		return arg;
 	    }
 	    type = skipwhite(p);
@@ -276,7 +276,7 @@ get_function_args(
 		if (!skip && in_vim9script()
 				      && !IS_WHITE_OR_NUL(*p) && *p != endchar)
 		{
-		    semsg(_(e_white_space_required_after), ",");
+		    semsg(_(e_white_space_required_after_str), ",");
 		    goto err_ret;
 		}
 	    }
@@ -623,6 +623,7 @@ get_func_tv(
     int		ret = OK;
     typval_T	argvars[MAX_FUNC_ARGS + 1];	// vars for arguments
     int		argcount = 0;		// number of arguments found
+    int		vim9script = in_vim9script();
 
     /*
      * Get the arguments.
@@ -644,10 +645,25 @@ get_func_tv(
 	++argcount;
 	// The comma should come right after the argument, but this wasn't
 	// checked previously, thus only enforce it in Vim9 script.
-	if (!in_vim9script())
+	if (vim9script)
+	{
+	    if (*argp != ',' && *skipwhite(argp) == ',')
+	    {
+		semsg(_(e_no_white_space_allowed_before_str), ",");
+		ret = FAIL;
+		break;
+	    }
+	}
+	else
 	    argp = skipwhite(argp);
 	if (*argp != ',')
 	    break;
+	if (vim9script && !IS_WHITE_OR_NUL(argp[1]))
+	{
+	    semsg(_(e_white_space_required_after_str), ",");
+	    ret = FAIL;
+	    break;
+	}
     }
     argp = skipwhite_and_linebreak(argp, evalarg);
     if (*argp == ')')
@@ -792,11 +808,12 @@ find_func_even_dead(char_u *name, int is_global, cctx_T *cctx)
 
     if (!is_global)
     {
-	int	vim9script = in_vim9script();
 	char_u	*after_script = NULL;
 	long	sid = 0;
+	int	find_script_local = in_vim9script()
+				     && eval_isnamec1(*name) && name[1] != ':';
 
-	if (vim9script)
+	if (find_script_local)
 	{
 	    // Find script-local function before global one.
 	    func = find_func_with_sid(name, current_sctx.sc_sid);
@@ -817,7 +834,7 @@ find_func_even_dead(char_u *name, int is_global, cctx_T *cctx)
 	    else
 		after_script = NULL;
 	}
-	if (vim9script || after_script != NULL)
+	if (find_script_local || after_script != NULL)
 	{
 	    // Find imported function before global one.
 	    if (after_script != NULL && sid != current_sctx.sc_sid)
@@ -1298,17 +1315,10 @@ call_user_func(
 
     if (fp->uf_def_status != UF_NOT_COMPILED)
     {
-	estack_push_ufunc(fp, 1);
-	save_current_sctx = current_sctx;
-	current_sctx = fp->uf_script_ctx;
-
 	// Execute the function, possibly compiling it first.
 	call_def_function(fp, argcount, argvars, funcexe->partial, rettv);
 	--depth;
 	current_funccal = fc->caller;
-
-	estack_pop();
-	current_sctx = save_current_sctx;
 	free_funccal(fc);
 	return;
     }
@@ -2651,7 +2661,7 @@ def_function(exarg_T *eap, char_u *name_arg)
     static int	func_nr = 0;	    // number for nameless function
     int		paren;
     hashitem_T	*hi;
-    int		do_concat = TRUE;
+    getline_opt_T getline_options = GETLINE_CONCAT_CONT;
     linenr_T	sourcing_lnum_off;
     linenr_T	sourcing_lnum_top;
     int		is_heredoc = FALSE;
@@ -3008,9 +3018,10 @@ def_function(exarg_T *eap, char_u *name_arg)
 	{
 	    vim_free(line_to_free);
 	    if (eap->getline == NULL)
-		theline = getcmdline(':', 0L, indent, do_concat);
+		theline = getcmdline(':', 0L, indent, getline_options);
 	    else
-		theline = eap->getline(':', eap->cookie, indent, do_concat);
+		theline = eap->getline(':', eap->cookie, indent,
+							      getline_options);
 	    line_to_free = theline;
 	}
 	if (KeyTyped)
@@ -3053,7 +3064,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 		{
 		    VIM_CLEAR(skip_until);
 		    VIM_CLEAR(heredoc_trimmed);
-		    do_concat = TRUE;
+		    getline_options = GETLINE_CONCAT_CONT;
 		    is_heredoc = FALSE;
 		}
 	    }
@@ -3178,7 +3189,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 		    skip_until = vim_strsave((char_u *)".");
 		else
 		    skip_until = vim_strnsave(p, skiptowhite(p) - p);
-		do_concat = FALSE;
+		getline_options = GETLINE_NONE;
 		is_heredoc = TRUE;
 	    }
 
@@ -3205,7 +3216,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 						 skipwhite(theline) - theline);
 		    }
 		    skip_until = vim_strnsave(p, skiptowhite(p) - p);
-		    do_concat = FALSE;
+		    getline_options = GETLINE_NONE;
 		    is_heredoc = TRUE;
 		}
 	    }
@@ -3274,7 +3285,7 @@ def_function(exarg_T *eap, char_u *name_arg)
 			  || fp->uf_script_ctx.sc_seq == current_sctx.sc_seq)))
 	    {
 		if (vim9script)
-		    emsg_funcname(e_name_already_defined, name);
+		    emsg_funcname(e_name_already_defined_str, name);
 		else
 		    emsg_funcname(e_funcexts, name);
 		goto erret;
@@ -4249,7 +4260,7 @@ get_func_line(
     int	    c UNUSED,
     void    *cookie,
     int	    indent UNUSED,
-    int	    do_concat UNUSED)
+    getline_opt_T options UNUSED)
 {
     funccall_T	*fcp = (funccall_T *)cookie;
     ufunc_T	*fp = fcp->func;

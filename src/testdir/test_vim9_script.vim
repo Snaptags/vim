@@ -4,10 +4,30 @@ source check.vim
 source term_util.vim
 source view_util.vim
 source vim9.vim
+source shared.vim
 
 def Test_syntax()
   let var = 234
   let other: list<string> = ['asdf']
+enddef
+
+def Test_range_only()
+  new
+  setline(1, ['blah', 'Blah'])
+  :/Blah/
+  assert_equal(2, getcurpos()[1])
+  bwipe!
+
+  # without range commands use current line
+  new
+  setline(1, ['one', 'two', 'three'])
+  :2
+  print
+  assert_equal('two', Screenline(&lines))
+  :3
+  list
+  assert_equal('three$', Screenline(&lines))
+  bwipe!
 enddef
 
 let s:appendToMe = 'xxx'
@@ -90,13 +110,34 @@ def Test_assignment()
   &ts %= 4
   assert_equal(2, &ts)
 
+  if has('float')
+    let f100: float = 100.0
+    f100 /= 5
+    assert_equal(20.0, f100)
+
+    let f200: float = 200.0
+    f200 /= 5.0
+    assert_equal(40.0, f200)
+
+    CheckDefFailure(['let nr: number = 200', 'nr /= 5.0'], 'E1012:')
+  endif
+
   lines =<< trim END
-    vim9script
     &ts = 6
     &ts += 3
     assert_equal(9, &ts)
+
+    &l:ts = 6
+    assert_equal(6, &ts)
+    &l:ts += 2
+    assert_equal(8, &ts)
+
+    &g:ts = 6
+    assert_equal(6, &g:ts)
+    &g:ts += 2
+    assert_equal(8, &g:ts)
   END
-  CheckScriptSuccess(lines)
+  CheckDefAndScriptSuccess(lines)
 
   CheckDefFailure(['&notex += 3'], 'E113:')
   CheckDefFailure(['&ts ..= "xxx"'], 'E1019:')
@@ -144,19 +185,15 @@ def Test_assignment()
   call CheckDefFailure(['$SOME_ENV_VAR += "more"'], 'E1051:')
   call CheckDefFailure(['$SOME_ENV_VAR += 123'], 'E1012:')
 
-  @a = 'areg'
-  @a ..= 'add'
-  assert_equal('aregadd', @a)
-  call CheckDefFailure(['@a += "more"'], 'E1051:')
-  call CheckDefFailure(['@a += 123'], 'E1012:')
-
   lines =<< trim END
-    vim9script
     @c = 'areg'
     @c ..= 'add'
     assert_equal('aregadd', @c)
   END
-  call CheckScriptSuccess(lines)
+  CheckDefAndScriptSuccess(lines)
+
+  call CheckDefFailure(['@a += "more"'], 'E1051:')
+  call CheckDefFailure(['@a += 123'], 'E1012:')
 
   v:errmsg = 'none'
   v:errmsg ..= 'again'
@@ -550,7 +587,10 @@ def Test_assignment_failure()
   call CheckDefFailure(['let t:var = 5'], 'E1016: Cannot declare a tab variable:')
 
   call CheckDefFailure(['let anr = 4', 'anr ..= "text"'], 'E1019:')
-  call CheckDefFailure(['let xnr += 4'], 'E1020:')
+  call CheckDefFailure(['let xnr += 4'], 'E1020:', 1)
+  call CheckScriptFailure(['vim9script', 'let xnr += 4'], 'E1020:')
+  call CheckDefFailure(["let xnr = xnr + 1"], 'E1001:', 1)
+  call CheckScriptFailure(['vim9script', 'let xnr = xnr + 4'], 'E121:')
 
   call CheckScriptFailure(['vim9script', 'def Func()', 'let dummy = s:notfound', 'enddef', 'defcompile'], 'E1108:')
 
@@ -585,6 +625,13 @@ def Test_unlet()
   unlet g:somevar
   assert_false(exists('g:somevar'))
   unlet! g:somevar
+
+  # also works for script-local variable in legacy Vim script
+  s:somevar = 'legacy'
+  assert_true(exists('s:somevar'))
+  unlet s:somevar
+  assert_false(exists('s:somevar'))
+  unlet! s:somevar
 
   call CheckScriptFailure([
         'vim9script',
@@ -1129,6 +1176,17 @@ def Test_list_vimscript()
       assert_equal(['one', 'two', 'three'], mylist)
   END
   CheckScriptSuccess(lines)
+
+  # check all lines from heredoc are kept
+  lines =<< trim END
+      # comment 1
+      two
+      # comment 3
+
+      five
+      # comment 6
+  END
+  assert_equal(['# comment 1', 'two', '# comment 3', '', 'five', '# comment 6'], lines)
 enddef
 
 if has('channel')
@@ -1594,6 +1652,10 @@ def Test_vim9script_reload_import()
   delete('Ximport.vim')
 enddef
 
+def s:RetSome(): string
+  return 'some'
+enddef
+
 " Not exported function that is referenced needs to be accessed by the
 " script-local name.
 def Test_vim9script_funcref()
@@ -1625,10 +1687,14 @@ def Test_vim9script_funcref()
   unlet g:result
   delete('Xsort.vim')
   delete('Xscript.vim')
+
+  let Funcref = function('s:RetSome')
+  assert_equal('some', Funcref())
 enddef
 
-" Check that when searcing for "FilterFunc" it doesn't find the import in the
-" script where FastFilter() is called from.
+" Check that when searching for "FilterFunc" it finds the import in the
+" script where FastFilter() is called from, both as a string and as a direct
+" function reference.
 def Test_vim9script_funcref_other_script()
   let filterLines =<< trim END
     vim9script
@@ -1638,22 +1704,26 @@ def Test_vim9script_funcref_other_script()
     export def FastFilter(): list<number>
       return range(10)->filter('FilterFunc')
     enddef
+    export def FastFilterDirect(): list<number>
+      return range(10)->filter(FilterFunc)
+    enddef
   END
   writefile(filterLines, 'Xfilter.vim')
 
   let lines =<< trim END
     vim9script
-    import {FilterFunc, FastFilter} from './Xfilter.vim'
+    import {FilterFunc, FastFilter, FastFilterDirect} from './Xfilter.vim'
     def Test()
       let x: list<number> = FastFilter()
     enddef
     Test()
+    def TestDirect()
+      let x: list<number> = FastFilterDirect()
+    enddef
+    TestDirect()
   END
-  writefile(lines, 'Ximport.vim')
-  assert_fails('source Ximport.vim', 'E121:')
-
+  CheckScriptSuccess(lines)
   delete('Xfilter.vim')
-  delete('Ximport.vim')
 enddef
 
 def Test_vim9script_reload_delfunc()
@@ -2060,6 +2130,14 @@ def Test_if_const_expr()
     res = true
   endif
   assert_equal(false, res)
+
+  # with constant "false" expression may be invalid so long as the syntax is OK
+  if false | eval 0 | endif
+  if false | eval burp + 234 | endif
+  if false | echo burp 234 'asd' | endif
+  if false
+    burp
+  endif
 enddef
 
 def Test_if_const_expr_fails()
@@ -2119,8 +2197,9 @@ def Test_execute_cmd()
   echomsg [1, 2, 3] #{a: 1, b: 2}
   assert_match('^\[1, 2, 3\] {''a'': 1, ''b'': 2}$', Screenline(&lines))
 
-  call CheckDefFailure(['execute xxx'], 'E1001:')
-  call CheckDefFailure(['execute "cmd"# comment'], 'E488:')
+  call CheckDefFailure(['execute xxx'], 'E1001:', 1)
+  call CheckDefExecFailure(['execute "tabnext " .. 8'], 'E475:', 1)
+  call CheckDefFailure(['execute "cmd"# comment'], 'E488:', 1)
 enddef
 
 def Test_execute_cmd_vimscript()
@@ -2285,6 +2364,8 @@ def Test_interrupt_loop()
     assert_equal(100, x)
   endtry
   assert_true(caught, 'should have caught an exception')
+  # consume the CTRL-C
+  getchar(0)
 enddef
 
 def Test_automatic_line_continuation()
@@ -3098,7 +3179,7 @@ func Test_vim9script_not_global()
     " caught
   endtry
 
-  call delete('Xvim9script.vium')
+  call delete('Xvim9script.vim')
 endfunc
 
 def Test_vim9_copen()
@@ -3133,6 +3214,23 @@ def Test_vim9_autoload()
   &rtp = save_rtp
 enddef
 
+def Test_script_var_in_autocmd()
+  # using a script variable from an autocommand, defined in a :def function in a
+  # legacy Vim script, cannot check the variable type.
+  let lines =<< trim END
+    let s:counter = 1
+    def s:Func()
+      au! CursorHold
+      au CursorHold * s:counter += 1
+    enddef
+    call s:Func()
+    doau CursorHold
+    call assert_equal(2, s:counter)
+    au! CursorHold
+  END
+  CheckScriptSuccess(lines)
+enddef
+
 def Test_cmdline_win()
   # if the Vim syntax highlighting uses Vim9 constructs they can be used from
   # the command line window.
@@ -3162,6 +3260,15 @@ def Test_cmdline_win()
   augroup END
   &rtp = save_rtp
   delete('rtp', 'rf')
+enddef
+
+def Test_invalid_sid()
+  assert_fails('func <SNR>1234_func', 'E123:')
+
+  if RunVim([], ['wq Xdidit'], '+"func <SNR>1_func"')
+    call assert_equal([], readfile('Xdidit'))
+  endif
+  delete('Xdidit')
 enddef
 
 " Keep this last, it messes up highlighting.

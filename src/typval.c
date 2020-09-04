@@ -177,6 +177,12 @@ tv_get_bool_or_number_chk(typval_T *varp, int *denote, int want_bool)
     switch (varp->v_type)
     {
 	case VAR_NUMBER:
+	    if (want_bool && varp->vval.v_number != 0
+						   && varp->vval.v_number != 1)
+	    {
+		semsg(_(e_using_number_as_bool_nr), varp->vval.v_number);
+		break;
+	    }
 	    return varp->vval.v_number;
 	case VAR_FLOAT:
 #ifdef FEAT_FLOAT
@@ -261,13 +267,12 @@ tv_get_number_chk(typval_T *varp, int *denote)
 
 /*
  * Get the boolean value of "varp".  This is like tv_get_number_chk(),
- * but in Vim9 script accepts Number and Bool.
+ * but in Vim9 script accepts Number (0 and 1) and Bool/Special.
  */
     varnumber_T
 tv_get_bool(typval_T *varp)
 {
     return tv_get_bool_or_number_chk(varp, NULL, TRUE);
-
 }
 
 /*
@@ -278,7 +283,6 @@ tv_get_bool(typval_T *varp)
 tv_get_bool_chk(typval_T *varp, int *denote)
 {
     return tv_get_bool_or_number_chk(varp, denote, TRUE);
-
 }
 
 #ifdef FEAT_FLOAT
@@ -1554,6 +1558,25 @@ tv_get_buf(typval_T *tv, int curtab_only)
     if (buf == NULL)
 	buf = find_buffer(tv);
 
+    return buf;
+}
+
+/*
+ * Like tv_get_buf() but give an error message is the type is wrong.
+ */
+    buf_T *
+tv_get_buf_from_arg(typval_T *tv)
+{
+    buf_T *buf;
+
+    ++emsg_off;
+    buf = tv_get_buf(tv, FALSE);
+    --emsg_off;
+    if (buf == NULL
+	    && tv->v_type != VAR_NUMBER
+	    && tv->v_type != VAR_STRING)
+	// issue errmsg for type error
+	(void)tv_get_number(tv);
     return buf;
 }
 

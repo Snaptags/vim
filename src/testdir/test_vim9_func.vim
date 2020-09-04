@@ -223,6 +223,15 @@ def Test_call_wrong_args()
   call CheckDefFailure(['TakesOneArg(11, 22)'], 'E118:')
   call CheckDefFailure(['bufnr(xxx)'], 'E1001:')
   call CheckScriptFailure(['def Func(Ref: func(s: string))'], 'E475:')
+
+  let lines =<< trim END
+    vim9script
+    def Func(s: string)
+      echo s
+    enddef
+    Func([])
+  END
+  call CheckScriptFailure(lines, 'E1013: argument 1: type mismatch, expected string but got list<unknown>', 5)
 enddef
 
 " Default arg and varargs
@@ -269,7 +278,7 @@ def Test_call_def_varargs()
       enddef
       Func(1, 2, 3)
   END
-  CheckScriptFailure(lines, 'E1012:')
+  CheckScriptFailure(lines, 'E1013: argument 1: type mismatch')
 
   lines =<< trim END
       vim9script
@@ -278,7 +287,7 @@ def Test_call_def_varargs()
       enddef
       Func('a', 9)
   END
-  CheckScriptFailure(lines, 'E1012:')
+  CheckScriptFailure(lines, 'E1013: argument 2: type mismatch')
 
   lines =<< trim END
       vim9script
@@ -287,7 +296,7 @@ def Test_call_def_varargs()
       enddef
       Func(1, 'a')
   END
-  CheckScriptFailure(lines, 'E1012:')
+  CheckScriptFailure(lines, 'E1013: argument 1: type mismatch')
 enddef
 
 def Test_call_call()
@@ -682,7 +691,7 @@ def Test_vim9script_call_fail_type()
     enddef
     MyFunc(1234)
   END
-  CheckScriptFailure(lines, 'E1012: type mismatch, expected string but got number')
+  CheckScriptFailure(lines, 'E1013: argument 1: type mismatch, expected string but got number')
 enddef
 
 def Test_vim9script_call_fail_const()
@@ -829,30 +838,30 @@ endfunc
 let s:funcResult = 0
 
 def FuncNoArgNoRet()
-  funcResult = 11
+  s:funcResult = 11
 enddef
 
 def FuncNoArgRetNumber(): number
-  funcResult = 22
+  s:funcResult = 22
   return 1234
 enddef
 
 def FuncNoArgRetString(): string
-  funcResult = 45
+  s:funcResult = 45
   return 'text'
 enddef
 
 def FuncOneArgNoRet(arg: number)
-  funcResult = arg
+  s:funcResult = arg
 enddef
 
 def FuncOneArgRetNumber(arg: number): number
-  funcResult = arg
+  s:funcResult = arg
   return arg
 enddef
 
 def FuncTwoArgNoRet(one: bool, two: number)
-  funcResult = two
+  s:funcResult = two
 enddef
 
 def FuncOneArgRetString(arg: string): string
@@ -865,31 +874,31 @@ enddef
 
 def Test_func_type()
   let Ref1: func()
-  funcResult = 0
+  s:funcResult = 0
   Ref1 = FuncNoArgNoRet
   Ref1()
-  assert_equal(11, funcResult)
+  assert_equal(11, s:funcResult)
 
   let Ref2: func
-  funcResult = 0
+  s:funcResult = 0
   Ref2 = FuncNoArgNoRet
   Ref2()
-  assert_equal(11, funcResult)
+  assert_equal(11, s:funcResult)
 
-  funcResult = 0
+  s:funcResult = 0
   Ref2 = FuncOneArgNoRet
   Ref2(12)
-  assert_equal(12, funcResult)
+  assert_equal(12, s:funcResult)
 
-  funcResult = 0
+  s:funcResult = 0
   Ref2 = FuncNoArgRetNumber
   assert_equal(1234, Ref2())
-  assert_equal(22, funcResult)
+  assert_equal(22, s:funcResult)
 
-  funcResult = 0
+  s:funcResult = 0
   Ref2 = FuncOneArgRetNumber
   assert_equal(13, Ref2(13))
-  assert_equal(13, funcResult)
+  assert_equal(13, s:funcResult)
 enddef
 
 def Test_repeat_return_type()
@@ -1320,6 +1329,12 @@ def Test_bufnr()
   assert_equal(buf, bufnr('%'))
 enddef
 
+def Test_col()
+  new
+  setline(1, 'asdf')
+  assert_equal(5, col([1, '$']))
+enddef
+
 def Test_getreg_return_type()
   let s1: string = getreg('"')
   let s2: string = getreg('"', 1)
@@ -1383,12 +1398,90 @@ def Test_search()
   new
   setline(1, ['foo', 'bar'])
   let val = 0
+  # skip expr returns boolean
   assert_equal(2, search('bar', 'W', 0, 0, {-> val == 1}))
+  :1
+  assert_equal(0, search('bar', 'W', 0, 0, {-> val == 0}))
+  # skip expr returns number, only 0 and 1 are accepted
+  :1
+  assert_equal(2, search('bar', 'W', 0, 0, {-> 0}))
+  :1
+  assert_equal(0, search('bar', 'W', 0, 0, {-> 1}))
+  assert_fails("search('bar', '', 0, 0, {-> -1})", 'E1023:')
+  assert_fails("search('bar', '', 0, 0, {-> -1})", 'E1023:')
 enddef
 
 def Test_readdir()
-   eval expand('.')->readdir({e -> e[0] !=# '.'})
-   eval expand('.')->readdirex({e -> e.name[0] !=# '.'})
+   eval expand('sautest')->readdir({e -> e[0] !=# '.'})
+   eval expand('sautest')->readdirex({e -> e.name[0] !=# '.'})
+enddef
+
+def Test_setbufvar()
+   setbufvar(bufnr('%'), '&syntax', 'vim')
+   assert_equal('vim', &syntax)
+   setbufvar(bufnr('%'), '&ts', 16)
+   assert_equal(16, &ts)
+   settabwinvar(1, 1, '&syntax', 'vam')
+   assert_equal('vam', &syntax)
+   settabwinvar(1, 1, '&ts', 15)
+   assert_equal(15, &ts)
+   setlocal ts=8
+
+   setbufvar('%', 'myvar', 123)
+   assert_equal(123, getbufvar('%', 'myvar'))
+enddef
+
+def Test_bufwinid()
+  let origwin = win_getid()
+  below split SomeFile
+  let SomeFileID = win_getid()
+  below split OtherFile
+  below split SomeFile
+  assert_equal(SomeFileID, bufwinid('SomeFile'))
+
+  win_gotoid(origwin)
+  only
+  bwipe SomeFile
+  bwipe OtherFile
+enddef
+
+def Test_getbufline()
+  e SomeFile
+  let buf = bufnr()
+  e #
+  let lines = ['aaa', 'bbb', 'ccc']
+  setbufline(buf, 1, lines)
+  assert_equal(lines, getbufline('#', 1, '$'))
+
+  bwipe!
+enddef
+
+def Test_getchangelist()
+  new
+  setline(1, 'some text')
+  let changelist = bufnr()->getchangelist()
+  assert_equal(changelist, getchangelist('%'))
+  bwipe!
+enddef
+
+def Test_setreg()
+  setreg('a', ['aaa', 'bbb', 'ccc'])
+  let reginfo = getreginfo('a')
+  setreg('a', reginfo)
+  assert_equal(reginfo, getreginfo('a'))
+enddef 
+
+def Test_bufname()
+  split SomeFile
+  assert_equal('SomeFile', bufname('%'))
+  edit OtherFile
+  assert_equal('SomeFile', bufname('#'))
+  close
+enddef
+
+def Test_gebufinfo()
+  let bufinfo = getbufinfo(bufnr())
+  assert_equal(bufinfo, getbufinfo('%'))
 enddef
 
 def Fibonacci(n: number): number
@@ -1397,6 +1490,74 @@ def Fibonacci(n: number): number
   else
     return Fibonacci(n - 1) + Fibonacci(n - 2)
   endif
+enddef
+
+def Test_count()
+  assert_equal(3, count('ABC ABC ABC', 'b', true))
+  assert_equal(0, count('ABC ABC ABC', 'b', false))
+enddef
+
+def Test_index()
+  assert_equal(3, index(['a', 'b', 'a', 'B'], 'b', 2, true))
+enddef
+
+def Test_expand()
+  split SomeFile
+  assert_equal(['SomeFile'], expand('%', true, true))
+  close
+enddef
+
+def Test_getreg()
+  let lines = ['aaa', 'bbb', 'ccc']
+  setreg('a', lines)
+  assert_equal(lines, getreg('a', true, true))
+enddef
+
+def Test_glob()
+  assert_equal(['runtest.vim'], glob('runtest.vim', true, true, true))
+enddef
+
+def Test_globpath()
+  assert_equal(['./runtest.vim'], globpath('.', 'runtest.vim', true, true, true))
+enddef
+
+def Test_hasmapto()
+  assert_equal(0, hasmapto('foobar', 'i', true))
+  iabbrev foo foobar
+  assert_equal(1, hasmapto('foobar', 'i', true))
+  iunabbrev foo
+enddef
+
+def SID(): number
+  return expand('<SID>')
+          ->matchstr('<SNR>\zs\d\+\ze_$')
+          ->str2nr()
+enddef
+
+def Test_maparg()
+  let lnum = str2nr(expand('<sflnum>'))
+  map foo bar
+  assert_equal(#{
+        lnum: lnum + 1,
+        script: 0,
+        mode: ' ',
+        silent: 0,
+        noremap: 0,
+        lhs: 'foo',
+        lhsraw: 'foo',
+        nowait: 0,
+        expr: 0,
+        sid: SID(),
+        rhs: 'bar',
+        buffer: 0},
+        maparg('foo', '', false, true))
+  unmap foo
+enddef
+
+def Test_mapcheck()
+  iabbrev foo foobar
+  assert_equal('foobar', mapcheck('foo', 'i', true))
+  iunabbrev foo
 enddef
 
 def Test_recursive_call()

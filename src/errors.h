@@ -33,7 +33,7 @@ EXTERN char e_syntax_error_at_str[]
 	INIT(= N_("E1002: Syntax error at %s"));
 EXTERN char e_missing_return_value[]
 	INIT(= N_("E1003: Missing return value"));
-EXTERN char e_white_space_required_before_and_after[]
+EXTERN char e_white_space_required_before_and_after_str[]
 	INIT(= N_("E1004: white space required before and after '%s'"));
 EXTERN char e_too_many_argument_types[]
 	INIT(= N_("E1005: Too many argument types"));
@@ -73,7 +73,8 @@ EXTERN char e_const_requires_a_value[]
 	INIT(= N_("E1021: const requires a value"));
 EXTERN char e_type_or_initialization_required[]
 	INIT(= N_("E1022: type or initialization required"));
-// E1023 unused
+EXTERN char e_using_number_as_bool_nr[]
+	INIT(= N_("E1023: Using a Number as a Bool: %d"));
 EXTERN char e_using_number_as_string[]
 	INIT(= N_("E1024: Using a Number as a String"));
 EXTERN char e_using_rcurly_outside_if_block_scope[]
@@ -156,13 +157,13 @@ EXTERN char e_type_mismatch_for_v_variable[]
 	INIT(= N_("E1063: type mismatch for v: variable"));
 // E1064 unused
 // E1065 unused
-EXTERN char e_cannot_declare_a_register[]
+EXTERN char e_cannot_declare_a_register_str[]
 	INIT(= N_("E1066: Cannot declare a register: %s"));
-EXTERN char e_separator_mismatch[]
+EXTERN char e_separator_mismatch_str[]
 	INIT(= N_("E1067: Separator mismatch: %s"));
-EXTERN char e_no_white_space_allowed_before[]
+EXTERN char e_no_white_space_allowed_before_str[]
 	INIT(= N_("E1068: No white space allowed before '%s'"));
-EXTERN char e_white_space_required_after[]
+EXTERN char e_white_space_required_after_str[]
 	INIT(= N_("E1069: white space required after '%s'"));
 EXTERN char e_missing_from[]
 	INIT(= N_("E1070: Missing \"from\""));
@@ -170,7 +171,7 @@ EXTERN char e_invalid_string_after_from[]
 	INIT(= N_("E1071: Invalid string after \"from\""));
 EXTERN char e_cannot_compare_str_with_str[]
 	INIT(= N_("E1072: Cannot compare %s with %s"));
-EXTERN char e_name_already_defined[]
+EXTERN char e_name_already_defined_str[]
 	INIT(= N_("E1073: name already defined: %s"));
 EXTERN char e_no_white_space_allowed_after_dot[]
 	INIT(= N_("E1074: no white space allowed after dot"));
@@ -237,4 +238,16 @@ EXTERN char e_string_list_dict_or_blob_required[]
 	INIT(= N_("E1107: String, List, Dict or Blob required"));
 EXTERN char e_item_not_found_str[]
 	INIT(= N_("E1108: Item not found: %s"));
+EXTERN char e_list_item_nr_is_not_list[]
+	INIT(= N_("E1109: List item %d is not a List"));
+EXTERN char e_list_item_nr_does_not_contain_3_numbers[]
+	INIT(= N_("E1110: List item %d does not contain 3 numbers"));
+EXTERN char e_list_item_nr_range_invalid[]
+	INIT(= N_("E1111: List item %d range invalid"));
+EXTERN char e_list_item_nr_cell_width_invalid[]
+	INIT(= N_("E1112: List item %d cell width invalid"));
+EXTERN char e_overlapping_ranges_for_nr[]
+	INIT(= N_("E1113: Overlapping ranges for 0x%lx"));
+EXTERN char e_only_values_of_0x100_and_higher_supported[]
+	INIT(= N_("E1114: Only values of 0x100 and higher supported"));
 #endif

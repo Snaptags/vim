@@ -395,7 +395,7 @@ skip_expr_concatenate(
     typval_T	rettv;
     int		res;
     int		vim9script = in_vim9script();
-    garray_T    *gap = &evalarg->eval_ga;
+    garray_T    *gap = evalarg == NULL ? NULL : &evalarg->eval_ga;
     int		save_flags = evalarg == NULL ? 0 : evalarg->eval_flags;
     int		evaluate = evalarg == NULL
 			       ? FALSE : (evalarg->eval_flags & EVAL_EVALUATE);
@@ -1291,7 +1291,7 @@ set_var_lval(
 	else
 	{
 	    if (lp->ll_type != NULL
-			      && check_typval_type(lp->ll_type, rettv) == FAIL)
+			   && check_typval_type(lp->ll_type, rettv, 0) == FAIL)
 		return;
 	    set_var_const(lp->ll_name, lp->ll_type, rettv, copy, flags);
 	}
@@ -1966,7 +1966,8 @@ eval_next_line(evalarg_T *evalarg)
     char_u	*line;
 
     if (evalarg->eval_cookie != NULL)
-	line = evalarg->eval_getline(0, evalarg->eval_cookie, 0, TRUE);
+	line = evalarg->eval_getline(0, evalarg->eval_cookie, 0,
+							   GETLINE_CONCAT_ALL);
     else
 	line = next_line_from_context(evalarg->eval_cctx, TRUE);
     ++evalarg->eval_break_count;
@@ -2166,7 +2167,10 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	evalarg_used->eval_flags = result ? orig_flags
 						 : orig_flags & ~EVAL_EVALUATE;
 	if (eval1(arg, rettv, evalarg_used) == FAIL)
+	{
+	    evalarg_used->eval_flags = orig_flags;
 	    return FAIL;
+	}
 
 	/*
 	 * Check for the ":".
@@ -2177,6 +2181,7 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    emsg(_(e_missing_colon));
 	    if (evaluate && result)
 		clear_tv(rettv);
+	    evalarg_used->eval_flags = orig_flags;
 	    return FAIL;
 	}
 	if (getnext)
@@ -2187,6 +2192,7 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    {
 		error_white_both(p, 1);
 		clear_tv(rettv);
+		evalarg_used->eval_flags = orig_flags;
 		return FAIL;
 	    }
 	    *arg = p;
@@ -2199,6 +2205,7 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	{
 	    error_white_both(p, 1);
 	    clear_tv(rettv);
+	    evalarg_used->eval_flags = orig_flags;
 	    return FAIL;
 	}
 	*arg = skipwhite_and_linebreak(*arg + 1, evalarg_used);
@@ -2208,6 +2215,7 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	{
 	    if (evaluate && result)
 		clear_tv(rettv);
+	    evalarg_used->eval_flags = orig_flags;
 	    return FAIL;
 	}
 	if (evaluate && !result)
@@ -2667,6 +2675,7 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	int	    oplen;
 	int	    concat;
 	typval_T    var2;
+	int	    vim9script = in_vim9script();
 
 	// "." is only string concatenation when scriptversion is 1
 	p = eval_next_non_blank(*arg, evalarg, &getnext);
@@ -2681,7 +2690,7 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    *arg = eval_next_line(evalarg);
 	else
 	{
-	    if (evaluate && in_vim9script() && !VIM_ISWHITE(**arg))
+	    if (evaluate && vim9script && !VIM_ISWHITE(**arg))
 	    {
 		error_white_both(p, oplen);
 		clear_tv(rettv);
@@ -2713,14 +2722,14 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	/*
 	 * Get the second variable.
 	 */
-	if (evaluate && in_vim9script() && !IS_WHITE_OR_NUL((*arg)[oplen]))
+	if (evaluate && vim9script && !IS_WHITE_OR_NUL((*arg)[oplen]))
 	{
 	    error_white_both(p, oplen);
 	    clear_tv(rettv);
 	    return FAIL;
 	}
 	*arg = skipwhite_and_linebreak(*arg + oplen, evalarg);
-	if (eval6(arg, &var2, evalarg, !in_vim9script() && op == '.') == FAIL)
+	if (eval6(arg, &var2, evalarg, !vim9script && op == '.') == FAIL)
 	{
 	    clear_tv(rettv);
 	    return FAIL;
@@ -2737,12 +2746,12 @@ eval5(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 		char_u	*s1 = tv_get_string_buf(rettv, buf1);
 		char_u	*s2 = NULL;
 
-		if (in_vim9script() && (var2.v_type == VAR_VOID
+		if (vim9script && (var2.v_type == VAR_VOID
 			|| var2.v_type == VAR_CHANNEL
 			|| var2.v_type == VAR_JOB))
 		    emsg(_(e_inval_string));
 #ifdef FEAT_FLOAT
-		else if (var2.v_type == VAR_FLOAT)
+		else if (vim9script && var2.v_type == VAR_FLOAT)
 		{
 		    vim_snprintf((char *)buf2, NUMBUFLEN, "%g",
 							    var2.vval.v_float);
@@ -4351,7 +4360,8 @@ set_ref_in_item(
 	    }
 	    else
 	    {
-		ht_stack_T *newitem = (ht_stack_T*)malloc(sizeof(ht_stack_T));
+		ht_stack_T *newitem = ALLOC_ONE(ht_stack_T);
+
 		if (newitem == NULL)
 		    abort = TRUE;
 		else
@@ -4377,8 +4387,8 @@ set_ref_in_item(
 	    }
 	    else
 	    {
-		list_stack_T *newitem = (list_stack_T*)malloc(
-							sizeof(list_stack_T));
+		list_stack_T *newitem = ALLOC_ONE(list_stack_T);
+
 		if (newitem == NULL)
 		    abort = TRUE;
 		else
@@ -4840,19 +4850,23 @@ var2fpos(
 	pos.lnum = list_find_nr(l, 0L, &error);
 	if (error || pos.lnum <= 0 || pos.lnum > curbuf->b_ml.ml_line_count)
 	    return NULL;	// invalid line number
-
-	// Get the column number
-	pos.col = list_find_nr(l, 1L, &error);
-	if (error)
-	    return NULL;
 	len = (long)STRLEN(ml_get(pos.lnum));
 
+	// Get the column number
 	// We accept "$" for the column number: last column.
 	li = list_find(l, 1L);
 	if (li != NULL && li->li_tv.v_type == VAR_STRING
 		&& li->li_tv.vval.v_string != NULL
 		&& STRCMP(li->li_tv.vval.v_string, "$") == 0)
+	{
 	    pos.col = len + 1;
+	}
+	else
+	{
+	    pos.col = list_find_nr(l, 1L, &error);
+	    if (error)
+		return NULL;
+	}
 
 	// Accept a position up to the NUL after the line.
 	if (pos.col == 0 || (int)pos.col > len + 1)
@@ -5378,7 +5392,7 @@ string_slice(char_u *str, varnumber_T first, varnumber_T last)
     if (start_byte < 0)
 	start_byte = 0; // first index very negative: use zero
     if (last == -1)
-	end_byte = slen;
+	end_byte = (long)slen;
     else
     {
 	end_byte = char_idx2byte(str, slen, last);

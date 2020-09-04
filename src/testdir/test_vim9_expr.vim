@@ -43,6 +43,9 @@ def Test_expr1()
   var = 0
   assert_equal('two', var ? 'one' : 'two')
 
+  # with constant condition expression is not evaluated 
+  assert_equal('one', 1 ? 'one' : xxx)
+
   let Some: func = function('len')
   let Other: func = function('winnr')
   let Res: func = g:atrue ? Some : Other
@@ -114,11 +117,31 @@ def Test_expr1_vimscript()
       let var = v:true ? 1 :2
   END
   CheckScriptFailure(lines, 'E1004:', 2)
+
+  # check after failure eval_flags is reset
+  lines =<< trim END
+      vim9script
+      try
+        call eval('0 ? 1: 2')
+      catch
+      endtry
+      assert_equal(v:true, eval(string(v:true)))
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      try
+        call eval('0 ? 1 :2')
+      catch
+      endtry
+      assert_equal(v:true, eval(string(v:true)))
+  END
+  CheckScriptSuccess(lines)
 enddef
 
 func Test_expr1_fails()
   call CheckDefFailure(["let x = 1 ? 'one'"], "Missing ':' after '?'", 1)
-  call CheckDefFailure(["let x = 1 ? 'one' : xxx"], "E1001:", 1)
 
   let msg = "white space required before and after '?'"
   call CheckDefFailure(["let x = 1? 'one' : 'two'"], msg, 1)
@@ -944,6 +967,18 @@ def Test_expr5()
   				+ g:ablob)
   assert_equal(0z01ab3344, g:ablob + 0z3344)
   assert_equal(0z01ab01ab, g:ablob + g:ablob)
+
+  # concatenate non-constant to constant
+  let save_path = &path
+  &path = 'b'
+  assert_equal('ab', 'a' .. &path)
+  &path = save_path
+
+  @b = 'b'
+  assert_equal('ab', 'a' .. @b)
+
+  $ENVVAR = 'env'
+  assert_equal('aenv', 'a' .. $ENVVAR)
 enddef
 
 def Test_expr5_vim9script()
@@ -1635,6 +1670,17 @@ def Test_expr7_lambda_vim9script()
   CheckScriptSuccess(lines)
 enddef
 
+def Test_epxr7_funcref()
+  let lines =<< trim END
+    def RetNumber(): number
+      return 123
+    enddef
+    let FuncRef = RetNumber
+    assert_equal(123, FuncRef())
+  END
+  CheckDefAndScriptSuccess(lines)
+enddef
+
 def Test_expr7_dict()
   # dictionary
   assert_equal(g:dict_empty, {})
@@ -1670,8 +1716,6 @@ def Test_expr7_dict()
   call CheckDefFailure(["let x = {xxx: 8}"], 'E1001:', 1)
   call CheckDefFailure(["let x = #{a: 1, a: 2}"], 'E721:', 1)
   call CheckDefFailure(["let x = #"], 'E1015:', 1)
-  call CheckDefFailure(["let x += 1"], 'E1020:', 1)
-  call CheckDefFailure(["let x = x + 1"], 'E1001:', 1)
   call CheckDefExecFailure(["let x = g:anint.member"], 'E715:', 1)
   call CheckDefExecFailure(["let x = g:dict_empty.member"], 'E716:', 1)
 
@@ -2326,7 +2370,8 @@ func Test_expr_fails()
   call CheckDefFailure(["let x = '1'isnot2"], 'E488:', 1)
 
   call CheckDefFailure(["CallMe ('yes')"], 'E476:', 1)
-  call CheckDefFailure(["CallMe2('yes','no')"], 'E1069:', 1)
+  call CheckScriptFailure(["CallMe ('yes')"], 'E492:', 1)
+  call CheckScriptAndDefFailure(["CallMe2('yes','no')"], 'E1069:', 1)
   call CheckDefFailure(["CallMe2('yes' , 'no')"], 'E1068:', 1)
 
   call CheckDefFailure(["v:nosuch += 3"], 'E1001:', 1)
