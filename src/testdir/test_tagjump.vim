@@ -8,7 +8,7 @@ func Test_ptag_with_notagstack()
   CheckFeature quickfix
 
   set notagstack
-  call assert_fails('ptag does_not_exist_tag_name', 'E433')
+  call assert_fails('ptag does_not_exist_tag_name', 'E433:')
   set tagstack&vim
 endfunc
 
@@ -184,6 +184,10 @@ function Test_keyword_jump()
   call search("start")
   exe "normal! 5\<C-W>\<C-I>"
   call assert_equal("		start OK if found this line", getline('.'))
+
+  " invalid tag search pattern
+  call assert_fails('tag /\%(/', 'E426:')
+
   enew! | only
   call delete('Xtestfile')
   call delete('Xinclude')
@@ -365,10 +369,10 @@ func Test_getsettagstack()
   " Error cases
   call assert_equal({}, gettagstack(100))
   call assert_equal(-1, settagstack(100, {'items' : []}))
-  call assert_fails('call settagstack(1, [1, 10])', 'E715')
-  call assert_fails("call settagstack(1, {'items' : 10})", 'E714')
-  call assert_fails("call settagstack(1, {'items' : []}, 10)", 'E928')
-  call assert_fails("call settagstack(1, {'items' : []}, 'b')", 'E962')
+  call assert_fails('call settagstack(1, [1, 10])', 'E715:')
+  call assert_fails("call settagstack(1, {'items' : 10})", 'E714:')
+  call assert_fails("call settagstack(1, {'items' : []}, 10)", 'E928:')
+  call assert_fails("call settagstack(1, {'items' : []}, 'b')", 'E962:')
   call assert_equal(-1, settagstack(0, test_null_dict()))
 
   set tags=Xtags
@@ -565,7 +569,7 @@ func Test_tag_line_toolong()
   let old_vbs = &verbose
   set verbose=5
   " ":tjump" should give "tag not found" not "Format error in tags file"
-  call assert_fails('tj /foo', 'E426')
+  call assert_fails('tj /foo', 'E426:')
   try
     tj /foo
   catch /^Vim\%((\a\+)\)\=:E431/
@@ -577,7 +581,7 @@ func Test_tag_line_toolong()
   call writefile([
 	\ '123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567	django/contrib/admin/templates/admin/edit_inline/stacked.html	16;"	j	line:16	language:HTML'
 	\ ], 'Xtags')
-  call assert_fails('tj /foo', 'E426')
+  call assert_fails('tj /foo', 'E426:')
   try
     tj /foo
   catch /^Vim\%((\a\+)\)\=:E431/

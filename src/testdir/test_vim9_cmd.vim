@@ -45,40 +45,6 @@ def Test_syn_include_wildcards()
   delete('Xthemine.vim')
 enddef
 
-def Test_assign_list()
-  let l: list<string> = []
-  l[0] = 'value'
-  assert_equal('value', l[0])
-
-  l[1] = 'asdf'
-  assert_equal('value', l[0])
-  assert_equal('asdf', l[1])
-  assert_equal('asdf', l[-1])
-  assert_equal('value', l[-2])
-
-  let nrl: list<number> = []
-  for i in range(5)
-    nrl[i] = i
-  endfor
-  assert_equal([0, 1, 2, 3, 4], nrl)
-enddef
-
-def Test_assign_dict()
-  let d: dict<string> = {}
-  d['key'] = 'value'
-  assert_equal('value', d['key'])
-
-  d[123] = 'qwerty'
-  assert_equal('qwerty', d[123])
-  assert_equal('qwerty', d['123'])
-
-  let nrd: dict<number> = {}
-  for i in range(3)
-    nrd[i] = i
-  endfor
-  assert_equal({'0': 0, '1': 1, '2': 2}, nrd)
-enddef
-
 def Test_echo_linebreak()
   let lines =<< trim END
       vim9script
@@ -314,6 +280,33 @@ def Test_normal_command()
   assert_equal(3, caught)
   bwipe!
 enddef
+
+def Test_put_command()
+  new
+  @p = 'ppp'
+  put p
+  assert_equal('ppp', getline(2))
+
+  put ='below'
+  assert_equal('below', getline(3))
+  put! ='above'
+  assert_equal('above', getline(3))
+  assert_equal('below', getline(4))
+
+  bwipe!
+enddef
+
+def Test_command_star_range()
+  new
+  setline(1, ['xxx foo xxx', 'xxx bar xxx', 'xxx foo xx bar'])
+  setpos("'<", [0, 1, 0, 0])
+  setpos("'>", [0, 3, 0, 0])
+  :*s/\(foo\|bar\)/baz/g
+  getline(1, 3)->assert_equal(['xxx baz xxx', 'xxx baz xxx', 'xxx baz xx baz'])
+
+  bwipe!
+enddef
+
 
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

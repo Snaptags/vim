@@ -593,8 +593,9 @@ popup_show_curline(win_T *wp)
 	    ++wp->w_topline;
     }
 
-    // Don't use "firstline" now.
-    wp->w_firstline = 0;
+    // Don't let "firstline" cause a scroll.
+    if (wp->w_firstline > 0)
+	wp->w_firstline = wp->w_topline;
 }
 
 /*
@@ -947,6 +948,18 @@ apply_options(win_T *wp, dict_T *dict)
     nr = dict_get_bool(dict, (char_u *)"hidden", FALSE);
     if (nr > 0)
 	wp->w_popup_flags |= POPF_HIDDEN;
+
+    // when "firstline" and "cursorline" are both set move the cursor to the
+    // "firstline".
+    if (wp->w_firstline > 0 && (wp->w_popup_flags & POPF_CURSORLINE))
+    {
+	if (wp->w_firstline > wp->w_buffer->b_ml.ml_line_count)
+	    wp->w_cursor.lnum = wp->w_buffer->b_ml.ml_line_count;
+	else
+	    wp->w_cursor.lnum = wp->w_firstline;
+	wp->w_topline = wp->w_cursor.lnum;
+	curwin->w_valid &= ~VALID_BOTLINE;
+    }
 
     popup_mask_refresh = TRUE;
     popup_highlight_curline(wp);
@@ -2237,7 +2250,13 @@ popup_close_and_callback(win_T *wp, typval_T *arg)
 
     // Just in case a check higher up is missing.
     if (wp == curwin && ERROR_IF_POPUP_WINDOW)
+    {
+	// To avoid getting stuck when win_execute() does something that causes
+	// an error, stop calling the filter callback.
+	free_callback(&wp->w_filter_cb);
+
 	return;
+    }
 
     CHECK_CURBUF;
     if (wp->w_close_cb.cb_name != NULL)
@@ -3115,7 +3134,8 @@ find_next_popup(int lowest, int handled_flag)
 /*
  * Invoke the filter callback for window "wp" with typed character "c".
  * Uses the global "mod_mask" for modifiers.
- * Returns the return value of the filter.
+ * Returns the return value of the filter or -1 for CTRL-C in the current
+ * window.
  * Careful: The filter may make "wp" invalid!
  */
     static int
@@ -3126,17 +3146,24 @@ invoke_popup_filter(win_T *wp, int c)
     typval_T	argv[3];
     char_u	buf[NUMBUFLEN];
     linenr_T	old_lnum = wp->w_cursor.lnum;
+    int		prev_called_emsg = called_emsg;
 
     // Emergency exit: CTRL-C closes the popup.
     if (c == Ctrl_C)
     {
 	int save_got_int = got_int;
+	int was_curwin = wp == curwin;
 
 	// Reset got_int to avoid the callback isn't called.
 	got_int = FALSE;
 	popup_close_with_retval(wp, -1);
 	got_int |= save_got_int;
-	return 1;
+
+	// If the popup is the current window it probably fails to close.  Then
+	// do not consume the key.
+	if (was_curwin && wp == curwin)
+	    return -1;
+	return TRUE;
     }
 
     argv[0].v_type = VAR_NUMBER;
@@ -3151,10 +3178,37 @@ invoke_popup_filter(win_T *wp, int c)
     argv[2].v_type = VAR_UNKNOWN;
 
     // NOTE: The callback might close the popup and make "wp" invalid.
-    call_callback(&wp->w_filter_cb, -1, &rettv, 2, argv);
-    if (win_valid_popup(wp) && old_lnum != wp->w_cursor.lnum)
-	popup_highlight_curline(wp);
-    res = tv_get_bool(&rettv);
+    if (call_callback(&wp->w_filter_cb, -1, &rettv, 2, argv) == FAIL)
+    {
+	// Cannot call the function, close the popup to avoid that the filter
+	// eats keys and the user is stuck.  Might as well eat the key.
+	popup_close_with_retval(wp, -1);
+	res = TRUE;
+    }
+    else
+    {
+	if (win_valid_popup(wp) && old_lnum != wp->w_cursor.lnum)
+	    popup_highlight_curline(wp);
+
+	// If an error was given always return FALSE, so that keys are not
+	// consumed and the user can type something.
+	// If we get three errors in a row then close the popup.  Decrement the
+	// error count by 1/10 if there are no errors, thus allowing up to 1 in
+	// 10 calls to cause an error.
+	if (win_valid_popup(wp) && called_emsg > prev_called_emsg)
+	{
+	    wp->w_filter_errors += 10;
+	    if (wp->w_filter_errors >= 30)
+		popup_close_with_retval(wp, -1);
+	    res = FALSE;
+	}
+	else
+	{
+	    if (win_valid_popup(wp) && wp->w_filter_errors > 0)
+		--wp->w_filter_errors;
+	    res = tv_get_bool(&rettv);
+	}
+    }
 
     vim_free(argv[1].vval.v_string);
     clear_tv(&rettv);
@@ -3197,7 +3251,8 @@ popup_do_filter(int c)
 
     popup_reset_handled(POPUP_HANDLED_2);
     state = get_real_state();
-    while (!res && (wp = find_next_popup(FALSE, POPUP_HANDLED_2)) != NULL)
+    while (res == FALSE
+		     && (wp = find_next_popup(FALSE, POPUP_HANDLED_2)) != NULL)
 	if (wp->w_filter_cb.cb_name != NULL
 		&& (wp->w_filter_mode & state) != 0)
 	    res = invoke_popup_filter(wp, c);
@@ -3213,7 +3268,9 @@ popup_do_filter(int c)
     }
     recursive = FALSE;
     KeyTyped = save_KeyTyped;
-    return res;
+
+    // When interrupted return FALSE to avoid looping.
+    return res == -1 ? FALSE : res;
 }
 
 /*
@@ -3654,6 +3711,11 @@ update_popups(void (*win_update)(win_T *wp))
 	// Draw the popup text, unless it's off screen.
 	if (wp->w_winrow < screen_Rows && wp->w_wincol < screen_Columns)
 	{
+	    // May need to update the "cursorline" highlighting, which may also
+	    // change "topline"
+	    if (wp->w_popup_last_curline != wp->w_cursor.lnum)
+		popup_highlight_curline(wp);
+
 	    win_update(wp);
 
 	    // move the cursor into the visible lines, otherwise executing

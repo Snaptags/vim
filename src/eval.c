@@ -872,8 +872,7 @@ get_lval(
     while (*p == '[' || (*p == '.' && lp->ll_tv->v_type == VAR_DICT))
     {
 	if (!(lp->ll_tv->v_type == VAR_LIST && lp->ll_tv->vval.v_list != NULL)
-		&& !(lp->ll_tv->v_type == VAR_DICT
-					   && lp->ll_tv->vval.v_dict != NULL)
+		&& !(lp->ll_tv->v_type == VAR_DICT)
 		&& !(lp->ll_tv->v_type == VAR_BLOB
 					   && lp->ll_tv->vval.v_blob != NULL))
 	{
@@ -994,7 +993,20 @@ get_lval(
 		}
 	    }
 	    lp->ll_list = NULL;
+
+	    // a NULL dict is equivalent with an empty dict
+	    if (lp->ll_tv->vval.v_dict == NULL)
+	    {
+		lp->ll_tv->vval.v_dict = dict_alloc();
+		if (lp->ll_tv->vval.v_dict == NULL)
+		{
+		    clear_tv(&var1);
+		    return NULL;
+		}
+		++lp->ll_tv->vval.v_dict->dv_refcount;
+	    }
 	    lp->ll_dict = lp->ll_tv->vval.v_dict;
+
 	    lp->ll_di = dict_find(lp->ll_dict, key, len);
 
 	    // When assigning to a scope dictionary check that a function and
@@ -1055,7 +1067,8 @@ get_lval(
 	    }
 	    // existing variable, need to check if it can be changed
 	    else if ((flags & GLV_READ_ONLY) == 0
-			     && var_check_ro(lp->ll_di->di_flags, name, FALSE))
+			&& (var_check_ro(lp->ll_di->di_flags, name, FALSE)
+			  || var_check_lock(lp->ll_di->di_flags, name, FALSE)))
 	    {
 		clear_tv(&var1);
 		return NULL;
@@ -1200,7 +1213,7 @@ set_var_lval(
     char_u	*endp,
     typval_T	*rettv,
     int		copy,
-    int		flags,    // LET_IS_CONST and/or LET_NO_COMMAND
+    int		flags,    // LET_IS_CONST, LET_FORCEIT, LET_NO_COMMAND
     char_u	*op)
 {
     int		cc;
@@ -1220,7 +1233,7 @@ set_var_lval(
 		semsg(_(e_letwrong), op);
 		return;
 	    }
-	    if (var_check_lock(lp->ll_blob->bv_lock, lp->ll_name, FALSE))
+	    if (value_check_lock(lp->ll_blob->bv_lock, lp->ll_name, FALSE))
 		return;
 
 	    if (lp->ll_range && rettv->v_type == VAR_BLOB)
@@ -1297,7 +1310,7 @@ set_var_lval(
 	}
 	*endp = cc;
     }
-    else if (var_check_lock(lp->ll_newkey == NULL
+    else if (value_check_lock(lp->ll_newkey == NULL
 		? lp->ll_tv->v_lock
 		: lp->ll_tv->vval.v_dict->dv_lock, lp->ll_name, FALSE))
 	;
@@ -1317,7 +1330,7 @@ set_var_lval(
 	 */
 	for (ri = rettv->vval.v_list->lv_first; ri != NULL && ll_li != NULL; )
 	{
-	    if (var_check_lock(ll_li->li_tv.v_lock, lp->ll_name, FALSE))
+	    if (value_check_lock(ll_li->li_tv.v_lock, lp->ll_name, FALSE))
 		return;
 	    ri = ri->li_next;
 	    if (ri == NULL || (!lp->ll_empty2 && lp->ll_n2 == ll_n1))
@@ -1459,8 +1472,16 @@ tv_op(typval_T *tv1, typval_T *tv2, char_u *op)
 		if (*op != '+' || tv2->v_type != VAR_LIST)
 		    break;
 		// List += List
-		if (tv1->vval.v_list != NULL && tv2->vval.v_list != NULL)
-		    list_extend(tv1->vval.v_list, tv2->vval.v_list, NULL);
+		if (tv2->vval.v_list != NULL)
+		{
+		    if (tv1->vval.v_list == NULL)
+		    {
+			tv1->vval.v_list = tv2->vval.v_list;
+			++tv1->vval.v_list->lv_refcount;
+		    }
+		    else
+			list_extend(tv1->vval.v_list, tv2->vval.v_list, NULL);
+		}
 		return OK;
 
 	    case VAR_NUMBER:
@@ -2103,6 +2124,8 @@ eval1(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
     char_u  *p;
     int	    getnext;
 
+    CLEAR_POINTER(rettv);
+
     /*
      * Get the first variable.
      */
@@ -2356,6 +2379,9 @@ eval2(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    clear_evalarg(&local_evalarg, NULL);
 	else
 	    evalarg->eval_flags = orig_flags;
+
+	// Resulting value can be assigned to a bool.
+	rettv->v_lock |= VAR_BOOL_OK;
     }
 
     return OK;
@@ -2451,6 +2477,7 @@ eval3(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    *arg = skipwhite_and_linebreak(*arg + 2, evalarg_used);
 	    evalarg_used->eval_flags = result ? orig_flags
 						 : orig_flags & ~EVAL_EVALUATE;
+	    CLEAR_FIELD(var2);
 	    if (eval4(arg, &var2, evalarg_used) == FAIL)
 		return FAIL;
 
@@ -2487,6 +2514,9 @@ eval3(char_u **arg, typval_T *rettv, evalarg_T *evalarg)
 	    clear_evalarg(&local_evalarg, NULL);
 	else
 	    evalarg->eval_flags = orig_flags;
+
+	// Resulting value can be assigned to a bool.
+	rettv->v_lock |= VAR_BOOL_OK;
     }
 
     return OK;
@@ -3579,7 +3609,7 @@ eval_index(
 	    ;
 	if (keylen == 0)
 	    return FAIL;
-	*arg = skipwhite(key + keylen);
+	*arg = key + keylen;
     }
     else
     {
