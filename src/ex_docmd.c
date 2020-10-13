@@ -263,6 +263,7 @@ static void	ex_psearch(exarg_T *eap);
 static void	ex_tag(exarg_T *eap);
 static void	ex_tag_cmd(exarg_T *eap, char_u *name);
 #ifndef FEAT_EVAL
+# define ex_block		ex_ni
 # define ex_break		ex_ni
 # define ex_breakadd		ex_ni
 # define ex_breakdel		ex_ni
@@ -280,6 +281,7 @@ static void	ex_tag_cmd(exarg_T *eap, char_u *name);
 # define ex_echo		ex_ni
 # define ex_echohl		ex_ni
 # define ex_else		ex_ni
+# define ex_endblock		ex_ni
 # define ex_endfunction		ex_ni
 # define ex_endif		ex_ni
 # define ex_endtry		ex_ni
@@ -291,6 +293,7 @@ static void	ex_tag_cmd(exarg_T *eap, char_u *name);
 # define ex_function		ex_ni
 # define ex_if			ex_ni
 # define ex_let			ex_ni
+# define ex_var			ex_ni
 # define ex_lockvar		ex_ni
 # define ex_oldfiles		ex_ni
 # define ex_options		ex_ni
@@ -1233,6 +1236,10 @@ do_cmdline(
 
     if (trylevel == 0)
     {
+	// Just in case did_throw got set but current_exception wasn't.
+	if (current_exception == NULL)
+	    did_throw = FALSE;
+
 	/*
 	 * When an exception is being thrown out of the outermost try
 	 * conditional, discard the uncaught exception, disable the conversion
@@ -2421,6 +2428,7 @@ do_one_cmd(
 	    case CMD_eval:
 	    case CMD_execute:
 	    case CMD_filter:
+	    case CMD_final:
 	    case CMD_help:
 	    case CMD_hide:
 	    case CMD_ijump:
@@ -2442,9 +2450,9 @@ do_one_cmd(
 	    case CMD_noswapfile:
 	    case CMD_perl:
 	    case CMD_psearch:
-	    case CMD_python:
 	    case CMD_py3:
 	    case CMD_python3:
+	    case CMD_python:
 	    case CMD_return:
 	    case CMD_rightbelow:
 	    case CMD_ruby:
@@ -2460,6 +2468,7 @@ do_one_cmd(
 	    case CMD_topleft:
 	    case CMD_unlet:
 	    case CMD_unlockvar:
+	    case CMD_var:
 	    case CMD_verbose:
 	    case CMD_vertical:
 	    case CMD_wincmd:
@@ -3215,7 +3224,7 @@ find_ex_command(
 		*p == '('
 		    || (p == eap->cmd
 			? (
-			    // "{..." is an dict expression.
+			    // "{..." is a dict expression or block start.
 			    *eap->cmd == '{'
 			    // "'string'->func()" is an expression.
 			 || *eap->cmd == '\''
@@ -3227,6 +3236,12 @@ find_ex_command(
 			    // "varname->func()" is an expression.
 			: (*p == '-' && p[1] == '>')))
 	    {
+		if (*eap->cmd == '{' && ends_excmd(*skipwhite(eap->cmd + 1)))
+		{
+		    // "{" by itself is the start of a block.
+		    eap->cmdidx = CMD_block;
+		    return eap->cmd + 1;
+		}
 		eap->cmdidx = CMD_eval;
 		return eap->cmd;
 	    }
@@ -3244,7 +3259,7 @@ find_ex_command(
 		if (skip_expr(&after) == OK
 				  && (*after == '='
 				      || (*after != NUL && after[1] == '=')))
-		    eap->cmdidx = CMD_let;
+		    eap->cmdidx = CMD_var;
 		else
 		    eap->cmdidx = CMD_eval;
 		--emsg_silent;
@@ -3268,7 +3283,7 @@ find_ex_command(
 		}
 		if (p > eap->cmd && *skipwhite(p) == '=')
 		{
-		    eap->cmdidx = CMD_let;
+		    eap->cmdidx = CMD_var;
 		    return eap->cmd;
 		}
 	    }
@@ -3287,7 +3302,7 @@ find_ex_command(
 			|| *eap->cmd == '@'
 			|| lookup(eap->cmd, p - eap->cmd, cctx) != NULL)
 		{
-		    eap->cmdidx = CMD_let;
+		    eap->cmdidx = CMD_var;
 		    return eap->cmd;
 		}
 	    }
@@ -3348,7 +3363,7 @@ find_ex_command(
 	}
 
 	// check for non-alpha command
-	if (p == eap->cmd && vim_strchr((char_u *)"@*!=><&~#", *p) != NULL)
+	if (p == eap->cmd && vim_strchr((char_u *)"@*!=><&~#}", *p) != NULL)
 	    ++p;
 	len = (int)(p - eap->cmd);
 	if (*eap->cmd == 'd' && (p[-1] == 'l' || p[-1] == 'p'))
@@ -3416,6 +3431,10 @@ find_ex_command(
 	if (p == eap->cmd)
 	    eap->cmdidx = CMD_SIZE;
     }
+
+    // ":fina" means ":finally" for backwards compatibility.
+    if (eap->cmdidx == CMD_final && p - eap->cmd == 4)
+	eap->cmdidx = CMD_finally;
 
     return p;
 }
@@ -8030,10 +8049,6 @@ ex_normal(exarg_T *eap)
 
     restore_current_state(&save_state);
     --ex_normal_busy;
-#ifdef FEAT_PROP_POPUP
-    if (ex_normal_busy == 0)
-	ex_normal_busy_done = FALSE;
-#endif
     setmouse();
 #ifdef CURSOR_SHAPE
     ui_cursor_shape();		// may show different cursor shape

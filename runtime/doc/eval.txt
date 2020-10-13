@@ -1,4 +1,4 @@
-*eval.txt*	For Vim version 8.2.  Last change: 2020 Sep 22
+*eval.txt*	For Vim version 8.2.  Last change: 2020 Oct 05
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -133,7 +133,27 @@ non-zero number it means TRUE: >
 	:" executed
 To test for a non-empty string, use empty(): >
 	:if !empty("foo")
-<
+
+<						*falsy* *truthy*
+An expression can be used as a condition, ignoring the type and only using
+whether the value is "sort of true" or "sort of false".  Falsy is:
+	the number zero
+	empty string, blob, list or dictionary
+Other values are truthy.  Examples:
+	0	falsy
+	1	truthy
+	-1	truthy
+	0.0	falsy
+	0.1	truthy
+	''	falsy
+	'x'	truthy
+	[]	falsy
+	[0]	truthy
+	{}	falsy
+	#{x: 1} truthy
+	0z	falsy
+	0z00	truthy
+
 							*non-zero-arg*
 Function arguments often behave slightly different from |TRUE|: If the
 argument is present and it evaluates to a non-zero Number, |v:true| or a
@@ -877,10 +897,13 @@ Example: >
 All expressions within one level are parsed from left to right.
 
 
-expr1							*expr1* *E109*
+expr1				*expr1* *trinary* *falsy-operator* *??* *E109*
 -----
 
-expr2 ? expr1 : expr1
+The trinary operator: expr2 ? expr1 : expr1
+The falsy operator:   expr2 ?? expr1
+
+Trinary operator ~
 
 The expression before the '?' is evaluated to a number.  If it evaluates to
 |TRUE|, the result is the value of the expression between the '?' and ':',
@@ -902,6 +925,23 @@ To keep this readable, using |line-continuation| is suggested: >
 
 You should always put a space before the ':', otherwise it can be mistaken for
 use in a variable such as "a:1".
+
+Falsy operator ~
+
+This is also known as the "null coalescing operator", but that's too
+complicated, thus we just call it the falsy operator.
+
+The expression before the '??' is evaluated.  If it evaluates to
+|truthy|, this is used as the result.  Otherwise the expression after the '??'
+is evaluated and used as the result.  This is most useful to have a default
+value for an expression that may result in zero or empty: >
+	echo theList ?? 'list is empty'
+	echo GetName() ?? 'unknown'
+
+These are similar, but not equal: >
+	expr2 ?? expr1
+	expr2 ? expr2 : expr1
+In the second line "expr2" is evaluated twice.
 
 
 expr2 and expr3						*expr2* *expr3*
@@ -2661,7 +2701,7 @@ mzeval({expr})			any	evaluate |MzScheme| expression
 nextnonblank({lnum})		Number	line nr of non-blank line >= {lnum}
 nr2char({expr} [, {utf8}])	String	single char with ASCII/UTF8 value {expr}
 or({expr}, {expr})		Number	bitwise OR
-pathshorten({expr})		String	shorten directory names in a path
+pathshorten({expr} [, {len}])	String	shorten directory names in a path
 perleval({expr})		any	evaluate |Perl| expression
 popup_atcursor({what}, {options}) Number create popup window near the cursor
 popup_beval({what}, {options})	Number	create popup window for 'ballooneval'
@@ -3463,7 +3503,7 @@ byteidxcomp({expr}, {nr})					*byteidxcomp()*
 <		The first and third echo result in 3 ('e' plus composing
 		character is 3 bytes), the second echo results in 1 ('e' is
 		one byte).
-		Only works different from byteidx() when 'encoding' is set to
+		Only works differently from byteidx() when 'encoding' is set to
 		a Unicode encoding.
 
 		Can also be used as a |method|: >
@@ -7656,13 +7696,17 @@ or({expr}, {expr})					*or()*
 			:let bits = bits->or(0x80)
 
 
-pathshorten({expr})					*pathshorten()*
+pathshorten({expr} [, {len}])				*pathshorten()*
 		Shorten directory names in the path {expr} and return the
 		result.  The tail, the file name, is kept as-is.  The other
-		components in the path are reduced to single letters.  Leading
-		'~' and '.' characters are kept.  Example: >
+		components in the path are reduced to {len} letters in length.
+		If {len} is omitted or smaller than 1 then 1 is used (single
+		letters).  Leading '~' and '.' characters are kept.  Examples: >
 			:echo pathshorten('~/.vim/autoload/myfile.vim')
 <			~/.v/a/myfile.vim ~
+>
+			:echo pathshorten('~/.vim/autoload/myfile.vim', 2)
+<			~/.vi/au/myfile.vim ~
 		It doesn't matter if the path exists or not.
 
 		Can also be used as a |method|: >
@@ -10344,7 +10388,9 @@ synIDattr({synID}, {what} [, {mode}])			*synIDattr()*
 		"bg"		background color (as with "fg")
 		"font"		font name (only available in the GUI)
 				|highlight-font|
-		"sp"		special color (as with "fg") |highlight-guisp|
+		"sp"		special color for the GUI (as with "fg")
+				|highlight-guisp|
+		"ul"		underline color for cterm: number as a string
 		"fg#"		like "fg", but for the GUI and the GUI is
 				running the name in "#RRGGBB" form
 		"bg#"		like "fg#" for "bg"

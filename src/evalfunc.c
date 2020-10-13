@@ -779,7 +779,7 @@ static funcentry_T global_functions[] =
     {"nextnonblank",	1, 1, FEARG_1,	  ret_number,	f_nextnonblank},
     {"nr2char",		1, 2, FEARG_1,	  ret_string,	f_nr2char},
     {"or",		2, 2, FEARG_1,	  ret_number,	f_or},
-    {"pathshorten",	1, 1, FEARG_1,	  ret_string,	f_pathshorten},
+    {"pathshorten",	1, 2, FEARG_1,	  ret_string,	f_pathshorten},
     {"perleval",	1, 1, FEARG_1,	  ret_any,
 #ifdef FEAT_PERL
 	    f_perleval
@@ -1982,7 +1982,7 @@ f_deepcopy(typval_T *argvars, typval_T *rettv)
     if (argvars[1].v_type != VAR_UNKNOWN)
 	noref = (int)tv_get_bool_chk(&argvars[1], NULL);
     if (noref < 0 || noref > 1)
-	emsg(_(e_invarg));
+	semsg(_(e_using_number_as_bool_nr), noref);
     else
     {
 	copyID = get_copyID();
@@ -2436,6 +2436,12 @@ f_expand(typval_T *argvars, typval_T *rettv)
     expand_T	xpc;
     int		error = FALSE;
     char_u	*result;
+#ifdef BACKSLASH_IN_FILENAME
+    char_u	*p_csl_save = p_csl;
+
+    // avoid using 'completeslash' here
+    p_csl = empty_option;
+#endif
 
     rettv->v_type = VAR_STRING;
     if (argvars[1].v_type != VAR_UNKNOWN
@@ -2488,6 +2494,9 @@ f_expand(typval_T *argvars, typval_T *rettv)
 	else
 	    rettv->vval.v_string = NULL;
     }
+#ifdef BACKSLASH_IN_FILENAME
+    p_csl = p_csl_save;
+#endif
 }
 
 /*
@@ -2607,15 +2616,15 @@ f_feedkeys(typval_T *argvars, typval_T *rettv UNUSED)
 		msg_scroll = FALSE;
 
 		if (!dangerous)
+		{
 		    ++ex_normal_busy;
+		    ++in_feedkeys;
+		}
 		exec_normal(TRUE, lowlevel, TRUE);
 		if (!dangerous)
 		{
 		    --ex_normal_busy;
-#ifdef FEAT_PROP_POPUP
-		    if (ex_normal_busy == 0)
-			ex_normal_busy_done = FALSE;
-#endif
+		    --in_feedkeys;
 		}
 
 		msg_scroll |= save_msg_scroll;
@@ -8184,7 +8193,7 @@ f_strchars(typval_T *argvars, typval_T *rettv)
     if (argvars[1].v_type != VAR_UNKNOWN)
 	skipcc = (int)tv_get_bool(&argvars[1]);
     if (skipcc < 0 || skipcc > 1)
-	emsg(_(e_invarg));
+	semsg(_(e_using_number_as_bool_nr), skipcc);
     else
     {
 	func_mb_ptr2char_adv = skipcc ? mb_ptr2char_adv : mb_cptr2char_adv;
@@ -8595,7 +8604,9 @@ f_synIDattr(typval_T *argvars UNUSED, typval_T *rettv)
 		break;
 
 	case 'u':
-		if (STRLEN(what) <= 5 || TOLOWER_ASC(what[5]) != 'c')
+		if (TOLOWER_ASC(what[1]) == 'l')	// ul
+		    p = highlight_color(id, what, modec);
+		else if (STRLEN(what) <= 5 || TOLOWER_ASC(what[5]) != 'c')
 							// underline
 		    p = highlight_has_attr(id, HL_UNDERLINE, modec);
 		else

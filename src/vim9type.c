@@ -269,15 +269,17 @@ typval2type_int(typval_T *tv, garray_T *type_gap)
 
     if (tv->v_type == VAR_LIST)
     {
-	listitem_T *li;
+	list_T	    *l = tv->vval.v_list;
+	listitem_T  *li;
 
-	if (tv->vval.v_list == NULL || tv->vval.v_list->lv_first == NULL)
+	if (l == NULL || l->lv_first == NULL)
 	    return &t_list_empty;
+	if (l->lv_first == &range_list_item)
+	    return &t_list_number;
 
 	// Use the common type of all members.
-	member_type = typval2type(&tv->vval.v_list->lv_first->li_tv, type_gap);
-	for (li = tv->vval.v_list->lv_first->li_next; li != NULL;
-							     li = li->li_next)
+	member_type = typval2type(&l->lv_first->li_tv, type_gap);
+	for (li = l->lv_first->li_next; li != NULL; li = li->li_next)
 	    common_type(typval2type(&li->li_tv, type_gap),
 					  member_type, &member_type, type_gap);
 	return get_list_type(member_type, type_gap);
@@ -358,13 +360,12 @@ typval2type_int(typval_T *tv, garray_T *type_gap)
 need_convert_to_bool(type_T *type, typval_T *tv)
 {
     return type != NULL && type == &t_bool && tv->v_type != VAR_BOOL
-	    && ((tv->v_lock & VAR_BOOL_OK)
-		|| (tv->v_type == VAR_NUMBER
-		       && (tv->vval.v_number == 0 || tv->vval.v_number == 1)));
+	    && (tv->v_type == VAR_NUMBER
+		       && (tv->vval.v_number == 0 || tv->vval.v_number == 1));
 }
 
 /*
- * Get a type_T for a typval_T and handle VAR_BOOL_OK.
+ * Get a type_T for a typval_T.
  * "type_list" is used to temporarily create types in.
  */
     type_T *
@@ -373,9 +374,8 @@ typval2type(typval_T *tv, garray_T *type_gap)
     type_T *type = typval2type_int(tv, type_gap);
 
     if (type != NULL && type != &t_bool
-	    && ((tv->v_type == VAR_NUMBER
-		    && (tv->vval.v_number == 0 || tv->vval.v_number == 1))
-		|| (tv->v_lock & VAR_BOOL_OK)))
+	    && (tv->v_type == VAR_NUMBER
+		    && (tv->vval.v_number == 0 || tv->vval.v_number == 1)))
     {
 	type_T *newtype = get_type_ptr(type_gap);
 
@@ -922,6 +922,10 @@ common_type(type_T *type1, type_T *type2, type_T **dest, garray_T *type_gap)
 	    }
 	    else
 		*dest = alloc_func_type(common, -1, type_gap);
+	    // Use the minimum of min_argcount.
+	    (*dest)->tt_min_argcount =
+			type1->tt_min_argcount < type2->tt_min_argcount
+			     ? type1->tt_min_argcount : type2->tt_min_argcount;
 	    return;
 	}
     }

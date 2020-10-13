@@ -726,6 +726,8 @@ func Test_reduce()
   call assert_fails("call reduce({}, { acc, val -> acc + val }, 1)", 'E897:')
   call assert_fails("call reduce(0, { acc, val -> acc + val }, 1)", 'E897:')
   call assert_fails("call reduce('', { acc, val -> acc + val }, 1)", 'E897:')
+  call assert_fails("call reduce([1, 2], 'Xdoes_not_exist')", 'E117:')
+  call assert_fails("echo reduce(0z01, { acc, val -> 2 * acc + val }, '')", 'E39:')
 
   let g:lut = [1, 2, 3, 4]
   func EvilRemove()
@@ -1005,8 +1007,10 @@ func Test_null_list()
   call assert_equal('[]', string(l))
   call assert_equal(0, sort(l))
   call assert_equal(0, uniq(l))
-  call assert_fails("let k = [] + l", 'E15:')
-  call assert_fails("let k = l + []", 'E15:')
+  let k = [] + l
+  call assert_equal([], k)
+  let k = l + []
+  call assert_equal([], k)
   call assert_equal(0, len(copy(l)))
   call assert_equal(0, count(l, 5))
   call assert_equal([], deepcopy(l))

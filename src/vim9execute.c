@@ -239,7 +239,9 @@ call_dfunc(int cdf_idx, int argcount_arg, ectx_T *ectx)
     // Store current execution state in stack frame for ISN_RETURN.
     STACK_TV_BOT(0)->vval.v_number = ectx->ec_dfunc_idx;
     STACK_TV_BOT(1)->vval.v_number = ectx->ec_iidx;
-    STACK_TV_BOT(2)->vval.v_number = ectx->ec_frame_idx;
+    STACK_TV_BOT(2)->vval.v_string = (void *)ectx->ec_outer_stack;
+    STACK_TV_BOT(3)->vval.v_number = ectx->ec_outer_frame;
+    STACK_TV_BOT(4)->vval.v_number = ectx->ec_frame_idx;
     ectx->ec_frame_idx = ectx->ec_stack.ga_len;
 
     // Initialize local variables
@@ -310,9 +312,12 @@ handle_closure_in_use(ectx_T *ectx, int free_arguments)
     // Check if any created closure is still in use.
     for (idx = 0; idx < closure_count; ++idx)
     {
-	partial_T *pt = ((partial_T **)gap->ga_data)[gap->ga_len
-							- closure_count + idx];
+	partial_T   *pt;
+	int	    off = gap->ga_len - closure_count + idx;
 
+	if (off < 0)
+	    continue;  // count is off or already done
+	pt = ((partial_T **)gap->ga_data)[off];
 	if (pt->pt_refcount > 1)
 	{
 	    int refcount = pt->pt_refcount;
@@ -344,8 +349,8 @@ handle_closure_in_use(ectx_T *ectx, int free_arguments)
 	// Move them to the called function.
 	if (funcstack == NULL)
 	    return FAIL;
-	funcstack->fs_ga.ga_len = argcount + STACK_FRAME_SIZE
-							  + dfunc->df_varcount;
+	funcstack->fs_var_offset = argcount + STACK_FRAME_SIZE;
+	funcstack->fs_ga.ga_len = funcstack->fs_var_offset + dfunc->df_varcount;
 	stack = ALLOC_CLEAR_MULT(typval_T, funcstack->fs_ga.ga_len);
 	funcstack->fs_ga.ga_data = stack;
 	if (stack == NULL)
@@ -371,27 +376,22 @@ handle_closure_in_use(ectx_T *ectx, int free_arguments)
 	{
 	    tv = STACK_TV(ectx->ec_frame_idx + STACK_FRAME_SIZE + idx);
 
-	    // Do not copy a partial created for a local function.
-	    // TODO: this won't work if the closure actually uses it.  But when
-	    // keeping it it gets complicated: it will create a reference cycle
-	    // inside the partial, thus needs special handling for garbage
-	    // collection.
+	    // A partial created for a local function, that is also used as a
+	    // local variable, has a reference count for the variable, thus
+	    // will never go down to zero.  When all these refcounts are one
+	    // then the funcstack is unused.  We need to count how many we have
+	    // so we need when to check.
 	    if (tv->v_type == VAR_PARTIAL && tv->vval.v_partial != NULL)
 	    {
-		int i;
+		int	    i;
 
 		for (i = 0; i < closure_count; ++i)
-		{
-		    partial_T *pt = ((partial_T **)gap->ga_data)[gap->ga_len
-							  - closure_count + i];
-		    if (tv->vval.v_partial == pt)
-			break;
-		}
-		if (i < closure_count)
-		    continue;
+		    if (tv->vval.v_partial == ((partial_T **)gap->ga_data)[
+					      gap->ga_len - closure_count + i])
+			++funcstack->fs_min_refcount;
 	    }
 
-	    *(stack + argcount + STACK_FRAME_SIZE + idx) = *tv;
+	    *(stack + funcstack->fs_var_offset + idx) = *tv;
 	    tv->v_type = VAR_UNKNOWN;
 	}
 
@@ -417,6 +417,43 @@ handle_closure_in_use(ectx_T *ectx, int free_arguments)
 	ga_clear(gap);
 
     return OK;
+}
+
+/*
+ * Called when a partial is freed or its reference count goes down to one.  The
+ * funcstack may be the only reference to the partials in the local variables.
+ * Go over all of them, the funcref and can be freed if all partials
+ * referencing the funcstack have a reference count of one.
+ */
+    void
+funcstack_check_refcount(funcstack_T *funcstack)
+{
+    int		    i;
+    garray_T	    *gap = &funcstack->fs_ga;
+    int		    done = 0;
+
+    if (funcstack->fs_refcount > funcstack->fs_min_refcount)
+	return;
+    for (i = funcstack->fs_var_offset; i < gap->ga_len; ++i)
+    {
+	typval_T *tv = ((typval_T *)gap->ga_data) + i;
+
+	if (tv->v_type == VAR_PARTIAL && tv->vval.v_partial != NULL
+		&& tv->vval.v_partial->pt_funcstack == funcstack
+		&& tv->vval.v_partial->pt_refcount == 1)
+	    ++done;
+    }
+    if (done == funcstack->fs_min_refcount)
+    {
+	typval_T	*stack = gap->ga_data;
+
+	// All partials referencing the funcstack have a reference count of
+	// one, thus the funcstack is no longer of use.
+	for (i = 0; i < gap->ga_len; ++i)
+	    clear_tv(stack + i);
+	vim_free(stack);
+	vim_free(funcstack);
+    }
 }
 
 /*
@@ -452,7 +489,11 @@ func_return(ectx_T *ectx)
     // Restore the previous frame.
     ectx->ec_dfunc_idx = STACK_TV(ectx->ec_frame_idx)->vval.v_number;
     ectx->ec_iidx = STACK_TV(ectx->ec_frame_idx + 1)->vval.v_number;
-    ectx->ec_frame_idx = STACK_TV(ectx->ec_frame_idx + 2)->vval.v_number;
+    ectx->ec_outer_stack =
+		       (void *)STACK_TV(ectx->ec_frame_idx + 2)->vval.v_string;
+    ectx->ec_outer_frame = STACK_TV(ectx->ec_frame_idx + 3)->vval.v_number;
+    // restoring ec_frame_idx must be last
+    ectx->ec_frame_idx = STACK_TV(ectx->ec_frame_idx + 4)->vval.v_number;
     dfunc = ((dfunc_T *)def_functions.ga_data) + ectx->ec_dfunc_idx;
     ectx->ec_instr = dfunc->df_instr;
 
@@ -729,7 +770,7 @@ store_var(char_u *name, typval_T *tv)
     funccal_entry_T entry;
 
     save_funccal(&entry);
-    set_var_const(name, NULL, tv, FALSE, LET_NO_COMMAND);
+    set_var_const(name, NULL, tv, FALSE, ASSIGN_NO_DECL);
     restore_funccal();
 }
 
@@ -1892,14 +1933,26 @@ call_def_function(
 	    case ISN_JUMP:
 		{
 		    jumpwhen_T	when = iptr->isn_arg.jump.jump_when;
+		    int		error = FALSE;
 		    int		jump = TRUE;
 
 		    if (when != JUMP_ALWAYS)
 		    {
 			tv = STACK_TV_BOT(-1);
-			jump = tv2bool(tv);
+			if (when == JUMP_IF_COND_FALSE
+				|| when == JUMP_IF_FALSE
+				|| when == JUMP_IF_COND_TRUE)
+			{
+			    SOURCING_LNUM = iptr->isn_lnum;
+			    jump = tv_get_bool_chk(tv, &error);
+			    if (error)
+				goto on_error;
+			}
+			else
+			    jump = tv2bool(tv);
 			if (when == JUMP_IF_FALSE
-					     || when == JUMP_AND_KEEP_IF_FALSE)
+					     || when == JUMP_AND_KEEP_IF_FALSE
+					     || when == JUMP_IF_COND_FALSE)
 			    jump = !jump;
 			if (when == JUMP_IF_FALSE || !jump)
 			{
@@ -2615,13 +2668,25 @@ call_def_function(
 		break;
 
 	    case ISN_2BOOL:
+	    case ISN_COND2BOOL:
 		{
 		    int n;
+		    int error = FALSE;
 
 		    tv = STACK_TV_BOT(-1);
-		    n = tv2bool(tv);
-		    if (iptr->isn_arg.number)  // invert
-			n = !n;
+		    if (iptr->isn_type == ISN_2BOOL)
+		    {
+			n = tv2bool(tv);
+			if (iptr->isn_arg.number)  // invert
+			    n = !n;
+		    }
+		    else
+		    {
+			SOURCING_LNUM = iptr->isn_lnum;
+			n = tv_get_bool_chk(tv, &error);
+			if (error)
+			    goto on_error;
+		    }
 		    clear_tv(tv);
 		    tv->v_type = VAR_BOOL;
 		    tv->vval.v_number = n ? VVAL_TRUE : VVAL_FALSE;
@@ -2734,13 +2799,13 @@ done:
     ret = OK;
 
 failed:
-    // Also deal with closures when failed, they may already be in use
-    // somewhere.
-    handle_closure_in_use(&ectx, FALSE);
-
     // When failed need to unwind the call stack.
     while (ectx.ec_frame_idx != initial_frame_idx)
 	func_return(&ectx);
+
+    // Deal with any remaining closures, they may be in use somewhere.
+    if (ectx.ec_funcrefs.ga_len > 0)
+	handle_closure_in_use(&ectx, FALSE);
 
     estack_pop();
     current_sctx = save_current_sctx;
@@ -3183,6 +3248,12 @@ ex_disassemble(exarg_T *eap)
 			case JUMP_AND_KEEP_IF_FALSE:
 			    when = "JUMP_AND_KEEP_IF_FALSE";
 			    break;
+			case JUMP_IF_COND_FALSE:
+			    when = "JUMP_IF_COND_FALSE";
+			    break;
+			case JUMP_IF_COND_TRUE:
+			    when = "JUMP_IF_COND_TRUE";
+			    break;
 		    }
 		    smsg("%4d %s -> %d", current, when,
 						iptr->isn_arg.jump.jump_where);
@@ -3333,6 +3404,7 @@ ex_disassemble(exarg_T *eap)
 				iptr->isn_arg.checklen.cl_more_OK ? ">= " : "",
 				iptr->isn_arg.checklen.cl_min_len);
 			       break;
+	    case ISN_COND2BOOL: smsg("%4d COND2BOOL", current); break;
 	    case ISN_2BOOL: if (iptr->isn_arg.number)
 				smsg("%4d INVERT (!val)", current);
 			    else
@@ -3364,7 +3436,7 @@ ex_disassemble(exarg_T *eap)
 }
 
 /*
- * Return TRUE when "tv" is not falsey: non-zero, non-empty string, non-empty
+ * Return TRUE when "tv" is not falsy: non-zero, non-empty string, non-empty
  * list, etc.  Mostly like what JavaScript does, except that empty list and
  * empty dictionary are FALSE.
  */

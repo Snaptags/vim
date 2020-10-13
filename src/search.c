@@ -759,6 +759,9 @@ searchit(
 					     NULL, NULL
 #endif
 						      );
+		// vim_regexec_multi() may clear "regprog"
+		if (regmatch.regprog == NULL)
+		    break;
 		// Abort searching on an error (e.g., out of stack).
 		if (called_emsg > called_emsg_before
 #ifdef FEAT_RELTIME
@@ -858,6 +861,9 @@ searchit(
 				match_ok = FALSE;
 				break;
 			    }
+			    // vim_regexec_multi() may clear "regprog"
+			    if (regmatch.regprog == NULL)
+				break;
 			    matchpos = regmatch.startpos[0];
 			    endpos = regmatch.endpos[0];
 # ifdef FEAT_EVAL
@@ -972,6 +978,9 @@ searchit(
 #endif
 				break;
 			    }
+			    // vim_regexec_multi() may clear "regprog"
+			    if (regmatch.regprog == NULL)
+				break;
 
 			    // Need to get the line pointer again, a
 			    // multi-line search may have made it invalid.
@@ -1064,6 +1073,10 @@ searchit(
 		    break;	    // if second loop, stop where started
 	    }
 	    at_first_line = FALSE;
+
+	    // vim_regexec_multi() may clear "regprog"
+	    if (regmatch.regprog == NULL)
+		break;
 
 	    /*
 	     * Stop the search if wrapscan isn't set, "stop_lnum" is
@@ -2911,7 +2924,8 @@ is_zero_width(char_u *pattern, int move, pos_T *cur, int direction)
 			       pos.lnum, regmatch.startpos[0].col, NULL, NULL);
 	    if (nmatched != 0)
 		break;
-	} while (direction == FORWARD ? regmatch.startpos[0].col < pos.col
+	} while (regmatch.regprog != NULL
+		&& direction == FORWARD ? regmatch.startpos[0].col < pos.col
 				      : regmatch.startpos[0].col > pos.col);
 
 	if (called_emsg == called_emsg_before)
@@ -2947,10 +2961,16 @@ current_search(
     int		flags = 0;
     pos_T	save_VIsual = VIsual;
     int		zero_width;
+    int		skip_first_backward;
 
     // Correct cursor when 'selection' is exclusive
     if (VIsual_active && *p_sel == 'e' && LT_POS(VIsual, curwin->w_cursor))
 	dec_cursor();
+
+    // When searching forward and the cursor is at the start of the Visual
+    // area, skip the first search backward, otherwise it doesn't move.
+    skip_first_backward = forward && VIsual_active
+					   && LT_POS(curwin->w_cursor, VIsual);
 
     orig_pos = pos = curwin->w_cursor;
     if (VIsual_active)
@@ -2970,12 +2990,16 @@ current_search(
     /*
      * The trick is to first search backwards and then search forward again,
      * so that a match at the current cursor position will be correctly
-     * captured.
+     * captured.  When "forward" is false do it the other way around.
      */
     for (i = 0; i < 2; i++)
     {
 	if (forward)
+	{
+	    if (i == 0 && skip_first_backward)
+		continue;
 	    dir = i;
+	}
 	else
 	    dir = !i;
 
@@ -3029,11 +3053,18 @@ current_search(
     if (!VIsual_active)
 	VIsual = start_pos;
 
-    // put cursor on last character of match
+    // put the cursor after the match
     curwin->w_cursor = end_pos;
     if (LT_POS(VIsual, end_pos) && forward)
-	dec_cursor();
-    else if (VIsual_active && LT_POS(curwin->w_cursor, VIsual))
+    {
+	if (skip_first_backward)
+	    // put the cursor on the start of the match
+	    curwin->w_cursor = pos;
+	else
+	    // put the cursor on last character of match
+	    dec_cursor();
+    }
+    else if (VIsual_active && LT_POS(curwin->w_cursor, VIsual) && forward)
 	curwin->w_cursor = pos;   // put the cursor on the start of the match
     VIsual_active = TRUE;
     VIsual_mode = 'v';

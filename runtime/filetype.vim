@@ -1,7 +1,7 @@
 " Vim support file to detect file types
 "
 " Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last Change:	2020 Aug 04
+" Last Change:	2020 Sep 30
 
 " Listen very carefully, I will say this only once
 if exists("did_load_filetypes")
@@ -317,7 +317,7 @@ au BufNewFile,BufRead *.css			setf css
 au BufNewFile,BufRead *.con			setf cterm
 
 " Changelog
-au BufNewFile,BufRead changelog.Debian,changelog.dch,NEWS.Debian,NEWS.dch
+au BufNewFile,BufRead changelog.Debian,changelog.dch,NEWS.Debian,NEWS.dch,*/debian/changelog
 					\	setf debchangelog
 
 au BufNewFile,BufRead [cC]hange[lL]og
@@ -1203,7 +1203,7 @@ au BufNewFile,BufRead *.pod6			setf pod6
 au BufNewFile,BufRead *.php,*.php\d,*.phtml,*.ctp	setf php
 
 " PHP config
-au BufNewFile,BufRead php.ini,php.ini-*		setf dosini
+au BufNewFile,BufRead php.ini-*			setf dosini
 
 " Pike and Cmod
 au BufNewFile,BufRead *.pike,*.pmod		setf pike
@@ -1341,13 +1341,6 @@ au BufNewFile,BufRead *.rego			setf rego
 
 " Rexx
 au BufNewFile,BufRead *.rex,*.orx,*.rxo,*.rxj,*.jrexx,*.rexxj,*.rexx,*.testGroup,*.testUnit	setf rexx
-
-" R (Splus)
-if has("fname_case")
-  au BufNewFile,BufRead *.s,*.S			setf r
-else
-  au BufNewFile,BufRead *.s			setf r
-endif
 
 " R Help file
 if has("fname_case")

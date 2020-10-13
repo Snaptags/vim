@@ -12,76 +12,77 @@ let g:alist = [7]
 let g:astring = 'text'
 
 def Test_assignment_bool()
-  let bool1: bool = true
+  var bool1: bool = true
   assert_equal(v:true, bool1)
-  let bool2: bool = false
+  var bool2: bool = false
   assert_equal(v:false, bool2)
 
-  let bool3: bool = 0
+  var bool3: bool = 0
   assert_equal(false, bool3)
-  let bool4: bool = 1
+  var bool4: bool = 1
   assert_equal(true, bool4)
 
-  let bool5: bool = 'yes' && 'no'
+  var bool5: bool = 1 && true
   assert_equal(true, bool5)
-  let bool6: bool = [] && 99
+  var bool6: bool = 0 && 1
   assert_equal(false, bool6)
-  let bool7: bool = [] || #{a: 1} && 99
+  var bool7: bool = 0 || 1 && true
   assert_equal(true, bool7)
 
-  let lines =<< trim END
+  var lines =<< trim END
     vim9script
     def GetFlag(): bool
-      let flag: bool = 1
+      var flag: bool = 1
       return flag
     enddef
-    let flag: bool = GetFlag()
+    var flag: bool = GetFlag()
     assert_equal(true, flag)
     flag = 0
     assert_equal(false, flag)
     flag = 1
     assert_equal(true, flag)
-    flag = 99 || 123
+    flag = 1 || true
     assert_equal(true, flag)
-    flag = 'yes' && []
+    flag = 1 && false
     assert_equal(false, flag)
   END
   CheckScriptSuccess(lines)
-  CheckDefAndScriptFailure(['let x: bool = 2'], 'E1012:')
-  CheckDefAndScriptFailure(['let x: bool = -1'], 'E1012:')
-  CheckDefAndScriptFailure(['let x: bool = [1]'], 'E1012:')
-  CheckDefAndScriptFailure(['let x: bool = {}'], 'E1012:')
-  CheckDefAndScriptFailure(['let x: bool = "x"'], 'E1012:')
+  CheckDefAndScriptFailure(['var x: bool = 2'], 'E1012:')
+  CheckDefAndScriptFailure(['var x: bool = -1'], 'E1012:')
+  CheckDefAndScriptFailure(['var x: bool = [1]'], 'E1012:')
+  CheckDefAndScriptFailure(['var x: bool = {}'], 'E1012:')
+  CheckDefAndScriptFailure(['var x: bool = "x"'], 'E1012:')
 enddef
 
 def Test_syntax()
-  let var = 234
-  let other: list<string> = ['asdf']
+  var name = 234
+  var other: list<string> = ['asdf']
 enddef
 
 def Test_assignment()
-  CheckDefFailure(['let x:string'], 'E1069:')
-  CheckDefFailure(['let x:string = "x"'], 'E1069:')
-  CheckDefFailure(['let a:string = "x"'], 'E1069:')
-  CheckDefFailure(['let lambda = {-> "lambda"}'], 'E704:')
+  CheckDefFailure(['var x:string'], 'E1069:')
+  CheckDefFailure(['var x:string = "x"'], 'E1069:')
+  CheckDefFailure(['var a:string = "x"'], 'E1069:')
+  CheckDefFailure(['var lambda = {-> "lambda"}'], 'E704:')
+  CheckScriptFailure(['var x = "x"'], 'E1124:')
 
-  let nr: number = 1234
-  CheckDefFailure(['let nr: number = "asdf"'], 'E1012:')
+  var nr: number = 1234
+  CheckDefFailure(['var nr: number = "asdf"'], 'E1012:')
 
-  let a: number = 6 #comment
+  var a: number = 6 #comment
   assert_equal(6, a)
 
   if has('channel')
-    let chan1: channel
-    let job1: job
-    let job2: job = job_start('willfail')
+    var chan1: channel
+    var job1: job
+    # calling job_start() is in test_vim9_fails.vim, it causes leak reports
   endif
   if has('float')
-    let float1: float = 3.4
+    var float1: float = 3.4
   endif
-  let Funky1: func
-  let Funky2: func = function('len')
-  let Party2: func = funcref('g:Test_syntax')
+  var Funky1: func
+  var Funky2: func = function('len')
+  var Party2: func = funcref('g:Test_syntax')
 
   g:newvar = 'new'  #comment
   assert_equal('new', g:newvar)
@@ -97,7 +98,7 @@ def Test_assignment()
   assert_equal('foobar', $ENVVAR)
   $ENVVAR = ''
 
-  let lines =<< trim END
+  var lines =<< trim END
     vim9script
     $ENVVAR = 'barfoo'
     assert_equal('barfoo', $ENVVAR)
@@ -126,15 +127,15 @@ def Test_assignment()
   assert_equal(2, &ts)
 
   if has('float')
-    let f100: float = 100.0
+    var f100: float = 100.0
     f100 /= 5
     assert_equal(20.0, f100)
 
-    let f200: float = 200.0
+    var f200: float = 200.0
     f200 /= 5.0
     assert_equal(40.0, f200)
 
-    CheckDefFailure(['let nr: number = 200', 'nr /= 5.0'], 'E1012:')
+    CheckDefFailure(['var nr: number = 200', 'nr /= 5.0'], 'E1012:')
   endif
 
   lines =<< trim END
@@ -163,11 +164,11 @@ def Test_assignment()
   CheckDefFailure(['&path += 3'], 'E1012:')
   CheckDefExecFailure(['&bs = "asdf"'], 'E474:')
   # test freeing ISN_STOREOPT
-  CheckDefFailure(['&ts = 3', 'let asdf'], 'E1022:')
+  CheckDefFailure(['&ts = 3', 'var asdf'], 'E1022:')
   &ts = 8
 
   lines =<< trim END
-    let save_TI = &t_TI
+    var save_TI = &t_TI
     &t_TI = ''
     assert_equal('', &t_TI)
     &t_TI = 'xxx'
@@ -179,8 +180,8 @@ def Test_assignment()
   CheckDefFailure(['&t_TI = 123'], 'E1012:')
   CheckScriptFailure(['vim9script', '&t_TI = 123'], 'E928:')
 
-  CheckDefFailure(['let s:var = 123'], 'E1101:')
-  CheckDefFailure(['let s:var: number'], 'E1101:')
+  CheckDefFailure(['var s:var = 123'], 'E1101:')
+  CheckDefFailure(['var s:var: number'], 'E1101:')
 
   lines =<< trim END
     vim9script
@@ -215,65 +216,74 @@ def Test_assignment()
   CheckDefFailure(['v:errmsg += "more"'], 'E1051:')
   CheckDefFailure(['v:errmsg += 123'], 'E1012:')
 
-  # this should not leak
-  if 0
-    let text =<< trim END
-      some text
-    END
-  endif
+  var text =<< trim END
+    some text
+  END
 enddef
 
 def Test_extend_list()
-  let lines =<< trim END
+  var lines =<< trim END
       vim9script
-      let l: list<number>
+      var l: list<number>
       l += [123]
       assert_equal([123], l)
 
-      let d: dict<number>
+      var d: dict<number>
       d['one'] = 1
       assert_equal(#{one: 1}, d)
+  END
+  CheckScriptSuccess(lines)
+
+  # appending to NULL list from a function
+  lines =<< trim END
+      vim9script
+      var list: list<string>
+      def Func()
+        list += ['a', 'b']
+      enddef
+      Func()
+      assert_equal(['a', 'b'], list)
   END
   CheckScriptSuccess(lines)
 enddef
 
 def Test_single_letter_vars()
   # single letter variables
-  let a: number = 123
+  var a: number = 123
   a = 123
   assert_equal(123, a)
-  let b: number
+  var b: number
   b = 123
   assert_equal(123, b)
-  let g: number
+  var g: number
   g = 123
   assert_equal(123, g)
-  let s: number
+  var s: number
   s = 123
   assert_equal(123, s)
-  let t: number
+  var t: number
   t = 123
   assert_equal(123, t)
-  let v: number
+  var v: number
   v = 123
   assert_equal(123, v)
-  let w: number
+  var w: number
   w = 123
   assert_equal(123, w)
 enddef
 
 def Test_vim9_single_char_vars()
-  let lines =<< trim END
+  var lines =<< trim END
       vim9script
 
       # single character variable declarations work
-      let a: string
-      let b: number
-      let l: list<any>
-      let s: string
-      let t: number
-      let v: number
-      let w: number
+      var a: string
+      var b: number
+      var l: list<any>
+      var s: string
+      var t: number
+      var v: number
+      var w: number
 
       # script-local variables can be used without s: prefix
       a = 'script-a'
@@ -298,14 +308,14 @@ def Test_vim9_single_char_vars()
 enddef
 
 def Test_assignment_list()
-  let list1: list<bool> = [false, true, false]
-  let list2: list<number> = [1, 2, 3]
-  let list3: list<string> = ['sdf', 'asdf']
-  let list4: list<any> = ['yes', true, 1234]
-  let list5: list<blob> = [0z01, 0z02]
+  var list1: list<bool> = [false, true, false]
+  var list2: list<number> = [1, 2, 3]
+  var list3: list<string> = ['sdf', 'asdf']
+  var list4: list<any> = ['yes', true, 1234]
+  var list5: list<blob> = [0z01, 0z02]
 
-  let listS: list<string> = []
-  let listN: list<number> = []
+  var listS: list<string> = []
+  var listN: list<number> = []
 
   assert_equal([1, 2, 3], list2)
   list2[-1] = 99
@@ -320,19 +330,19 @@ def Test_assignment_list()
   list3 += ['end']
   assert_equal(['sdf', 'asdf', 'end'], list3)
 
-  CheckDefExecFailure(['let ll = [1, 2, 3]', 'll[-4] = 6'], 'E684:')
-  CheckDefExecFailure(['let [v1, v2] = [1, 2]'], 'E1092:')
+  CheckDefExecFailure(['var ll = [1, 2, 3]', 'll[-4] = 6'], 'E684:')
+  CheckDefExecFailure(['var [v1, v2] = [1, 2]'], 'E1092:')
 
   # type becomes list<any>
-  let somelist = rand() > 0 ? [1, 2, 3] : ['a', 'b', 'c']
+  var somelist = rand() > 0 ? [1, 2, 3] : ['a', 'b', 'c']
 enddef
 
 def Test_assignment_list_vim9script()
-  let lines =<< trim END
+  var lines =<< trim END
     vim9script
-    let v1: number
-    let v2: number
-    let v3: number
+    var v1: number
+    var v2: number
+    var v3: number
     [v1, v2, v3] = [1, 2, 3]
     assert_equal([1, 2, 3], [v1, v2, v3])
   END
@@ -340,27 +350,27 @@ def Test_assignment_list_vim9script()
 enddef
 
 def Test_assignment_dict()
-  let dict1: dict<bool> = #{one: false, two: true}
-  let dict2: dict<number> = #{one: 1, two: 2}
-  let dict3: dict<string> = #{key: 'value'}
-  let dict4: dict<any> = #{one: 1, two: '2'}
-  let dict5: dict<blob> = #{one: 0z01, two: 0z02}
+  var dict1: dict<bool> = #{one: false, two: true}
+  var dict2: dict<number> = #{one: 1, two: 2}
+  var dict3: dict<string> = #{key: 'value'}
+  var dict4: dict<any> = #{one: 1, two: '2'}
+  var dict5: dict<blob> = #{one: 0z01, two: 0z02}
 
   # overwrite
   dict3['key'] = 'another'
 
   # empty key can be used
-  let dd = {}
+  var dd = {}
   dd[""] = 6
   assert_equal({'': 6}, dd)
 
   # type becomes dict<any>
-  let somedict = rand() > 0 ? #{a: 1, b: 2} : #{a: 'a', b: 'b'}
+  var somedict = rand() > 0 ? #{a: 1, b: 2} : #{a: 'a', b: 'b'}
 
   # assignment to script-local dict
-  let lines =<< trim END
+  var lines =<< trim END
     vim9script
-    let test: dict<any> = {}
+    var test: dict<any> = {}
     def FillDict(): dict<any>
       test['a'] = 43
       return test
@@ -371,7 +381,7 @@ def Test_assignment_dict()
 
   lines =<< trim END
     vim9script
-    let test: dict<any>
+    var test: dict<any>
     def FillDict(): dict<any>
       test['a'] = 43
       return test
@@ -408,7 +418,7 @@ enddef
 def Test_assignment_local()
   # Test in a separated file in order not to the current buffer/window/tab is
   # changed.
-  let script_lines: list<string> =<< trim END
+  var script_lines: list<string> =<< trim END
     let b:existing = 'yes'
     let w:existing = 'yes'
     let t:existing = 'yes'
@@ -446,37 +456,37 @@ enddef
 def Test_assignment_default()
 
   # Test default values.
-  let thebool: bool
+  var thebool: bool
   assert_equal(v:false, thebool)
 
-  let thenumber: number
+  var thenumber: number
   assert_equal(0, thenumber)
 
   if has('float')
-    let thefloat: float
+    var thefloat: float
     assert_equal(0.0, thefloat)
   endif
 
-  let thestring: string
+  var thestring: string
   assert_equal('', thestring)
 
-  let theblob: blob
+  var theblob: blob
   assert_equal(0z, theblob)
 
-  let Thefunc: func
+  var Thefunc: func
   assert_equal(test_null_function(), Thefunc)
 
-  let thelist: list<any>
+  var thelist: list<any>
   assert_equal([], thelist)
 
-  let thedict: dict<any>
+  var thedict: dict<any>
   assert_equal({}, thedict)
 
   if has('channel')
-    let thejob: job
+    var thejob: job
     assert_equal(test_null_job(), thejob)
 
-    let thechannel: channel
+    var thechannel: channel
     assert_equal(test_null_channel(), thechannel)
 
     if has('unix') && executable('cat')
@@ -487,14 +497,14 @@ def Test_assignment_default()
     endif
   endif
 
-  let nr = 1234 | nr = 5678
+  var nr = 1234 | nr = 5678
   assert_equal(5678, nr)
 enddef
 
 def Test_assignment_var_list()
-  let v1: string
-  let v2: string
-  let vrem: list<string>
+  var v1: string
+  var v2: string
+  var vrem: list<string>
   [v1] = ['aaa']
   assert_equal('aaa', v1)
 
@@ -519,18 +529,18 @@ def Test_assignment_var_list()
 enddef
 
 def Test_assignment_vim9script()
-  let lines =<< trim END
+  var lines =<< trim END
     vim9script
     def Func(): list<number>
       return [1, 2]
     enddef
-    let var1: number
-    let var2: number
-    [var1, var2] =
+    var name1: number
+    var name2: number
+    [name1, name2] =
           Func()
-    assert_equal(1, var1)
-    assert_equal(2, var2)
-    let ll =
+    assert_equal(1, name1)
+    assert_equal(2, name2)
+    var ll =
           Func()
     assert_equal([1, 2], ll)
 
@@ -551,18 +561,28 @@ def Test_assignment_vim9script()
       assert_equal('plus', @+)
     endif
 
-    let a: number = 123
+    var a: number = 123
     assert_equal(123, a)
-    let s: string = 'yes'
+    var s: string = 'yes'
     assert_equal('yes', s)
-    let b: number = 42
+    var b: number = 42
     assert_equal(42, b)
-    let w: number = 43
+    var w: number = 43
     assert_equal(43, w)
-    let t: number = 44
+    var t: number = 44
     assert_equal(44, t)
   END
   CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      var n: number
+      def Func()
+        n = 'string'
+      enddef
+      defcompile
+  END
+  CheckScriptFailure(lines, 'E1012: Type mismatch; expected number but got string')
 enddef
 
 def Mess(): string
@@ -571,80 +591,80 @@ def Mess(): string
 enddef
 
 def Test_assignment_failure()
-  CheckDefFailure(['let var=234'], 'E1004:')
-  CheckDefFailure(['let var =234'], 'E1004:')
-  CheckDefFailure(['let var= 234'], 'E1004:')
+  CheckDefFailure(['var name=234'], 'E1004:')
+  CheckDefFailure(['var name =234'], 'E1004:')
+  CheckDefFailure(['var name= 234'], 'E1004:')
 
-  CheckScriptFailure(['vim9script', 'let var=234'], 'E1004:')
-  CheckScriptFailure(['vim9script', 'let var=234'], "before and after '='")
-  CheckScriptFailure(['vim9script', 'let var =234'], 'E1004:')
-  CheckScriptFailure(['vim9script', 'let var= 234'], 'E1004:')
-  CheckScriptFailure(['vim9script', 'let var = 234', 'var+=234'], 'E1004:')
-  CheckScriptFailure(['vim9script', 'let var = 234', 'var+=234'], "before and after '+='")
-  CheckScriptFailure(['vim9script', 'let var = "x"', 'var..="y"'], 'E1004:')
-  CheckScriptFailure(['vim9script', 'let var = "x"', 'var..="y"'], "before and after '..='")
+  CheckScriptFailure(['vim9script', 'var name=234'], 'E1004:')
+  CheckScriptFailure(['vim9script', 'var name=234'], "before and after '='")
+  CheckScriptFailure(['vim9script', 'var name =234'], 'E1004:')
+  CheckScriptFailure(['vim9script', 'var name= 234'], 'E1004:')
+  CheckScriptFailure(['vim9script', 'var name = 234', 'name+=234'], 'E1004:')
+  CheckScriptFailure(['vim9script', 'var name = 234', 'name+=234'], "before and after '+='")
+  CheckScriptFailure(['vim9script', 'var name = "x"', 'name..="y"'], 'E1004:')
+  CheckScriptFailure(['vim9script', 'var name = "x"', 'name..="y"'], "before and after '..='")
 
-  CheckDefFailure(['let true = 1'], 'E1034:')
-  CheckDefFailure(['let false = 1'], 'E1034:')
+  CheckDefFailure(['var true = 1'], 'E1034:')
+  CheckDefFailure(['var false = 1'], 'E1034:')
 
   CheckDefFailure(['[a; b; c] = g:list'], 'E452:')
-  CheckDefExecFailure(['let a: number',
+  CheckDefExecFailure(['var a: number',
                        '[a] = test_null_list()'], 'E1093:')
-  CheckDefExecFailure(['let a: number',
+  CheckDefExecFailure(['var a: number',
                        '[a] = []'], 'E1093:')
-  CheckDefExecFailure(['let x: number',
-                       'let y: number',
+  CheckDefExecFailure(['var x: number',
+                       'var y: number',
                        '[x, y] = [1]'], 'E1093:')
-  CheckDefExecFailure(['let x: number',
-                       'let y: number',
-                       'let z: list<number>',
+  CheckDefExecFailure(['var x: number',
+                       'var y: number',
+                       'var z: list<number>',
                        '[x, y; z] = [1]'], 'E1093:')
 
-  CheckDefFailure(['let somevar'], "E1022:")
-  CheckDefFailure(['let &tabstop = 4'], 'E1052:')
+  CheckDefFailure(['var somevar'], "E1022:")
+  CheckDefFailure(['var &tabstop = 4'], 'E1052:')
   CheckDefFailure(['&g:option = 5'], 'E113:')
-  CheckScriptFailure(['vim9script', 'let &tabstop = 4'], 'E1052:')
+  CheckScriptFailure(['vim9script', 'var &tabstop = 4'], 'E1052:')
 
-  CheckDefFailure(['let $VAR = 5'], 'E1016: Cannot declare an environment variable:')
-  CheckScriptFailure(['vim9script', 'let $ENV = "xxx"'], 'E1016:')
+  CheckDefFailure(['var $VAR = 5'], 'E1016: Cannot declare an environment variable:')
+  CheckScriptFailure(['vim9script', 'var $ENV = "xxx"'], 'E1016:')
 
   if has('dnd')
-    CheckDefFailure(['let @~ = 5'], 'E1066:')
+    CheckDefFailure(['var @~ = 5'], 'E1066:')
   else
-    CheckDefFailure(['let @~ = 5'], 'E354:')
+    CheckDefFailure(['var @~ = 5'], 'E354:')
     CheckDefFailure(['@~ = 5'], 'E354:')
   endif
-  CheckDefFailure(['let @a = 5'], 'E1066:')
-  CheckDefFailure(['let @/ = "x"'], 'E1066:')
-  CheckScriptFailure(['vim9script', 'let @a = "abc"'], 'E1066:')
+  CheckDefFailure(['var @a = 5'], 'E1066:')
+  CheckDefFailure(['var @/ = "x"'], 'E1066:')
+  CheckScriptFailure(['vim9script', 'var @a = "abc"'], 'E1066:')
 
-  CheckDefFailure(['let g:var = 5'], 'E1016: Cannot declare a global variable:')
-  CheckDefFailure(['let w:var = 5'], 'E1016: Cannot declare a window variable:')
-  CheckDefFailure(['let b:var = 5'], 'E1016: Cannot declare a buffer variable:')
-  CheckDefFailure(['let t:var = 5'], 'E1016: Cannot declare a tab variable:')
+  CheckDefFailure(['var g:var = 5'], 'E1016: Cannot declare a global variable:')
+  CheckDefFailure(['var w:var = 5'], 'E1016: Cannot declare a window variable:')
+  CheckDefFailure(['var b:var = 5'], 'E1016: Cannot declare a buffer variable:')
+  CheckDefFailure(['var t:var = 5'], 'E1016: Cannot declare a tab variable:')
 
-  CheckDefFailure(['let anr = 4', 'anr ..= "text"'], 'E1019:')
-  CheckDefFailure(['let xnr += 4'], 'E1020:', 1)
-  CheckScriptFailure(['vim9script', 'let xnr += 4'], 'E1020:')
-  CheckDefFailure(["let xnr = xnr + 1"], 'E1001:', 1)
-  CheckScriptFailure(['vim9script', 'let xnr = xnr + 4'], 'E121:')
+  CheckDefFailure(['var anr = 4', 'anr ..= "text"'], 'E1019:')
+  CheckDefFailure(['var xnr += 4'], 'E1020:', 1)
+  CheckScriptFailure(['vim9script', 'var xnr += 4'], 'E1020:')
+  CheckDefFailure(["var xnr = xnr + 1"], 'E1001:', 1)
+  CheckScriptFailure(['vim9script', 'var xnr = xnr + 4'], 'E121:')
 
-  CheckScriptFailure(['vim9script', 'def Func()', 'let dummy = s:notfound', 'enddef', 'defcompile'], 'E1108:')
+  CheckScriptFailure(['vim9script', 'def Func()', 'var dummy = s:notfound', 'enddef', 'defcompile'], 'E1108:')
 
-  CheckDefFailure(['let var: list<string> = [123]'], 'expected list<string> but got list<number>')
-  CheckDefFailure(['let var: list<number> = ["xx"]'], 'expected list<number> but got list<string>')
+  CheckDefFailure(['var name: list<string> = [123]'], 'expected list<string> but got list<number>')
+  CheckDefFailure(['var name: list<number> = ["xx"]'], 'expected list<number> but got list<string>')
 
-  CheckDefFailure(['let var: dict<string> = #{key: 123}'], 'expected dict<string> but got dict<number>')
-  CheckDefFailure(['let var: dict<number> = #{key: "xx"}'], 'expected dict<number> but got dict<string>')
+  CheckDefFailure(['var name: dict<string> = #{key: 123}'], 'expected dict<string> but got dict<number>')
+  CheckDefFailure(['var name: dict<number> = #{key: "xx"}'], 'expected dict<number> but got dict<string>')
 
-  CheckDefFailure(['let var = feedkeys("0")'], 'E1031:')
-  CheckDefFailure(['let var: number = feedkeys("0")'], 'expected number but got void')
+  CheckDefFailure(['var name = feedkeys("0")'], 'E1031:')
+  CheckDefFailure(['var name: number = feedkeys("0")'], 'expected number but got void')
 
-  CheckDefFailure(['let var: dict <number>'], 'E1068:')
-  CheckDefFailure(['let var: dict<number'], 'E1009:')
+  CheckDefFailure(['var name: dict <number>'], 'E1068:')
+  CheckDefFailure(['var name: dict<number'], 'E1009:')
 
   assert_fails('s/^/\=Mess()/n', 'E794:')
-  CheckDefFailure(['let var: dict<number'], 'E1009:')
+  CheckDefFailure(['var name: dict<number'], 'E1009:')
 
   CheckDefFailure(['w:foo: number = 10'],
                   'E488: Trailing characters: : number = 1')
@@ -657,7 +677,7 @@ def Test_assignment_failure()
 enddef
 
 def Test_assign_list()
-  let l: list<string> = []
+  var l: list<string> = []
   l[0] = 'value'
   assert_equal('value', l[0])
 
@@ -667,7 +687,7 @@ def Test_assign_list()
   assert_equal('asdf', l[-1])
   assert_equal('value', l[-2])
 
-  let nrl: list<number> = []
+  var nrl: list<number> = []
   for i in range(5)
     nrl[i] = i
   endfor
@@ -675,7 +695,7 @@ def Test_assign_list()
 enddef
 
 def Test_assign_dict()
-  let d: dict<string> = {}
+  var d: dict<string> = {}
   d['key'] = 'value'
   assert_equal('value', d['key'])
 
@@ -683,7 +703,7 @@ def Test_assign_dict()
   assert_equal('qwerty', d[123])
   assert_equal('qwerty', d['123'])
 
-  let nrd: dict<number> = {}
+  var nrd: dict<number> = {}
   for i in range(3)
     nrd[i] = i
   endfor
@@ -691,12 +711,12 @@ def Test_assign_dict()
 enddef
 
 def Test_assign_dict_unknown_type()
-  let lines =<< trim END
+  var lines =<< trim END
       vim9script
-      let mylist = []
+      var mylist = []
       mylist += [#{one: 'one'}]
       def Func()
-        let dd = mylist[0]
+        var dd = mylist[0]
         assert_equal('one', dd.one)
       enddef
       Func()
@@ -706,10 +726,10 @@ def Test_assign_dict_unknown_type()
   # doesn't work yet
   #lines =<< trim END
   #    vim9script
-  #    let mylist = [[]]
+  #    var mylist = [[]]
   #    mylist[0] += [#{one: 'one'}]
   #    def Func()
-  #      let dd = mylist[0][0]
+  #      var dd = mylist[0][0]
   #      assert_equal('one', dd.one)
   #    enddef
   #    Func()
@@ -719,16 +739,237 @@ enddef
 
 def Test_assign_lambda()
   # check if assign a lambda to a variable which type is func or any.
-  let lines =<< trim END
+  var lines =<< trim END
       vim9script
-      let FuncRef = {->123}
+      var FuncRef = {->123}
       assert_equal(123, FuncRef())
-      let FuncRef_Func: func = {->123}
+      var FuncRef_Func: func = {->123}
       assert_equal(123, FuncRef_Func())
-      let FuncRef_Any: any = {->123}
+      var FuncRef_Any: any = {->123}
       assert_equal(123, FuncRef_Any())
   END
   CheckScriptSuccess(lines)
 enddef
+
+def Test_heredoc()
+  var lines =<< trim END # comment
+    text
+  END
+  assert_equal(['text'], lines)
+
+  CheckDefFailure(['var lines =<< trim END X', 'END'], 'E488:')
+  CheckDefFailure(['var lines =<< trim END " comment', 'END'], 'E488:')
+
+  lines =<< trim [END]
+      def Func()
+        var&lines =<< trim END
+        x
+        x
+        x
+        x
+        x
+        x
+        x
+        x
+      enddef
+      call Func()
+  [END]
+  CheckScriptFailure(lines, 'E990:')
+enddef
+
+def Test_let_func_call()
+  var lines =<< trim END
+    vim9script
+    func GetValue()
+      if exists('g:count')
+        let g:count += 1
+      else
+        let g:count = 1
+      endif
+      return 'this'
+    endfunc
+    var val: string = GetValue() 
+    # env var is always a string
+    var env = $TERM
+  END
+  writefile(lines, 'Xfinished')
+  source Xfinished
+  # GetValue() is not called during discovery phase
+  assert_equal(1, g:count)
+
+  unlet g:count
+  delete('Xfinished')
+enddef
+
+def Test_let_missing_type()
+  var lines =<< trim END
+    vim9script
+    var name = g:unknown
+  END
+  CheckScriptFailure(lines, 'E121:')
+
+  lines =<< trim END
+    vim9script
+    var nr: number = 123
+    var name = nr
+  END
+  CheckScriptSuccess(lines)
+enddef
+
+def Test_let_declaration()
+  var lines =<< trim END
+    vim9script
+    var name: string
+    g:var_uninit = name
+    name = 'text'
+    g:var_test = name
+    # prefixing s: is optional
+    s:name = 'prefixed'
+    g:var_prefixed = s:name
+
+    var s:other: number
+    other = 1234
+    g:other_var = other
+
+    # type is inferred
+    s:dict = {'a': 222}
+    def GetDictVal(key: any)
+      g:dict_val = s:dict[key]
+    enddef
+    GetDictVal('a')
+  END
+  CheckScriptSuccess(lines)
+  assert_equal('', g:var_uninit)
+  assert_equal('text', g:var_test)
+  assert_equal('prefixed', g:var_prefixed)
+  assert_equal(1234, g:other_var)
+  assert_equal(222, g:dict_val)
+
+  unlet g:var_uninit
+  unlet g:var_test
+  unlet g:var_prefixed
+  unlet g:other_var
+enddef
+
+def Test_let_declaration_fails()
+  var lines =<< trim END
+    vim9script
+    final var: string
+  END
+  CheckScriptFailure(lines, 'E1125:')
+
+  lines =<< trim END
+    vim9script
+    const var: string
+  END
+  CheckScriptFailure(lines, 'E1021:')
+
+  lines =<< trim END
+    vim9script
+    var 9var: string
+  END
+  CheckScriptFailure(lines, 'E475:')
+enddef
+
+def Test_let_type_check()
+  var lines =<< trim END
+    vim9script
+    var name: string
+    name = 1234
+  END
+  CheckScriptFailure(lines, 'E1012:')
+
+  lines =<< trim END
+    vim9script
+    var name:string
+  END
+  CheckScriptFailure(lines, 'E1069:')
+
+  lines =<< trim END
+    vim9script
+    var name: asdf
+  END
+  CheckScriptFailure(lines, 'E1010:')
+
+  lines =<< trim END
+    vim9script
+    var s:l: list<number>
+    s:l = []
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    var s:d: dict<number>
+    s:d = {}
+  END
+  CheckScriptSuccess(lines)
+enddef
+
+let g:dict_number = #{one: 1, two: 2}
+
+def Test_let_list_dict_type()
+  var ll: list<number>
+  ll = [1, 2, 2, 3, 3, 3]->uniq()
+  ll->assert_equal([1, 2, 3])
+
+  var dd: dict<number>
+  dd = g:dict_number
+  dd->assert_equal(g:dict_number)
+
+  var lines =<< trim END
+      var ll: list<number>
+      ll = [1, 2, 3]->map('"one"')
+  END
+  CheckDefExecFailure(lines, 'E1012: Type mismatch; expected list<number> but got list<string>')
+enddef
+
+def Test_unlet()
+  g:somevar = 'yes'
+  assert_true(exists('g:somevar'))
+  unlet g:somevar
+  assert_false(exists('g:somevar'))
+  unlet! g:somevar
+
+  # also works for script-local variable in legacy Vim script
+  s:somevar = 'legacy'
+  assert_true(exists('s:somevar'))
+  unlet s:somevar
+  assert_false(exists('s:somevar'))
+  unlet! s:somevar
+
+  CheckScriptFailure([
+   'vim9script',
+   'var svar = 123',
+   'unlet svar',
+   ], 'E1081:')
+  CheckScriptFailure([
+   'vim9script',
+   'var svar = 123',
+   'unlet s:svar',
+   ], 'E1081:')
+  CheckScriptFailure([
+   'vim9script',
+   'var svar = 123',
+   'def Func()',
+   '  unlet svar',
+   'enddef',
+   'defcompile',
+   ], 'E1081:')
+  CheckScriptFailure([
+   'vim9script',
+   'var svar = 123',
+   'def Func()',
+   '  unlet s:svar',
+   'enddef',
+   'defcompile',
+   ], 'E1081:')
+
+  $ENVVAR = 'foobar'
+  assert_equal('foobar', $ENVVAR)
+  unlet $ENVVAR
+  assert_equal('', $ENVVAR)
+enddef
+
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

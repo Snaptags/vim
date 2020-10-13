@@ -288,6 +288,9 @@ EXTERN garray_T	exestack INIT5(0, 0, sizeof(estack_T), 50, NULL);
 #define SOURCING_LNUM (((estack_T *)exestack.ga_data)[exestack.ga_len - 1].es_lnum)
 
 #ifdef FEAT_EVAL
+// whether inside compile_def_function()
+EXTERN int	estack_compiling INIT(= FALSE);
+
 EXTERN int	ex_nesting_level INIT(= 0);	// nesting level
 EXTERN int	debug_break_level INIT(= -1);	// break below this level
 EXTERN int	debug_did_msg INIT(= FALSE);	// did "debug mode" message
@@ -1150,12 +1153,9 @@ EXTERN typebuf_T typebuf		// typeahead buffer
 		    = {NULL, NULL, 0, 0, 0, 0, 0, 0, 0}
 #endif
 		    ;
-EXTERN int	ex_normal_busy INIT(= 0); // recursiveness of ex_normal()
-EXTERN int	ex_normal_lock INIT(= 0); // forbid use of ex_normal()
-#ifdef FEAT_PROP_POPUP
-// Set to TRUE when ex_normal_busy is set and out of typeahead.
-EXTERN int	ex_normal_busy_done INIT(= FALSE);
-#endif
+EXTERN int	ex_normal_busy INIT(= 0);   // recursiveness of ex_normal()
+EXTERN int	in_feedkeys INIT(= 0);	    // ex_normal_busy set in feedkeys()
+EXTERN int	ex_normal_lock INIT(= 0);   // forbid use of ex_normal()
 
 #ifdef FEAT_EVAL
 EXTERN int	ignore_script INIT(= FALSE);  // ignore script input

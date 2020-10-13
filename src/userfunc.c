@@ -2374,6 +2374,7 @@ trans_function_name(
     int		extra = 0;
     lval_T	lv;
     int		vim9script;
+    static char *e_function_name = N_("E129: Function name required");
 
     if (fdp != NULL)
 	CLEAR_POINTER(fdp);
@@ -2401,7 +2402,7 @@ trans_function_name(
     if (end == start)
     {
 	if (!skip)
-	    emsg(_("E129: Function name required"));
+	    emsg(_(e_function_name));
 	goto theend;
     }
     if (end == NULL || (lv.ll_tv != NULL && (lead > 2 || lv.ll_range)))
@@ -2516,6 +2517,12 @@ trans_function_name(
 	    lv.ll_name += 2;
 	}
 	len = (int)(end - lv.ll_name);
+    }
+    if (len <= 0)
+    {
+	if (!skip)
+	    emsg(_(e_function_name));
+	goto theend;
     }
 
     // In Vim9 script a user function is script-local by default.
@@ -3214,19 +3221,20 @@ def_function(exarg_T *eap, char_u *name_arg)
 		is_heredoc = TRUE;
 	    }
 
-	    // Check for ":let v =<< [trim] EOF"
-	    //       and ":let [a, b] =<< [trim] EOF"
+	    // Check for ":cmd v =<< [trim] EOF"
+	    //       and ":cmd [a, b] =<< [trim] EOF"
+	    // Where "cmd" can be "let", "var", "final" or "const".
 	    arg = skipwhite(skiptowhite(p));
 	    if (*arg == '[')
 		arg = vim_strchr(arg, ']');
 	    if (arg != NULL)
 	    {
 		arg = skipwhite(skiptowhite(arg));
-		if ( arg[0] == '=' && arg[1] == '<' && arg[2] =='<'
-			&& ((p[0] == 'l'
-				&& p[1] == 'e'
-				&& (!ASCII_ISALNUM(p[2])
-				    || (p[2] == 't' && !ASCII_ISALNUM(p[3]))))))
+		if (arg[0] == '=' && arg[1] == '<' && arg[2] =='<'
+			&& (checkforcmd(&p, "let", 2)
+			    || checkforcmd(&p, "var", 3)
+			    || checkforcmd(&p, "final", 5)
+			    || checkforcmd(&p, "const", 5)))
 		{
 		    p = skipwhite(arg + 3);
 		    if (STRNCMP(p, "trim", 4) == 0)
