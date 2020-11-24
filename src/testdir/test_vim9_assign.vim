@@ -74,7 +74,11 @@ def Test_assignment()
 
   if has('channel')
     var chan1: channel
+    assert_equal('fail', ch_status(chan1))
+
     var job1: job
+    assert_equal('fail', job_status(job1))
+
     # calling job_start() is in test_vim9_fails.vim, it causes leak reports
   endif
   if has('float')
@@ -227,10 +231,14 @@ def Test_extend_list()
       var l: list<number>
       l += [123]
       assert_equal([123], l)
+  END
+  CheckScriptSuccess(lines)
 
-      var d: dict<number>
-      d['one'] = 1
-      assert_equal(#{one: 1}, d)
+  lines =<< trim END
+      vim9script
+      var list: list<string>
+      extend(list, ['x'])
+      assert_equal(['x'], list)
   END
   CheckScriptSuccess(lines)
 
@@ -245,6 +253,48 @@ def Test_extend_list()
       assert_equal(['a', 'b'], list)
   END
   CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      var l: list<string> = test_null_list()
+      extend(l, ['x'])
+      assert_equal(['x'], l)
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      extend(test_null_list(), ['x'])
+  END
+  CheckScriptFailure(lines, 'E1134:', 2)
+enddef
+
+def Test_extend_dict()
+  var lines =<< trim END
+      vim9script
+      var d: dict<number>
+      extend(d, #{a: 1})
+      assert_equal(#{a: 1}, d)
+
+      var d2: dict<number>
+      d2['one'] = 1
+      assert_equal(#{one: 1}, d2)
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      var d: dict<string> = test_null_dict()
+      extend(d, #{a: 'x'})
+      assert_equal(#{a: 'x'}, d)
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      extend(test_null_dict(), #{a: 'x'})
+  END
+  CheckScriptFailure(lines, 'E1133:', 2)
 enddef
 
 def Test_single_letter_vars()
@@ -358,6 +408,15 @@ def Test_assignment_dict()
 
   # overwrite
   dict3['key'] = 'another'
+  assert_equal(dict3, #{key: 'another'})
+  dict3.key = 'yet another'
+  assert_equal(dict3, #{key: 'yet another'})
+
+  var lines =<< trim END
+    var dd = #{one: 1}
+    dd.one) = 2
+  END
+  CheckDefFailure(lines, 'E15:', 2)
 
   # empty key can be used
   var dd = {}
@@ -368,7 +427,7 @@ def Test_assignment_dict()
   var somedict = rand() > 0 ? #{a: 1, b: 2} : #{a: 'a', b: 'b'}
 
   # assignment to script-local dict
-  var lines =<< trim END
+  lines =<< trim END
     vim9script
     var test: dict<any> = {}
     def FillDict(): dict<any>
@@ -454,7 +513,6 @@ def Test_assignment_local()
 enddef
 
 def Test_assignment_default()
-
   # Test default values.
   var thebool: bool
   assert_equal(v:false, thebool)
@@ -571,6 +629,10 @@ def Test_assignment_vim9script()
     assert_equal(43, w)
     var t: number = 44
     assert_equal(44, t)
+
+    var to_var = 0
+    to_var = 3
+    assert_equal(3, to_var)
   END
   CheckScriptSuccess(lines)
 
@@ -615,6 +677,9 @@ def Test_assignment_failure()
   CheckDefExecFailure(['var x: number',
                        'var y: number',
                        '[x, y] = [1]'], 'E1093:')
+  CheckDefExecFailure(['var x: string',
+                       'var y: string',
+                       '[x, y] = ["x"]'], 'E1093:')
   CheckDefExecFailure(['var x: number',
                        'var y: number',
                        'var z: list<number>',
@@ -692,6 +757,9 @@ def Test_assign_list()
     nrl[i] = i
   endfor
   assert_equal([0, 1, 2, 3, 4], nrl)
+
+  CheckDefFailure(["var l: list<number> = ['', true]"], 'E1012: Type mismatch; expected list<number> but got list<any>', 1)
+  CheckDefFailure(["var l: list<list<number>> = [['', true]]"], 'E1012: Type mismatch; expected list<list<number>> but got list<list<any>>', 1)
 enddef
 
 def Test_assign_dict()
@@ -708,6 +776,9 @@ def Test_assign_dict()
     nrd[i] = i
   endfor
   assert_equal({'0': 0, '1': 1, '2': 2}, nrd)
+
+  CheckDefFailure(["var d: dict<number> = #{a: '', b: true}"], 'E1012: Type mismatch; expected dict<number> but got dict<any>', 1)
+  CheckDefFailure(["var d: dict<dict<number>> = #{x: #{a: '', b: true}}"], 'E1012: Type mismatch; expected dict<dict<number>> but got dict<dict<any>>', 1)
 enddef
 
 def Test_assign_dict_unknown_type()

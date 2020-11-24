@@ -3091,6 +3091,66 @@ func Test_resize_from_copen()
   endtry
 endfunc
 
+func Test_vimgrep_with_textlock()
+  new
+
+  " Simple way to execute something with "textwinlock" set.
+  " Check that vimgrep without jumping can be executed.
+  au InsertCharPre * vimgrep /RunTheTest/j runtest.vim
+  normal ax
+  let qflist = getqflist()
+  call assert_true(len(qflist) > 0)
+  call assert_match('RunTheTest', qflist[0].text)
+  call setqflist([], 'r')
+  au! InsertCharPre
+
+  " Check that vimgrepadd without jumping can be executed.
+  au InsertCharPre * vimgrepadd /RunTheTest/j runtest.vim
+  normal ax
+  let qflist = getqflist()
+  call assert_true(len(qflist) > 0)
+  call assert_match('RunTheTest', qflist[0].text)
+  call setqflist([], 'r')
+  au! InsertCharPre
+
+  " Check that lvimgrep without jumping can be executed.
+  au InsertCharPre * lvimgrep /RunTheTest/j runtest.vim
+  normal ax
+  let qflist = getloclist(0)
+  call assert_true(len(qflist) > 0)
+  call assert_match('RunTheTest', qflist[0].text)
+  call setloclist(0, [], 'r')
+  au! InsertCharPre
+
+  " Check that lvimgrepadd without jumping can be executed.
+  au InsertCharPre * lvimgrepadd /RunTheTest/j runtest.vim
+  normal ax
+  let qflist = getloclist(0)
+  call assert_true(len(qflist) > 0)
+  call assert_match('RunTheTest', qflist[0].text)
+  call setloclist(0, [], 'r')
+  au! InsertCharPre
+
+  " trying to jump will give an error
+  au InsertCharPre * vimgrep /RunTheTest/ runtest.vim
+  call assert_fails('normal ax', 'E565:')
+  au! InsertCharPre
+
+  au InsertCharPre * vimgrepadd /RunTheTest/ runtest.vim
+  call assert_fails('normal ax', 'E565:')
+  au! InsertCharPre
+
+  au InsertCharPre * lvimgrep /RunTheTest/ runtest.vim
+  call assert_fails('normal ax', 'E565:')
+  au! InsertCharPre
+
+  au InsertCharPre * lvimgrepadd /RunTheTest/ runtest.vim
+  call assert_fails('normal ax', 'E565:')
+  au! InsertCharPre
+
+  bwipe!
+endfunc
+
 " Tests for the quickfix buffer b:changedtick variable
 func Xchangedtick_tests(cchar)
   call s:setup_commands(a:cchar)
@@ -3949,6 +4009,10 @@ func Test_lhelpgrep_autocmd()
     au BufEnter * call setqflist([], 'f')
   augroup END
   call assert_fails('helpgrep quickfix', 'E925:')
+  " run the test with a help window already open
+  help
+  wincmd w
+  call assert_fails('helpgrep quickfix', 'E925:')
   augroup QF_Test
     au! BufEnter
   augroup END
@@ -4418,6 +4482,21 @@ func Test_viscol()
   call assert_equal([11, 17], [col('.'), virtcol('.')])
   cnext
   call assert_equal([16, 25], [col('.'), virtcol('.')])
+
+  " Use screen column number with a multi-line error message
+  enew
+  call writefile(["à test"], 'Xfile1')
+  set efm=%E===\ %f\ ===,%C%l:%v,%Z%m
+  cexpr ["=== Xfile1 ===", "1:3", "errormsg"]
+  call assert_equal('Xfile1', @%)
+  call assert_equal([0, 1, 4, 0], getpos('.'))
+
+  " Repeat previous test with byte offset %c: ensure that fix to issue #7145
+  " does not break this
+  set efm=%E===\ %f\ ===,%C%l:%c,%Z%m
+  cexpr ["=== Xfile1 ===", "1:3", "errormsg"]
+  call assert_equal('Xfile1', @%)
+  call assert_equal([0, 1, 3, 0], getpos('.'))
 
   enew | only
   set efm&
@@ -5124,6 +5203,54 @@ func Test_setloclist_crash()
   augroup END
   unlet g:BufNum
   %bw!
+endfunc
+
+" Test for adding an invalid entry with the quickfix window open and making
+" sure that the window contents are not changed
+func Test_add_invalid_entry_with_qf_window()
+  call setqflist([], 'f')
+  cexpr "Xfile1:10:aa"
+  copen
+  call setqflist(['bb'], 'a')
+  call assert_equal(1, line('$'))
+  call assert_equal(['Xfile1|10| aa'], getline(1, '$'))
+  call assert_equal([{'lnum': 10, 'bufnr': bufnr('Xfile1'), 'col': 0, 'pattern': '', 'valid': 1, 'vcol': 0, 'nr': -1, 'type': '', 'module': '', 'text': 'aa'}], getqflist())
+  cclose
+endfunc
+
+" Test for very weird problem: autocommand causes a failure, resulting opening
+" the quickfix window to fail. This still splits the window, but otherwise
+" should not mess up buffers.
+func Test_quickfix_window_fails_to_open()
+  CheckScreendump
+
+  let lines =<< trim END
+      anything
+      try
+        anything
+      endtry
+  END
+  call writefile(lines, 'XquickfixFails')
+
+  let lines =<< trim END
+      split XquickfixFails
+      silent vimgrep anything %
+      normal o
+      au BufLeave * ++once source XquickfixFails
+      " This will trigger the autocommand, which causes an error, what follows
+      " is aborted but the window was already split.
+      silent! cwindow
+  END
+  call writefile(lines, 'XtestWinFails')
+  let buf = RunVimInTerminal('-S XtestWinFails', #{rows: 13})
+  call VerifyScreenDump(buf, 'Test_quickfix_window_fails', {})
+
+  " clean up
+  call term_sendkeys(buf, ":bwipe!\<CR>")
+  call term_wait(buf)
+  call StopVimInTerminal(buf)
+  call delete('XtestWinFails')
+  call delete('XquickfixFails')
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

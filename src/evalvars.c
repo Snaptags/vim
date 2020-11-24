@@ -146,7 +146,6 @@ static struct vimvar
     {VV_NAME("echospace",	 VAR_NUMBER), VV_RO},
     {VV_NAME("argv",		 VAR_LIST), VV_RO},
     {VV_NAME("collate",		 VAR_STRING), VV_RO},
-    {VV_NAME("disallow_let",	 VAR_NUMBER), 0}, // TODO: remove
 };
 
 // shorthand
@@ -243,9 +242,6 @@ evalvars_init(void)
 
     set_vim_var_nr(VV_ECHOSPACE,    sc_col - 1);
 
-    // TODO: remove later
-    set_vim_var_nr(VV_DISALLOW_LET, 1);
-
     // Default for v:register is not 0 but '"'.  This is adjusted once the
     // clipboard has been setup by calling reset_reg_var().
     set_reg_var(0);
@@ -303,11 +299,23 @@ garbage_collect_vimvars(int copyID)
     int
 garbage_collect_scriptvars(int copyID)
 {
-    int		i;
-    int		abort = FALSE;
+    int		    i;
+    int		    idx;
+    int		    abort = FALSE;
+    scriptitem_T    *si;
 
     for (i = 1; i <= script_items.ga_len; ++i)
+    {
 	abort = abort || set_ref_in_ht(&SCRIPT_VARS(i), copyID, NULL);
+
+	si = SCRIPT_ITEM(i);
+	for (idx = 0; idx < si->sn_var_vals.ga_len; ++idx)
+	{
+	    svar_T    *sv = ((svar_T *)si->sn_var_vals.ga_data) + idx;
+
+	    abort = abort || set_ref_in_item(sv->sv_tv, copyID, NULL, NULL);
+	}
+    }
 
     return abort;
 }
@@ -737,8 +745,7 @@ ex_let(exarg_T *eap)
 	    ex_finally(eap);
 	    return;
     }
-    if (get_vim_var_nr(VV_DISALLOW_LET)
-				      && eap->cmdidx == CMD_let && vim9script)
+    if (eap->cmdidx == CMD_let && vim9script)
     {
 	emsg(_(e_cannot_use_let_in_vim9_script));
 	return;
@@ -1974,7 +1981,13 @@ get_user_var_name(expand_T *xp, int idx)
     }
 
     // b: variables
-    ht = &curbuf->b_vars->dv_hashtab;
+    ht =
+#ifdef FEAT_CMDWIN
+	// In cmdwin, the alternative buffer should be used.
+	(cmdwin_type != 0 && get_cmdline_type() == NUL) ?
+	&prevwin->w_buffer->b_vars->dv_hashtab :
+#endif
+	&curbuf->b_vars->dv_hashtab;
     if (bdone < ht->ht_used)
     {
 	if (bdone++ == 0)
@@ -1987,7 +2000,13 @@ get_user_var_name(expand_T *xp, int idx)
     }
 
     // w: variables
-    ht = &curwin->w_vars->dv_hashtab;
+    ht =
+#ifdef FEAT_CMDWIN
+	// In cmdwin, the alternative window should be used.
+	(cmdwin_type != 0 && get_cmdline_type() == NUL) ?
+	&prevwin->w_vars->dv_hashtab :
+#endif
+	&curwin->w_vars->dv_hashtab;
     if (wdone < ht->ht_used)
     {
 	if (wdone++ == 0)
@@ -2534,7 +2553,22 @@ eval_variable(
 	    ret = FAIL;
 	}
 	else if (rettv != NULL)
+	{
+	    // If a list or dict variable wasn't initialized, do it now.
+	    if (tv->v_type == VAR_DICT && tv->vval.v_dict == NULL)
+	    {
+		tv->vval.v_dict = dict_alloc();
+		if (tv->vval.v_dict != NULL)
+		    ++tv->vval.v_dict->dv_refcount;
+	    }
+	    else if (tv->v_type == VAR_LIST && tv->vval.v_list == NULL)
+	    {
+		tv->vval.v_list = list_alloc();
+		if (tv->vval.v_list != NULL)
+		    ++tv->vval.v_list->lv_refcount;
+	    }
 	    copy_tv(tv, rettv);
+	}
     }
 
     name[len] = cc;
@@ -2594,7 +2628,28 @@ find_var(char_u *name, hashtab_T **htp, int no_autoload)
 	return ret;
 
     // Search in parent scope for lambda
-    return find_var_in_scoped_ht(name, no_autoload || htp != NULL);
+    ret = find_var_in_scoped_ht(name, no_autoload || htp != NULL);
+    if (ret != NULL)
+	return ret;
+
+    // in Vim9 script items without a scope can be script-local
+    if (in_vim9script() && name[0] != NUL && name[1] != ':')
+    {
+	ht = get_script_local_ht();
+	if (ht != NULL)
+	{
+	    ret = find_var_in_ht(ht, *name, varname,
+						   no_autoload || htp != NULL);
+	    if (ret != NULL)
+	    {
+		if (htp != NULL)
+		    *htp = ht;
+		return ret;
+	    }
+	}
+    }
+
+    return NULL;
 }
 
 /*
@@ -2882,7 +2937,7 @@ vars_clear_ext(hashtab_T *ht, int free_val)
 	}
     }
     hash_clear(ht);
-    ht->ht_used = 0;
+    hash_init(ht);
 }
 
 /*
@@ -3142,30 +3197,10 @@ set_var_const(
 	if (flags & ASSIGN_CONST)
 	    di->di_flags |= DI_FLAGS_LOCK;
 
+	// A Vim9 script-local variable is also added to sn_all_vars and
+	// sn_var_vals.
 	if (is_script_local && vim9script)
-	{
-	    scriptitem_T *si = SCRIPT_ITEM(current_sctx.sc_sid);
-
-	    // Store a pointer to the typval_T, so that it can be found by
-	    // index instead of using a hastab lookup.
-	    if (ga_grow(&si->sn_var_vals, 1) == OK)
-	    {
-		svar_T *sv = ((svar_T *)si->sn_var_vals.ga_data)
-						      + si->sn_var_vals.ga_len;
-		sv->sv_name = di->di_key;
-		sv->sv_tv = &di->di_tv;
-		if (type == NULL)
-		    sv->sv_type = typval2type(tv, &si->sn_type_list);
-		else
-		    sv->sv_type = type;
-		sv->sv_const = (flags & ASSIGN_CONST);
-		sv->sv_export = is_export;
-		++si->sn_var_vals.ga_len;
-
-		// let ex_export() know the export worked.
-		is_export = FALSE;
-	    }
-	}
+	    add_vim9_script_var(di, tv, type);
     }
 
     if (copy || tv->v_type == VAR_NUMBER || tv->v_type == VAR_FLOAT)
@@ -3590,9 +3625,11 @@ var_redir_start(char_u *name, int append)
     tv.v_type = VAR_STRING;
     tv.vval.v_string = (char_u *)"";
     if (append)
-	set_var_lval(redir_lval, redir_endp, &tv, TRUE, 0, (char_u *)".");
+	set_var_lval(redir_lval, redir_endp, &tv, TRUE,
+						ASSIGN_NO_DECL, (char_u *)".");
     else
-	set_var_lval(redir_lval, redir_endp, &tv, TRUE, 0, (char_u *)"=");
+	set_var_lval(redir_lval, redir_endp, &tv, TRUE,
+						ASSIGN_NO_DECL, (char_u *)"=");
     clear_lval(redir_lval);
     if (called_emsg > called_emsg_before)
     {

@@ -605,6 +605,7 @@ func Test_popup_drag_termwin()
 	endfor
 	%foldclose
 	set shell=/bin/sh noruler
+	unlet $PROMPT_COMMAND
 	let $PS1 = 'vim> '
         terminal ++rows=4
 	$wincmd w
@@ -2158,6 +2159,7 @@ func Test_popup_scrollbar()
     endfunc
     func Popup_filter(winid, key)
       if a:key == 'j'
+	silent! this_throws_an_error_but_is_ignored
 	let line = popup_getoptions(a:winid).firstline
 	let nlines = line('$', a:winid)
 	let newline = line < nlines ? (line + 1) : nlines
@@ -2360,6 +2362,16 @@ func Test_popup_settext_getline()
   let id = popup_create('', #{ tabpage: -1 })
   call popup_settext(id, ['a','b'])
   call assert_equal(2, line('$', id)) " Fails :(
+  call popup_close(id)
+endfunc
+
+func Test_popup_settext_null()
+  let id = popup_create('', #{ tabpage: 0 })
+  call popup_settext(id, test_null_list())
+  call popup_close(id)
+
+  let id = popup_create('', #{ tabpage: 0 })
+  call popup_settext(id, test_null_string())
   call popup_close(id)
 endfunc
 
@@ -3232,6 +3244,10 @@ func Get_popupmenu_lines()
 	  call popup_show(id)
 	endif
       endfunc
+
+      " Check that no autocommands are triggered for the info popup
+      au WinEnter * if win_gettype() == 'popup' | call setline(2, 'WinEnter') | endif
+      au WinLeave * if win_gettype() == 'popup' | call setline(2, 'WinLeave') | endif
   END
   return lines
 endfunc
@@ -3674,6 +3690,28 @@ func Test_popupwin_filter_close_three_errors()
   call delete('XtestPopupThreeErrors')
 endfunc
 
+func Test_popupwin_latin1_encoding()
+  CheckScreendump
+  CheckUnix
+
+  " When 'encoding' is a single-byte encoding a terminal window will mess up
+  " the display.  Check that showing a popup on top of that doesn't crash.
+  let lines =<< trim END
+      set encoding=latin1
+      terminal cat Xmultibyte
+      call popup_create(['one', 'two', 'three', 'four'], #{line: 1, col: 10})
+  END
+  call writefile(lines, 'XtestPopupLatin')
+  call writefile([repeat("\u3042 ", 120)], 'Xmultibyte')
+
+  let buf = RunVimInTerminal('-S XtestPopupLatin', #{rows: 10})
+
+  call term_sendkeys(buf, ":q\<CR>")
+  call StopVimInTerminal(buf)
+  call delete('XtestPopupLatin')
+  call delete('Xmultibyte')
+endfunc
+
 func Test_popupwin_atcursor_far_right()
   new
 
@@ -3704,5 +3742,26 @@ func Test_popupwin_splitmove()
   bwipe
 endfunc
 
+func Test_popupwin_exiting_terminal()
+  CheckFeature terminal
+
+  " Tests that when creating a popup right after closing a terminal window does
+  " not make the popup the current window.
+  let winid = win_getid()
+  try
+    augroup Test_popupwin_exiting_terminal
+      autocmd!
+      autocmd WinEnter * :call popup_create('test', {})
+    augroup END
+    let bnr = term_start(&shell, #{term_finish: 'close'})
+    call term_sendkeys(bnr, "exit\r\n")
+    call WaitForAssert({-> assert_equal(winid, win_getid())})
+  finally
+    call popup_clear(1)
+    augroup Test_popupwin_exiting_terminal
+      autocmd!
+    augroup END
+  endtry
+endfunc
 
 " vim: shiftwidth=2 sts=2

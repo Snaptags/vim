@@ -250,6 +250,71 @@ def Test_block_failure()
   CheckDefFailure(['{', 'echo 1'], 'E1026:')
 enddef
 
+def Test_block_local_vars()
+  var lines =<< trim END
+      vim9script
+      v:testing = 1
+      if true
+        var text = ['hello']
+        def SayHello(): list<string>
+          return text
+        enddef
+        def SetText(v: string)
+          text = [v]
+        enddef
+      endif
+
+      if true
+        var text = ['again']
+        def SayAgain(): list<string>
+          return text
+        enddef
+      endif
+
+      # test that the "text" variables are not cleaned up
+      test_garbagecollect_now()
+
+      defcompile
+
+      assert_equal(['hello'], SayHello())
+      assert_equal(['again'], SayAgain())
+
+      SetText('foobar')
+      assert_equal(['foobar'], SayHello())
+
+      call writefile(['ok'], 'Xdidit')
+      qall!
+  END
+
+  # need to execute this with a separate Vim instance to avoid the current
+  # context gets garbage collected.
+  writefile(lines, 'Xscript')
+  RunVim([], [], '-S Xscript')
+  assert_equal(['ok'], readfile('Xdidit'))
+
+  delete('Xscript')
+  delete('Xdidit')
+enddef
+
+def Test_block_local_vars_with_func()
+  var lines =<< trim END
+      vim9script
+      if true
+        var foo = 'foo'
+        if true
+          var bar = 'bar'
+          def Func(): list<string>
+            return [foo, bar]
+          enddef
+        endif
+      endif
+      # function is compiled here, after blocks have finished, can still access
+      # "foo" and "bar"
+      assert_equal(['foo', 'bar'], Func())
+  END
+  CheckScriptSuccess(lines)
+enddef
+
 func g:NoSuchFunc()
   echo 'none'
 endfunc
@@ -351,7 +416,7 @@ def Test_try_catch()
 
   var nd: dict<any>
   try
-    nd = {g:anumber: 1}
+    nd = {[g:anumber]: 1}
   catch /E1012:/
     n = 266
   endtry
@@ -394,7 +459,7 @@ def Test_try_catch()
   assert_equal(322, n)
 
   try
-    d = {'text': 1, g:astring: 2}
+    d = {text: 1, [g:astring]: 2}
   catch /E721:/
     n = 333
   endtry
@@ -569,6 +634,22 @@ def Test_throw_vimscript()
       catch
         assert_equal('onetwo', v:exception)
       endtry
+  END
+  CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    @r = ''
+    def Func()
+      throw @r
+    enddef
+    var result = ''
+    try
+      Func()
+    catch /E1129:/
+      result = 'caught'
+    endtry
+    assert_equal('caught', result)
   END
   CheckScriptSuccess(lines)
 enddef
@@ -1265,15 +1346,16 @@ def Test_import_absolute()
 
   assert_equal(9876, g:imported_abs)
   assert_equal(8888, g:imported_after)
-  assert_match('<SNR>\d\+_UseExported.*' ..
-          'g:imported_abs = exported.*' ..
-          '0 LOADSCRIPT exported from .*Xexport_abs.vim.*' ..
-          '1 STOREG g:imported_abs.*' ..
-          'exported = 8888.*' ..
-          '3 STORESCRIPT exported in .*Xexport_abs.vim.*' ..
-          'g:imported_after = exported.*' ..
-          '4 LOADSCRIPT exported from .*Xexport_abs.vim.*' ..
-          '5 STOREG g:imported_after.*',
+  assert_match('<SNR>\d\+_UseExported\_s*' ..
+          'g:imported_abs = exported\_s*' ..
+          '0 LOADSCRIPT exported-2 from .*Xexport_abs.vim\_s*' ..
+          '1 STOREG g:imported_abs\_s*' ..
+          'exported = 8888\_s*' ..
+          '2 PUSHNR 8888\_s*' ..
+          '3 STORESCRIPT exported-2 in .*Xexport_abs.vim\_s*' ..
+          'g:imported_after = exported\_s*' ..
+          '4 LOADSCRIPT exported-2 from .*Xexport_abs.vim\_s*' ..
+          '5 STOREG g:imported_after',
         g:import_disassembled)
 
   Undo_export_script_lines()
@@ -1778,6 +1860,44 @@ def Test_for_loop_fails()
   CheckDefFailure(['for i in xxx'], 'E1001:')
   CheckDefFailure(['endfor'], 'E588:')
   CheckDefFailure(['for i in range(3)', 'echo 3'], 'E170:')
+enddef
+
+def Test_for_loop_unpack()
+  var result = []
+  for [v1, v2] in [[1, 2], [3, 4]]
+    result->add(v1)
+    result->add(v2)
+  endfor
+  assert_equal([1, 2, 3, 4], result)
+
+  result = []
+  for [v1, v2; v3] in [[1, 2], [3, 4, 5, 6]]
+    result->add(v1)
+    result->add(v2)
+    result->add(v3)
+  endfor
+  assert_equal([1, 2, [], 3, 4, [5, 6]], result)
+
+  var lines =<< trim END
+      for [v1, v2] in [[1, 2, 3], [3, 4]]
+        echo v1 v2
+      endfor
+  END
+  CheckDefExecFailure(lines, 'E710:', 1)
+
+  lines =<< trim END
+      for [v1, v2] in [[1], [3, 4]]
+        echo v1 v2
+      endfor
+  END
+  CheckDefExecFailure(lines, 'E711:', 1)
+
+  lines =<< trim END
+      for [v1, v1] in [[1, 2], [3, 4]]
+        echo v1
+      endfor
+  END
+  CheckDefExecFailure(lines, 'E1017:', 1)
 enddef
 
 def Test_while_loop()
@@ -2754,6 +2874,61 @@ def Test_script_var_scope()
       echo one
   END
   CheckScriptFailure(lines, 'E121:', 6)
+enddef
+
+def Test_catch_exception_in_callback()
+  var lines =<< trim END
+    vim9script
+    def Callback(...l: any)
+      try
+        var x: string
+        var y: string
+        # this error should be caught with CHECKLEN
+        [x, y] = ['']
+      catch
+        g:caught = 'yes'
+      endtry
+    enddef
+    popup_menu('popup', #{callback: Callback})
+    feedkeys("\r", 'xt')
+  END
+  CheckScriptSuccess(lines)
+
+  unlet g:caught
+enddef
+
+def Test_no_unknown_error_after_error()
+  if !has('unix') || !has('job')
+    throw 'Skipped: not unix of missing +job feature'
+  endif
+  var lines =<< trim END
+      vim9script
+      var source: list<number>
+      def Out_cb(...l: any)
+          eval [][0]
+      enddef
+      def Exit_cb(...l: any)
+          sleep 1m
+          source += l
+      enddef
+      var myjob = job_start('echo burp', #{out_cb: Out_cb, exit_cb: Exit_cb, mode: 'raw'})
+      sleep 100m
+  END
+  writefile(lines, 'Xdef')
+  assert_fails('so Xdef', ['E684:', 'E1012:'])
+  delete('Xdef')
+enddef
+
+def Test_put_with_linebreak()
+  new
+  var lines =<< trim END
+    vim9script
+    pu=split('abc', '\zs')
+            ->join()
+  END
+  CheckScriptSuccess(lines)
+  getline(2)->assert_equal('a b c')
+  bwipe!
 enddef
 
 " Keep this last, it messes up highlighting.
