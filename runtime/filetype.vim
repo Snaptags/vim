@@ -1,7 +1,7 @@
 " Vim support file to detect file types
 "
 " Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last Change:	2020 Oct 24
+" Last Change:	2020 Nov 22
 
 " Listen very carefully, I will say this only once
 if exists("did_load_filetypes")
@@ -697,15 +697,9 @@ au BufNewFile,BufRead *.haml			setf haml
 
 " Hamster Classic | Playground files
 au BufNewFile,BufRead *.hsm	  		setf hamster
-au BufNewFile,BufRead *.hsc
-	\ if match(join(getline(1,10), "\n"), '\%(^\|\n\)\s*\%({-#\_s*LANGUAGE\>\|\<module\>\)') != -1 |
-	\   setf haskell |
-	\ else |
-	\   setf hamster |
-	\ endif
 
 " Haskell
-au BufNewFile,BufRead *.hs,*.hs-boot		setf haskell
+au BufNewFile,BufRead *.hs,*.hsc,*.hs-boot	setf haskell
 au BufNewFile,BufRead *.lhs			setf lhaskell
 au BufNewFile,BufRead *.chs			setf chaskell
 au BufNewFile,BufRead cabal.project		setf cabalproject

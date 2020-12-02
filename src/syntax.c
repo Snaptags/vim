@@ -2606,8 +2606,6 @@ update_si_attr(int idx)
 	{
 	    sip->si_attr = CUR_STATE(idx - 1).si_attr;
 	    sip->si_trans_id = CUR_STATE(idx - 1).si_trans_id;
-	    sip->si_h_startpos = CUR_STATE(idx - 1).si_h_startpos;
-	    sip->si_h_endpos = CUR_STATE(idx - 1).si_h_endpos;
 	    if (sip->si_cont_list == NULL)
 	    {
 		sip->si_flags |= HL_TRANS_CONT;
@@ -6707,7 +6705,7 @@ syntime_report(void)
 {
     int		idx;
     synpat_T	*spp;
-# ifdef FEAT_FLOAT
+# if defined(FEAT_RELTIME) && defined(FEAT_FLOAT)
     proftime_T	tm;
 # endif
     int		len;
@@ -6737,7 +6735,7 @@ syntime_report(void)
 	    p->match = spp->sp_time.match;
 	    total_count += spp->sp_time.count;
 	    p->slowest = spp->sp_time.slowest;
-# ifdef FEAT_FLOAT
+# if defined(FEAT_RELTIME) && defined(FEAT_FLOAT)
 	    profile_divide(&spp->sp_time.total, spp->sp_time.count, &tm);
 	    p->average = tm;
 # endif
