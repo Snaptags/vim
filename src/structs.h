@@ -225,6 +225,8 @@ typedef struct
 #endif
     int		wo_list;
 #define w_p_list w_onebuf_opt.wo_list	// 'list'
+    char_u	*wo_lcs;
+#define w_p_lcs w_onebuf_opt.wo_lcs	// 'listchars'
     int		wo_nu;
 #define w_p_nu w_onebuf_opt.wo_nu	// 'number'
     int		wo_rnu;
@@ -642,6 +644,7 @@ typedef struct
 #define CMOD_LOCKMARKS	    0x0800	// ":lockmarks"
 #define CMOD_KEEPPATTERNS   0x1000	// ":keeppatterns"
 #define CMOD_NOSWAPFILE	    0x2000	// ":noswapfile"
+#define CMOD_VIM9CMD	    0x4000	// ":vim9cmd"
 
     int		cmod_split;		// flags for win_split()
     int		cmod_tab;		// > 0 when ":tab" was used
@@ -1577,7 +1580,7 @@ typedef struct svar_S svar_T;
 #if defined(FEAT_EVAL) || defined(PROTO)
 typedef struct funccall_S funccall_T;
 
-// values used for "uf_dfunc_idx"
+// values used for "uf_def_status"
 typedef enum {
     UF_NOT_COMPILED,
     UF_TO_BE_COMPILED,
@@ -1649,8 +1652,8 @@ typedef struct
 
     char_u	*uf_name_exp;	// if "uf_name[]" starts with SNR the name with
 				// "<SNR>" as a string, otherwise NULL
-    char_u	uf_name[1];	// name of function (actually longer); can
-				// start with <SNR>123_ (<SNR> is K_SPECIAL
+    char_u	uf_name[4];	// name of function (actual size equals name);
+				// can start with <SNR>123_ (<SNR> is K_SPECIAL
 				// KS_EXTRA KE_SNR)
 } ufunc_T;
 
@@ -1899,6 +1902,18 @@ typedef struct sn_prl_S
 } sn_prl_T;
 
 #  define PRL_ITEM(si, idx)	(((sn_prl_T *)(si)->sn_prl_ga.ga_data)[(idx)])
+
+typedef struct {
+    int		pi_started_profiling;
+    proftime_T	pi_wait_start;
+    proftime_T	pi_call_start;
+} profinfo_T;
+
+# else
+typedef struct
+{
+    int	    dummy;
+} profinfo_T;
 # endif
 #else
 // dummy typedefs for use in function prototypes
@@ -2621,6 +2636,8 @@ struct file_buffer
     int		b_flags;	// various BF_ flags
     int		b_locked;	// Buffer is being closed or referenced, don't
 				// let autocommands wipe it out.
+    int		b_locked_split;	// Buffer is being closed, don't allow opening
+				// a new window with it.
 
     /*
      * b_ffname has the full path of the file (NULL for no name).
@@ -3318,6 +3335,26 @@ typedef struct {
 #endif
 
 /*
+ * Characters from the 'listchars' option
+ */
+typedef struct
+{
+    int		eol;
+    int		ext;
+    int		prec;
+    int		nbsp;
+    int		space;
+    int		tab1;
+    int		tab2;
+    int		tab3;
+    int		trail;
+    int		lead;
+#ifdef FEAT_CONCEAL
+    int		conceal;
+#endif
+} lcs_chars_T;
+
+/*
  * Structure which contains all information that belongs to a window
  *
  * All row numbers are relative to the start of the window, except w_winrow.
@@ -3364,6 +3401,8 @@ struct window_S
     linenr_T	w_old_visual_lnum;  // last known start of visual part
     colnr_T	w_old_visual_col;   // last known start of visual part
     colnr_T	w_old_curswant;	    // last known value of Curswant
+
+    lcs_chars_T	w_lcs_chars;	    // 'listchars' characters
 
     /*
      * "w_topline", "w_leftcol" and "w_skipcol" specify the offsets for
@@ -4373,3 +4412,10 @@ typedef enum {
     MAGIC_ON = 3,		// "\m" or 'magic'
     MAGIC_ALL = 4		// "\v" very magic
 } magic_T;
+
+// Struct used to pass to error messages about where the error happened.
+typedef struct {
+    char    wt_index;	    // argument or variable index, 0 means unknown
+    char    wt_variable;    // "variable" when TRUE, "argument" otherwise
+} where_T;
+

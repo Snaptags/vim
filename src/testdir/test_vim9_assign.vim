@@ -9,6 +9,7 @@ let g:existing = 'yes'
 let g:inc_counter = 1
 let $SOME_ENV_VAR = 'some'
 let g:alist = [7]
+let g:adict = #{a: 1}
 let g:astring = 'text'
 
 def Test_assignment_bool()
@@ -55,6 +56,8 @@ def Test_assignment_bool()
   CheckDefAndScriptFailure(['var x: bool = [1]'], 'E1012:')
   CheckDefAndScriptFailure(['var x: bool = {}'], 'E1012:')
   CheckDefAndScriptFailure(['var x: bool = "x"'], 'E1012:')
+
+  CheckDefAndScriptFailure(['var x: bool = "x"', '', 'eval 0'], 'E1012:', 1)
 enddef
 
 def Test_syntax()
@@ -282,6 +285,14 @@ def Test_assign_unpack()
       [v1, v2] = ''
   END
   CheckDefFailure(lines, 'E1012: Type mismatch; expected list<any> but got string', 3)
+
+  lines =<< trim END
+    g:values = [false, 0]
+    var x: bool
+    var y: string
+    [x, y] = g:values
+  END
+  CheckDefExecAndScriptFailure(lines, 'E1163: Variable 2: type mismatch, expected string but got number')
 enddef
 
 def Test_assign_linebreak()
@@ -350,7 +361,7 @@ def Test_assign_index()
     var lines: list<string>
     lines['a'] = 'asdf'
   END
-  CheckDefFailure(lines, 'E39:', 2)
+  CheckDefFailure(lines, 'E1012:', 2)
 
   lines =<< trim END
     var lines: string
@@ -559,6 +570,15 @@ def Test_assignment_list()
     d.dd[0] = 0
   END
   CheckDefExecFailure(lines, 'E1147:', 2)
+enddef
+
+def Test_assignment_list_any_index()
+   var l: list<number> = [1, 2]
+  for  [x, y, _]
+  in  [[0, 1, ''], [1, 3, '']]
+      l[x] = l[x] + y
+  endfor
+  assert_equal([2, 5], l)
 enddef
 
 def Test_assignment_list_vim9script()
@@ -1089,6 +1109,8 @@ def Test_assign_lambda()
       assert_equal(123, FuncRef_Func())
       var FuncRef_Any: any = () => 123
       assert_equal(123, FuncRef_Any())
+      var FuncRef_Number: func(): number = () => 321
+      assert_equal(321, FuncRef_Number())
   END
   CheckScriptSuccess(lines)
 
@@ -1096,8 +1118,12 @@ def Test_assign_lambda()
       var Ref: func(number)
       Ref = (j) => !j
   END
-  CheckDefFailure(lines, 'E1012: Type mismatch; expected func(number) but got func(any): bool')
-  CheckScriptFailure(['vim9script'] + lines, 'E1012: Type mismatch; expected func(number) but got func(any): any')
+  CheckDefAndScriptFailure(lines, 'E1012: Type mismatch; expected func(number) but got func(any): bool')
+
+  lines =<< trim END
+      echo filter([1, 2, 3], (_, v: string) => v + 1) 
+  END
+  CheckDefAndScriptFailure(lines, 'E1051:')
 enddef
 
 def Test_heredoc()
@@ -1351,7 +1377,7 @@ def Test_var_list_dict_type()
       var ll: list<number>
       ll = [1, 2, 3]->map('"one"')
   END
-  CheckDefExecFailure(lines, 'E1012: Type mismatch; expected list<number> but got list<string>')
+  CheckDefExecFailure(lines, 'E1012: Type mismatch; expected number but got string')
 enddef
 
 def Test_cannot_use_let()
@@ -1389,6 +1415,51 @@ def Test_unlet()
   unlet ll[-1]
   assert_equal([1, 3], ll)
 
+  ll = [1, 2, 3, 4]
+  unlet ll[0 : 1]
+  assert_equal([3, 4], ll)
+
+  ll = [1, 2, 3, 4]
+  unlet ll[2 : 8]
+  assert_equal([1, 2], ll)
+
+  ll = [1, 2, 3, 4]
+  unlet ll[-2 : -1]
+  assert_equal([1, 2], ll)
+
+  CheckDefFailure([
+    'var ll = [1, 2]',
+    'll[1 : 2] = 7',
+    ], 'E1165:', 2)
+  CheckDefFailure([
+    'var dd = {a: 1}',
+    'unlet dd["a" : "a"]',
+    ], 'E1166:', 2)
+  CheckDefExecFailure([
+    'unlet g:adict[0 : 1]',
+    ], 'E1148:', 1)
+  CheckDefFailure([
+    'var ll = [1, 2]',
+    'unlet ll[0:1]',
+    ], 'E1004:', 2)
+  CheckDefFailure([
+    'var ll = [1, 2]',
+    'unlet ll[0 :1]',
+    ], 'E1004:', 2)
+  CheckDefFailure([
+    'var ll = [1, 2]',
+    'unlet ll[0: 1]',
+    ], 'E1004:', 2)
+
+  CheckDefFailure([
+    'var ll = [1, 2]',
+    'unlet ll["x" : 1]',
+    ], 'E1012:', 2)
+  CheckDefFailure([
+    'var ll = [1, 2]',
+    'unlet ll[0 : "x"]',
+    ], 'E1012:', 2)
+
   # list of dict unlet
   var dl = [{a: 1, b: 2}, {c: 3}]
   unlet dl[0]['b']
@@ -1405,7 +1476,7 @@ def Test_unlet()
   CheckDefExecFailure([
     'var ll = [1]',
     'unlet ll[g:astring]',
-    ], 'E39:', 2)
+    ], 'E1012:', 2)
   CheckDefExecFailure([
     'var dd = test_null_dict()',
     'unlet dd["a"]',
@@ -1479,6 +1550,30 @@ def Test_unlet()
   unlet $ENVVAR
   assert_equal('', $ENVVAR)
 enddef
+
+def Test_expr_error_no_assign()
+  var lines =<< trim END
+      vim9script
+      var x = invalid
+      echo x
+  END
+  CheckScriptFailureList(lines, ['E121:', 'E121:'])
+
+  lines =<< trim END
+      vim9script
+      var x = 1 / 0
+      echo x
+  END
+  CheckScriptFailureList(lines, ['E1154:', 'E121:'])
+
+  lines =<< trim END
+      vim9script
+      var x = 1 % 0
+      echo x
+  END
+  CheckScriptFailureList(lines, ['E1154:', 'E121:'])
+enddef
+
 
 def Test_assign_command_modifier()
   var lines =<< trim END

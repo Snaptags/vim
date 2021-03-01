@@ -23,7 +23,8 @@ in_vim9script(void)
     // Do not go up the stack, a ":function" inside vim9script uses legacy
     // syntax.  "sc_version" is also set when compiling a ":def" function in
     // legacy script.
-    return current_sctx.sc_version == SCRIPT_VERSION_VIM9;
+    return current_sctx.sc_version == SCRIPT_VERSION_VIM9
+		|| (cmdmod.cmod_flags & CMOD_VIM9CMD);
 }
 
 /*
@@ -91,6 +92,13 @@ not_in_vim9(exarg_T *eap)
     if (in_vim9script())
 	switch (eap->cmdidx)
 	{
+	    case CMD_k:
+		if (eap->addr_count > 0)
+		{
+		    emsg(_(e_norange));
+		    return FAIL;
+		}
+		// FALLTHROUGH
 	    case CMD_append:
 	    case CMD_change:
 	    case CMD_insert:
@@ -317,93 +325,52 @@ handle_import(
 {
     char_u	*arg = arg_start;
     char_u	*cmd_end = NULL;
-    char_u	*as_name = NULL;
     int		ret = FAIL;
     typval_T	tv;
     int		sid = -1;
     int		res;
+    int		mult = FALSE;
     garray_T	names;
+    garray_T	as_names;
 
     ga_init2(&names, sizeof(char_u *), 10);
+    ga_init2(&as_names, sizeof(char_u *), 10);
     if (*arg == '{')
     {
 	// "import {item, item} from ..."
+	mult = TRUE;
 	arg = skipwhite_and_linebreak(arg + 1, evalarg);
-	for (;;)
-	{
-	    char_u  *p = arg;
-	    int	    had_comma = FALSE;
-
-	    while (eval_isnamec(*arg))
-		++arg;
-	    if (p == arg)
-		break;
-	    if (ga_grow(&names, 1) == FAIL)
-		goto erret;
-	    ((char_u **)names.ga_data)[names.ga_len] =
-						      vim_strnsave(p, arg - p);
-	    ++names.ga_len;
-	    if (*arg == ',')
-	    {
-		had_comma = TRUE;
-		++arg;
-	    }
-	    arg = skipwhite_and_linebreak(arg, evalarg);
-	    if (*arg == '}')
-	    {
-		arg = skipwhite_and_linebreak(arg + 1, evalarg);
-		break;
-	    }
-	    if (!had_comma)
-	    {
-		emsg(_(e_missing_comma_in_import));
-		goto erret;
-	    }
-	}
-	if (names.ga_len == 0)
-	{
-	    emsg(_(e_syntax_error_in_import));
-	    goto erret;
-	}
     }
-    else
-    {
-	// "import Name from ..."
-	// "import * as Name from ..."
-	// "import item [as Name] from ..."
-	arg = skipwhite_and_linebreak(arg, evalarg);
-	if (arg[0] == '*' && IS_WHITE_OR_NUL(arg[1]))
-	    arg = skipwhite_and_linebreak(arg + 1, evalarg);
-	else if (eval_isnamec1(*arg))
-	{
-	    char_u  *p = arg;
 
+    for (;;)
+    {
+	char_u	    *p = arg;
+	int	    had_comma = FALSE;
+	char_u	    *as_name = NULL;
+
+	// accept "*" or "Name"
+	if (!mult && arg[0] == '*' && IS_WHITE_OR_NUL(arg[1]))
+	    ++arg;
+	else
 	    while (eval_isnamec(*arg))
 		++arg;
-	    if (ga_grow(&names, 1) == FAIL)
-		goto erret;
-	    ((char_u **)names.ga_data)[names.ga_len] =
-						      vim_strnsave(p, arg - p);
-	    ++names.ga_len;
-	    arg = skipwhite_and_linebreak(arg, evalarg);
-	}
-	else
-	{
-	    emsg(_(e_syntax_error_in_import));
+	if (p == arg)
+	    break;
+	if (ga_grow(&names, 1) == FAIL || ga_grow(&as_names, 1) == FAIL)
 	    goto erret;
-	}
+	((char_u **)names.ga_data)[names.ga_len] = vim_strnsave(p, arg - p);
+	++names.ga_len;
 
+	arg = skipwhite_and_linebreak(arg, evalarg);
 	if (STRNCMP("as", arg, 2) == 0 && IS_WHITE_OR_NUL(arg[2]))
 	{
-	    char_u *p;
-
 	    // skip over "as Name "; no line break allowed after "as"
 	    arg = skipwhite(arg + 2);
 	    p = arg;
 	    if (eval_isnamec1(*arg))
 		while (eval_isnamec(*arg))
 		    ++arg;
-	    if (check_defined(p, arg - p, cctx) == FAIL)
+	    if (check_defined(p, arg - p, cctx, FALSE) == FAIL)
 		goto erret;
 	    as_name = vim_strnsave(p, arg - p);
 	    arg = skipwhite_and_linebreak(arg, evalarg);
@@ -413,6 +380,35 @@ handle_import(
 	    emsg(_(e_missing_as_after_star));
 	    goto erret;
 	}
+	// without "as Name" the as_names entry is NULL
+	((char_u **)as_names.ga_data)[as_names.ga_len] = as_name;
+	++as_names.ga_len;
+
+	if (!mult)
+	    break;
+	if (*arg == ',')
+	{
+	    had_comma = TRUE;
+	    ++arg;
+	}
+	arg = skipwhite_and_linebreak(arg, evalarg);
+	if (*arg == '}')
+	{
+	    ++arg;
+	    break;
+	}
+	if (!had_comma)
+	{
+	    emsg(_(e_missing_comma_in_import));
+	    goto erret;
+	}
+    }
+    arg = skipwhite_and_linebreak(arg, evalarg);
+
+    if (names.ga_len == 0)
+    {
+	emsg(_(e_syntax_error_in_import));
+	goto erret;
     }
 
     if (STRNCMP("from", arg, 4) != 0 || !IS_WHITE_OR_NUL(arg[4]))
@@ -493,8 +489,10 @@ handle_import(
 
     if (*arg_start == '*')
     {
-	imported_T *imported;
+	imported_T  *imported;
+	char_u	    *as_name = ((char_u **)as_names.ga_data)[0];
 
+	// "import * as That"
 	imported = find_imported(as_name, STRLEN(as_name), cctx);
 	if (imported != NULL && imported->imp_sid == sid)
 	{
@@ -513,7 +511,7 @@ handle_import(
 	if (imported == NULL)
 	    goto erret;
 	imported->imp_name = as_name;
-	as_name = NULL;
+	((char_u **)as_names.ga_data)[0] = NULL;
 	imported->imp_sid = sid;
 	imported->imp_flags = IMP_FLAGS_STAR;
     }
@@ -527,6 +525,7 @@ handle_import(
 	for (i = 0; i < names.ga_len; ++i)
 	{
 	    char_u	*name = ((char_u **)names.ga_data)[i];
+	    char_u	*as_name = ((char_u **)as_names.ga_data)[i];
 	    size_t	len = STRLEN(name);
 	    int		idx;
 	    imported_T	*imported;
@@ -556,7 +555,7 @@ handle_import(
 	    }
 	    else
 	    {
-		if (check_defined(name, len, cctx) == FAIL)
+		if (check_defined(name, len, cctx, FALSE) == FAIL)
 		    goto erret;
 
 		imported = new_imported(gap != NULL ? gap
@@ -564,10 +563,17 @@ handle_import(
 		if (imported == NULL)
 		    goto erret;
 
-		// TODO: check for "as" following
-		// imported->imp_name = vim_strsave(as_name);
-		imported->imp_name = name;
-		((char_u **)names.ga_data)[i] = NULL;
+		if (as_name == NULL)
+		{
+		    imported->imp_name = name;
+		    ((char_u **)names.ga_data)[i] = NULL;
+		}
+		else
+		{
+		    // "import This as That ..."
+		    imported->imp_name = as_name;
+		    ((char_u **)as_names.ga_data)[i] = NULL;
+		}
 		imported->imp_sid = sid;
 		if (idx >= 0)
 		{
@@ -584,7 +590,7 @@ handle_import(
     }
 erret:
     ga_clear_strings(&names);
-    vim_free(as_name);
+    ga_clear_strings(&as_names);
     return cmd_end;
 }
 
@@ -629,7 +635,7 @@ vim9_declare_scriptvar(exarg_T *eap, char_u *arg)
     }
     if (!VIM_ISWHITE(p[1]))
     {
-	semsg(_(e_white_space_required_after_str), ":");
+	semsg(_(e_white_space_required_after_str_str), ":", p);
 	return arg + STRLEN(arg);
     }
     name = vim_strnsave(arg, p - arg);
@@ -650,7 +656,7 @@ vim9_declare_scriptvar(exarg_T *eap, char_u *arg)
 	init_tv.v_type = VAR_NUMBER;
     else
 	init_tv.v_type = type->tt_type;
-    set_var_const(name, type, &init_tv, FALSE, 0);
+    set_var_const(name, type, &init_tv, FALSE, 0, 0);
 
     vim_free(name);
     return p;
@@ -855,7 +861,7 @@ find_typval_in_script(typval_T *dest)
 	if (sv->sv_name != NULL && sv->sv_tv == dest)
 	    return sv;
     }
-    iemsg("check_script_var_type(): not found");
+    iemsg("find_typval_in_script(): not found");
     return NULL;
 }
 
@@ -864,7 +870,11 @@ find_typval_in_script(typval_T *dest)
  * If needed convert "value" to a bool.
  */
     int
-check_script_var_type(typval_T *dest, typval_T *value, char_u *name)
+check_script_var_type(
+	typval_T    *dest,
+	typval_T    *value,
+	char_u	    *name,
+	where_T	    where)
 {
     svar_T  *sv = find_typval_in_script(dest);
     int	    ret;
@@ -876,7 +886,7 @@ check_script_var_type(typval_T *dest, typval_T *value, char_u *name)
 	    semsg(_(e_readonlyvar), name);
 	    return FAIL;
 	}
-	ret = check_typval_type(sv->sv_type, value, 0);
+	ret = check_typval_type(sv->sv_type, value, where);
 	if (ret == OK && need_convert_to_bool(sv->sv_type, value))
 	{
 	    int	val = tv2bool(value);

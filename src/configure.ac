@@ -90,7 +90,7 @@ with_x_arg="$with_x"
 dnl Set default value for CFLAGS if none is defined or it's empty
 if test -z "$CFLAGS"; then
   CFLAGS="-O"
-  test "$GCC" = yes && CFLAGS="-O2 -fno-strength-reduce -Wall"
+  test "$GCC" = yes && CFLAGS="-O2 -fno-strength-reduce -Wall -Wno-deprecated-declarations"
 fi
 if test "$GCC" = yes; then
   dnl method that should work for nearly all versions
@@ -127,8 +127,9 @@ if test x"$CLANG_VERSION_STRING" != x"" ; then
   dnl change the constant 500002075 below appropriately.  To get the
   dnl integer corresponding to a version number, refer to the
   dnl definition of CLANG_VERSION above.
+  dnl Clang 11 reports "11", assume Clang 10 and later work like this.
   AC_MSG_CHECKING(if clang supports -fno-strength-reduce)
-  if test "$CLANG_VERSION" -ge 500002075 ; then
+  if test "$CLANG_MAJOR" -ge 10 -o "$CLANG_VERSION" -ge 500002075 ; then
     AC_MSG_RESULT(no)
     CFLAGS=`echo "$CFLAGS" | sed -e 's/-fno-strength-reduce/ /'`
   else
@@ -2447,6 +2448,7 @@ else
     yes|""|auto)	AC_MSG_RESULT(yes/auto - automatic GUI support)
 		gui_auto=yes
 		SKIP_GTK2=
+		SKIP_GTK3=
 		SKIP_GNOME=
 		SKIP_MOTIF=
 		SKIP_ATHENA=
@@ -2583,6 +2585,9 @@ AC_DEFUN(AM_PATH_GTK,
 	     sed 's/\([[0-9]]*\)\.\([[0-9]]*\)\.\([[0-9]]*\)/\3/'`
     }
     else
+      dnl Put some text before the "no" to hint at installing the gtk-dev
+      dnl packages.
+      AC_MSG_CHECKING(for GTK -dev package)
       no_gtk=yes
     fi
 
@@ -2755,6 +2760,10 @@ if test -z "$SKIP_GTK2"; then
   if test "x$PKG_CONFIG" != "xno"; then
     dnl First try finding version 2.2.0 or later.  The 2.0.x series has
     dnl problems (bold fonts, --remote doesn't work).
+    dnl Disable checking for GTK3 here, otherwise it's found when GTK2 is not
+    dnl found.
+    save_skip_gtk3=$SKIP_GTK3
+    SKIP_GTK3=YES
     AM_PATH_GTK(2.2.0,
 		[GUI_LIB_LOC="$GTK_LIBDIR"
 		 GTK_LIBNAME="$GTK_LIBS"
@@ -2766,6 +2775,8 @@ if test -z "$SKIP_GTK2"; then
       SKIP_MOTIF=YES
       GUITYPE=GTK
       AC_SUBST(GTK_LIBNAME)
+    else
+      SKIP_GTK3=$save_skip_gtk3
     fi
   fi
   if test "x$GUITYPE" = "xGTK"; then
@@ -2801,6 +2812,8 @@ if test -z "$SKIP_GTK3"; then
   fi
 
   if test "x$PKG_CONFIG" != "xno"; then
+    save_skip_gtk2=$SKIP_GTK2
+    SKIP_GTK2=YES
     AM_PATH_GTK(3.0.0,
 		[GUI_LIB_LOC="$GTK_LIBDIR"
 		 GTK_LIBNAME="$GTK_LIBS"
@@ -2814,6 +2827,8 @@ if test -z "$SKIP_GTK3"; then
       GUITYPE=GTK
       AC_SUBST(GTK_LIBNAME)
       AC_DEFINE(USE_GTK3)
+    else
+      SKIP_GTK2=$save_skip_gtk2
     fi
   fi
 fi
@@ -4088,6 +4103,15 @@ AC_TRY_COMPILE(
 	(void)sysconf(_SC_PHYS_PAGES);
 	],
 	AC_MSG_RESULT(yes); AC_DEFINE(HAVE_SYSCONF),
+	AC_MSG_RESULT(not usable))
+
+dnl check if we have _SC_SIGSTKSZ via sysconf()
+AC_MSG_CHECKING(for _SC_SIGSTKSZ via sysconf())
+AC_TRY_COMPILE(
+[#include <unistd.h>],
+[	(void)sysconf(_SC_SIGSTKSZ);
+	],
+	AC_MSG_RESULT(yes); AC_DEFINE(HAVE_SYSCONF_SIGSTKSZ),
 	AC_MSG_RESULT(not usable))
 
 AC_CHECK_SIZEOF([int])

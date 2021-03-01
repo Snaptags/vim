@@ -84,7 +84,7 @@ EXTERN char e_const_requires_a_value[]
 EXTERN char e_type_or_initialization_required[]
 	INIT(= N_("E1022: Type or initialization required"));
 EXTERN char e_using_number_as_bool_nr[]
-	INIT(= N_("E1023: Using a Number as a Bool: %d"));
+	INIT(= N_("E1023: Using a Number as a Bool: %lld"));
 EXTERN char e_using_number_as_string[]
 	INIT(= N_("E1024: Using a Number as a String"));
 EXTERN char e_using_rcurly_outside_if_block_scope[]
@@ -147,7 +147,7 @@ EXTERN char e_cannot_declare_an_option[]
 	INIT(= N_("E1052: Cannot declare an option: %s"));
 EXTERN char e_could_not_import_str[]
 	INIT(= N_("E1053: Could not import \"%s\""));
-EXTERN char e_variable_already_declared_in_script[]
+EXTERN char e_variable_already_declared_in_script_str[]
 	INIT(= N_("E1054: Variable already declared in the script: %s"));
 EXTERN char e_missing_name_after_dots[]
 	INIT(= N_("E1055: Missing name after ..."));
@@ -173,10 +173,10 @@ EXTERN char e_cannot_declare_a_register_str[]
 	INIT(= N_("E1066: Cannot declare a register: %s"));
 EXTERN char e_separator_mismatch_str[]
 	INIT(= N_("E1067: Separator mismatch: %s"));
-EXTERN char e_no_white_space_allowed_before_str[]
-	INIT(= N_("E1068: No white space allowed before '%s'"));
-EXTERN char e_white_space_required_after_str[]
-	INIT(= N_("E1069: White space required after '%s'"));
+EXTERN char e_no_white_space_allowed_before_str_str[]
+	INIT(= N_("E1068: No white space allowed before '%s': %s"));
+EXTERN char e_white_space_required_after_str_str[]
+	INIT(= N_("E1069: White space required after '%s': %s"));
 EXTERN char e_missing_from[]
 	INIT(= N_("E1070: Missing \"from\""));
 EXTERN char e_invalid_string_after_from[]
@@ -343,3 +343,33 @@ EXTERN char e_mismatched_enddef[]
 	INIT(= N_("E1152: Mismatched enddef"));
 EXTERN char e_invalid_operation_for_bool[]
 	INIT(= N_("E1153: Invalid operation for bool"));
+EXTERN char e_divide_by_zero[]
+	INIT(= N_("E1154: Divide by zero"));
+EXTERN char e_cannot_define_autocommands_for_all_events[]
+	INIT(= N_("E1155: Cannot define autocommands for ALL events"));
+EXTERN char e_cannot_change_arglist_recursively[]
+	INIT(= N_("E1156: Cannot change the argument list recursively"));
+EXTERN char e_missing_return_type[]
+	INIT(= N_("E1157: Missing return type"));
+EXTERN char e_cannot_use_flatten_in_vim9_script[]
+	INIT(= N_("E1158: Cannot use flatten() in Vim9 script"));
+EXTERN char e_cannot_split_window_when_closing_buffer[]
+	INIT(= N_("E1159: Cannot split a window when closing the buffer"));
+EXTERN char e_cannot_use_default_for_variable_arguments[]
+	INIT(= N_("E1160: Cannot use a default for variable arguments"));
+EXTERN char e_cannot_json_encode_str[]
+	INIT(= N_("E1161: Cannot json encode a %s"));
+EXTERN char e_register_name_must_be_one_char_str[]
+	INIT(= N_("E1162: Register name must be one character: %s"));
+EXTERN char e_variable_nr_type_mismatch_expected_str_but_got_str[]
+	INIT(= N_("E1163: Variable %d: type mismatch, expected %s but got %s"));
+EXTERN char e_vim9cmd_must_be_followed_by_command[]
+	INIT(= N_("E1164: vim9cmd must be followed by a command"));
+EXTERN char e_cannot_use_range_with_assignment_str[]
+	INIT(= N_("E1165: Cannot use a range with an assignment: %s"));
+EXTERN char e_cannot_use_range_with_dictionary[]
+	INIT(= N_("E1166: Cannot use a range with a dictionary"));
+EXTERN char e_argument_name_shadows_existing_variable_str[]
+	INIT(= N_("E1167: Argument name shadows existing variable: %s"));
+EXTERN char e_argument_already_declared_in_script_str[]
+	INIT(= N_("E1168: Argument already declared in the script: %s"));

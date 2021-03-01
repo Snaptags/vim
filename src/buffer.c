@@ -492,8 +492,10 @@ can_unload_buffer(buf_T *buf)
  * supposed to close the window but autocommands close all other windows.
  *
  * When "ignore_abort" is TRUE don't abort even when aborting() returns TRUE.
+ *
+ * Return TRUE when we got to the end and b_nwindows was decremented.
  */
-    void
+    int
 close_buffer(
     win_T	*win,		// if not NULL, set b_last_cursor
     buf_T	*buf,
@@ -540,7 +542,7 @@ close_buffer(
 	    if (wipe_buf || unload_buf)
 	    {
 		if (!can_unload_buffer(buf))
-		    return;
+		    return FALSE;
 
 		// Wiping out or unloading a terminal buffer kills the job.
 		free_terminal(buf);
@@ -571,7 +573,7 @@ close_buffer(
     // Disallow deleting the buffer when it is locked (already being closed or
     // halfway a command that relies on it). Unloading is allowed.
     if ((del_buf || wipe_buf) && !can_unload_buffer(buf))
-	return;
+	return FALSE;
 
     // check no autocommands closed the window
     if (win != NULL && win_valid_any_tab(win))
@@ -593,6 +595,7 @@ close_buffer(
     if (buf->b_nwindows == 1)
     {
 	++buf->b_locked;
+	++buf->b_locked_split;
 	if (apply_autocmds(EVENT_BUFWINLEAVE, buf->b_fname, buf->b_fname,
 								  FALSE, buf)
 		&& !bufref_valid(&bufref))
@@ -600,9 +603,10 @@ close_buffer(
 	    // Autocommands deleted the buffer.
 aucmd_abort:
 	    emsg(_(e_auabort));
-	    return;
+	    return FALSE;
 	}
 	--buf->b_locked;
+	--buf->b_locked_split;
 	if (abort_if_last && one_window())
 	    // Autocommands made this the only window.
 	    goto aucmd_abort;
@@ -612,12 +616,14 @@ aucmd_abort:
 	if (!unload_buf)
 	{
 	    ++buf->b_locked;
+	    ++buf->b_locked_split;
 	    if (apply_autocmds(EVENT_BUFHIDDEN, buf->b_fname, buf->b_fname,
 								  FALSE, buf)
 		    && !bufref_valid(&bufref))
 		// Autocommands deleted the buffer.
 		goto aucmd_abort;
 	    --buf->b_locked;
+	    --buf->b_locked_split;
 	    if (abort_if_last && one_window())
 		// Autocommands made this the only window.
 		goto aucmd_abort;
@@ -625,7 +631,7 @@ aucmd_abort:
 #ifdef FEAT_EVAL
 	// autocmds may abort script processing
 	if (!ignore_abort && aborting())
-	    return;
+	    return FALSE;
 #endif
     }
 
@@ -653,7 +659,7 @@ aucmd_abort:
     // Return when a window is displaying the buffer or when it's not
     // unloaded.
     if (buf->b_nwindows > 0 || !unload_buf)
-	return;
+	return FALSE;
 
     // Always remove the buffer when there is no file name.
     if (buf->b_ffname == NULL)
@@ -683,11 +689,11 @@ aucmd_abort:
 
     // Autocommands may have deleted the buffer.
     if (!bufref_valid(&bufref))
-	return;
+	return FALSE;
 #ifdef FEAT_EVAL
     // autocmds may abort script processing
     if (!ignore_abort && aborting())
-	return;
+	return FALSE;
 #endif
 
     /*
@@ -698,7 +704,7 @@ aucmd_abort:
      * deleted buffer.
      */
     if (buf == curbuf && !is_curbuf)
-	return;
+	return FALSE;
 
     if (win_valid_any_tab(win) && win->w_buffer == buf)
 	win->w_buffer = NULL;  // make sure we don't use the buffer now
@@ -755,6 +761,7 @@ aucmd_abort:
 	    buf->b_p_bl = FALSE;
     }
     // NOTE: at this point "curbuf" may be invalid!
+    return TRUE;
 }
 
 /*
@@ -797,6 +804,7 @@ buf_freeall(buf_T *buf, int flags)
 
     // Make sure the buffer isn't closed by autocommands.
     ++buf->b_locked;
+    ++buf->b_locked_split;
     set_bufref(&bufref, buf);
     if (buf->b_ml.ml_mfp != NULL)
     {
@@ -823,6 +831,7 @@ buf_freeall(buf_T *buf, int flags)
 	    return;
     }
     --buf->b_locked;
+    --buf->b_locked_split;
 
     // If the buffer was in curwin and the window has changed, go back to that
     // window, if it still exists.  This avoids that ":edit x" triggering a
@@ -1715,8 +1724,8 @@ set_curbuf(buf_T *buf, int action)
     set_bufref(&prevbufref, prevbuf);
     set_bufref(&newbufref, buf);
 
-    // Autocommands may delete the current buffer and/or the buffer we want to go
-    // to.  In those cases don't close the buffer.
+    // Autocommands may delete the current buffer and/or the buffer we want to
+    // go to.  In those cases don't close the buffer.
     if (!apply_autocmds(EVENT_BUFLEAVE, NULL, NULL, FALSE, curbuf)
 	    || (bufref_valid(&prevbufref)
 		&& bufref_valid(&newbufref)
@@ -2561,12 +2570,15 @@ buflist_findpat(
     char_u	*p;
     int		toggledollar;
 
-    if (pattern_end == pattern + 1 && (*pattern == '%' || *pattern == '#'))
+    // "%" is current file, "%%" or "#" is alternate file
+    if ((pattern_end == pattern + 1 && (*pattern == '%' || *pattern == '#'))
+	    || (in_vim9script() && pattern_end == pattern + 2
+				    && pattern[0] == '%' && pattern[1] == '%'))
     {
-	if (*pattern == '%')
-	    match = curbuf->b_fnum;
-	else
+	if (*pattern == '#' || pattern_end == pattern + 2)
 	    match = curwin->w_alt_fnum;
+	else
+	    match = curbuf->b_fnum;
 #ifdef FEAT_DIFF
 	if (diffmode && !diff_mode_buf(buflist_findnr(match)))
 	    match = -1;
@@ -4537,7 +4549,7 @@ build_stl_str_hl(
 	case STL_VIRTCOL_ALT:
 	    // In list mode virtcol needs to be recomputed
 	    virtcol = wp->w_virtcol;
-	    if (wp->w_p_list && lcs_tab1 == NUL)
+	    if (wp->w_p_list && wp->w_lcs_chars.tab1 == NUL)
 	    {
 		wp->w_p_list = FALSE;
 		getvcol(wp, &wp->w_cursor, NULL, &virtcol, NULL);

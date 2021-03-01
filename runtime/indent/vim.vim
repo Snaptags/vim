@@ -1,7 +1,7 @@
 " Vim indent file
 " Language:	Vim script
 " Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last Change:	2021 Jan 06
+" Last Change:	2021 Feb 18
 
 " Only load this indent file when no other was loaded.
 if exists("b:did_indent")
@@ -38,6 +38,9 @@ function GetVimIndentIntern()
   " Find a non-blank line above the current line.
   let lnum = prevnonblank(v:lnum - 1)
 
+  " The previous line, ignoring line continuation
+  let prev_text_end = lnum > 0 ? getline(lnum) : ''
+
   " If the current line doesn't start with '\' or '"\ ' and below a line that
   " starts with '\' or '"\ ', use the indent of the line above it.
   let cur_text = getline(v:lnum)
@@ -51,6 +54,8 @@ function GetVimIndentIntern()
   if lnum == 0
     return 0
   endif
+
+  " the start of the previous line, skipping over line continuation
   let prev_text = getline(lnum)
   let found_cont = 0
 
@@ -94,7 +99,9 @@ function GetVimIndentIntern()
     let ind = ind + shiftwidth()
   else
     " A line starting with :au does not increment/decrement indent.
-    if prev_text !~ '^\s*au\%[tocmd]'
+    " A { may start a block or a dict.  Assume that when a } follows it's a
+    " terminated dict.
+    if prev_text !~ '^\s*au\%[tocmd]' && prev_text !~ '^\s*{.*}'
       let i = match(prev_text, '\(^\||\)\s*\(export\s\+\)\?\({\|\(if\|wh\%[ile]\|for\|try\|cat\%[ch]\|fina\|finall\%[y]\|fu\%[nction]\|def\|el\%[seif]\)\>\)')
       if i >= 0
 	let ind += shiftwidth()
@@ -147,13 +154,17 @@ function GetVimIndentIntern()
   endif
 
   " Below a line starting with "]" we must be below the end of a list.
-  if prev_text =~ '^\s*]'
+  " Include a "}" and "},} in case a dictionary ends too.
+  if prev_text_end =~ '^\s*\(},\=\s*\)\=]'
     let ind = ind - shiftwidth()
   endif
 
-  " A line ending in "{"/"[} is most likely the start of a dict/list literal,
-  " indent the next line more.  Not for a continuation line.
-  if prev_text =~ '[{[]\s*$' && !found_cont
+  let ends_in_comment = has('syntax_items')
+	\ && synIDattr(synID(lnum, len(getline(lnum)), 1), "name") =~ '\(Comment\|String\)$'
+
+  " A line ending in "{" or "[" is most likely the start of a dict/list literal,
+  " indent the next line more.  Not for a continuation line or {{{.
+  if !ends_in_comment && prev_text_end =~ '\s[{[]\s*$' && !found_cont
     let ind = ind + shiftwidth()
   endif
 

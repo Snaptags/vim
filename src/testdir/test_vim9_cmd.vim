@@ -5,6 +5,16 @@ source vim9.vim
 source term_util.vim
 source view_util.vim
 
+def Test_vim9cmd()
+  var lines =<< trim END
+    vim9cmd var x = 123
+    let s:y = 'yes'
+    vim9c assert_equal(123, x)
+    vim9cm assert_equal('yes', y)
+  END
+  CheckScriptSuccess(lines)
+enddef
+
 def Test_edit_wildcards()
   var filename = 'Xtest'
   edit `=filename`
@@ -68,6 +78,17 @@ def Test_expand_alternate_file()
     edit Xfiletwo
     edit %%:r
     assert_equal('Xfileone', bufname())
+
+    assert_false(bufexists('altfoo'))
+    edit altfoo
+    edit bar
+    assert_true(bufexists('altfoo'))
+    assert_true(buflisted('altfoo'))
+    bdel %%
+    assert_true(bufexists('altfoo'))
+    assert_false(buflisted('altfoo'))
+    bwipe! altfoo
+    bwipe! bar
   END
   CheckDefAndScriptSuccess(lines)
 enddef
@@ -302,6 +323,11 @@ def Test_for_linebreak()
   CheckScriptSuccess(lines)
 enddef
 
+def MethodAfterLinebreak(arg: string)
+  arg
+    ->setline(1)
+enddef
+
 def Test_method_call_linebreak()
   var lines =<< trim END
       vim9script
@@ -317,6 +343,48 @@ def Test_method_call_linebreak()
       assert_equal([1, 2, 3], res)
   END
   CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      new
+      var name = [1, 2]
+      name
+          ->copy()
+          ->setline(1)
+      assert_equal(['1', '2'], getline(1, 2))
+      bwipe!
+  END
+  CheckDefAndScriptSuccess(lines)
+
+  lines =<< trim END
+      new
+      g:shortlist
+          ->copy()
+          ->setline(1)
+      assert_equal(['1', '2'], getline(1, 2))
+      bwipe!
+  END
+  g:shortlist = [1, 2]
+  CheckDefAndScriptSuccess(lines)
+  unlet g:shortlist
+
+  new
+  MethodAfterLinebreak('foobar')
+  assert_equal('foobar', getline(1))
+  bwipe!
+enddef
+
+def Test_method_call_whitespace()
+  var lines =<< trim END
+    new
+    var yank = 'text'
+    yank->setline(1)
+    yank  ->setline(2)
+    yank->  setline(3)
+    yank  ->  setline(4)
+    assert_equal(['text', 'text', 'text', 'text'], getline(1, 4))
+    bwipe!
+  END
+  CheckDefAndScriptSuccess(lines)
 enddef
 
 def Test_skipped_expr_linebreak()
@@ -736,6 +804,9 @@ def Test_put_command()
   assert_equal('above', getline(3))
   assert_equal('below', getline(4))
 
+  :2put =['a', 'b', 'c']
+  assert_equal(['ppp', 'a', 'b', 'c', 'above'], getline(2, 6))
+
   # compute range at runtime
   setline(1, range(1, 8))
   @a = 'aaa'
@@ -746,6 +817,10 @@ def Test_put_command()
   :2
   :+2put! a
   assert_equal('aaa', getline(4))
+
+  []->mapnew(() => 0)
+  :$put ='end'
+  assert_equal('end', getline('$'))
 
   bwipe!
 

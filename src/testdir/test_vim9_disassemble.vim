@@ -422,7 +422,7 @@ def Test_disassemble_try()
   var res = execute('disass s:ScriptFuncTry')
   assert_match('<SNR>\d*_ScriptFuncTry\_s*' ..
         'try\_s*' ..
-        '\d TRY catch -> \d\+, finally -> \d\+\_s*' ..
+        '\d TRY catch -> \d\+, finally -> \d\+, endtry -> \d\+\_s*' ..
         'echo "yes"\_s*' ..
         '\d PUSHS "yes"\_s*' ..
         '\d ECHO 1\_s*' ..
@@ -437,6 +437,7 @@ def Test_disassemble_try()
         '\d\+ PUSHS "no"\_s*' ..
         '\d\+ ECHO 1\_s*' ..
         'finally\_s*' ..
+        '\d\+ FINALLY\_s*' ..
         'throw "end"\_s*' ..
         '\d\+ PUSHS "end"\_s*' ..
         '\d\+ THROW\_s*' ..
@@ -762,7 +763,7 @@ def Test_disassemble_const_expr()
             'if has("gui_running")\_s*' ..
             '\d PUSHS "gui_running"\_s*' ..
             '\d BCALL has(argc 1)\_s*' ..
-            '\d COND2BOOL\_s*' ..
+            '\d 2BOOL (!!val)\_s*' ..
             '\d JUMP_IF_FALSE -> \d\_s*' ..
             '  echo "yes"\_s*' ..
             '\d PUSHS "yes"\_s*' ..
@@ -934,7 +935,7 @@ def Test_disassemble_lambda_with_type()
         'return Ref(g:value)\_s*' ..
         '\d LOADG g:value\_s*' ..
         '\d LOAD $0\_s*' ..
-        '\d CHECKTYPE number stack\[-2\]\_s*' ..
+        '\d CHECKTYPE number stack\[-2\] arg 1\_s*' ..
         '\d PCALL (argc 1)\_s*' ..
         '\d RETURN',
         instr)
@@ -1106,6 +1107,63 @@ def Test_disassemble_for_loop_unpack()
         '\d\+ ECHO 2\_s*' ..
         'endfor\_s*' ..
         '\d\+ JUMP -> 8\_s*' ..
+        '\d\+ DROP\_s*' ..
+        '\d\+ RETURN 0',
+        instr)
+enddef
+
+def ForLoopContinue()
+  for nr in [1, 2]
+    try
+      echo "ok"
+      try
+        echo "deeper"
+      catch
+        continue
+      endtry
+    catch
+      echo "not ok"
+    endtry
+  endfor
+enddef
+
+def Test_disassemble_for_loop_continue()
+  var instr = execute('disassemble ForLoopContinue')
+  assert_match('ForLoopContinue\_s*' ..
+        'for nr in \[1, 2]\_s*' ..
+        '0 STORE -1 in $0\_s*' ..
+        '1 PUSHNR 1\_s*' ..
+        '2 PUSHNR 2\_s*' ..
+        '3 NEWLIST size 2\_s*' ..
+        '4 FOR $0 -> 22\_s*' ..
+        '5 STORE $1\_s*' ..
+        'try\_s*' ..
+        '6 TRY catch -> 17, endtry -> 20\_s*' ..
+        'echo "ok"\_s*' ..
+        '7 PUSHS "ok"\_s*' ..
+        '8 ECHO 1\_s*' ..
+        'try\_s*' ..
+        '9 TRY catch -> 13, endtry -> 15\_s*' ..
+        'echo "deeper"\_s*' ..
+        '10 PUSHS "deeper"\_s*' ..
+        '11 ECHO 1\_s*' ..
+        'catch\_s*' ..
+        '12 JUMP -> 15\_s*' ..
+        '13 CATCH\_s*' ..
+        'continue\_s*' ..
+        '14 TRY-CONTINUE 2 levels -> 4\_s*' ..
+        'endtry\_s*' ..
+        '15 ENDTRY\_s*' ..
+        'catch\_s*' ..
+        '16 JUMP -> 20\_s*' ..
+        '17 CATCH\_s*' ..
+        'echo "not ok"\_s*' ..
+        '18 PUSHS "not ok"\_s*' ..
+        '19 ECHO 1\_s*' ..
+        'endtry\_s*' ..
+        '20 ENDTRY\_s*' ..
+        'endfor\_s*' ..
+        '21 JUMP -> 4\_s*' ..
         '\d\+ DROP\_s*' ..
         '\d\+ RETURN 0',
         instr)
@@ -1839,6 +1897,45 @@ def Test_silent()
         '\d ECHOERR 1\_s*' ..
         '\d CMDMOD_REV\_s*' ..
         '\d RETURN 0',
+        res)
+enddef
+
+def s:Profiled(): string
+  echo "profiled"
+  return "done"
+enddef
+
+def Test_profiled()
+  if !has('profile')
+    MissingFeature 'profile'
+  endif
+  var res = execute('disass! s:Profiled')
+  assert_match('<SNR>\d*_Profiled\_s*' ..
+        'echo "profiled"\_s*' ..
+        '\d PROFILE START line 1\_s*' ..
+        '\d PUSHS "profiled"\_s*' ..
+        '\d ECHO 1\_s*' ..
+        'return "done"\_s*' ..
+        '\d PROFILE END\_s*' ..
+        '\d PROFILE START line 2\_s*' ..
+        '\d PUSHS "done"\_s*' ..
+        '\d RETURN\_s*' ..
+        '\d PROFILE END',
+        res)
+enddef
+
+def s:SilentReturn(): string
+  silent return "done"
+enddef
+
+def Test_silent_return()
+  var res = execute('disass s:SilentReturn')
+  assert_match('<SNR>\d*_SilentReturn\_s*' ..
+        'silent return "done"\_s*' ..
+        '\d CMDMOD silent\_s*' ..
+        '\d PUSHS "done"\_s*' ..
+        '\d CMDMOD_REV\_s*' ..
+        '\d RETURN',
         res)
 enddef
 

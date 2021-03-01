@@ -122,6 +122,8 @@ static struct vimvar
     {VV_NAME("true",		 VAR_BOOL), VV_RO},
     {VV_NAME("none",		 VAR_SPECIAL), VV_RO},
     {VV_NAME("null",		 VAR_SPECIAL), VV_RO},
+    {VV_NAME("numbermax",	 VAR_NUMBER), VV_RO},
+    {VV_NAME("numbermin",	 VAR_NUMBER), VV_RO},
     {VV_NAME("numbersize",	 VAR_NUMBER), VV_RO},
     {VV_NAME("vim_did_enter",	 VAR_NUMBER), VV_RO},
     {VV_NAME("testing",		 VAR_NUMBER), 0},
@@ -171,7 +173,7 @@ static void list_buf_vars(int *first);
 static void list_win_vars(int *first);
 static void list_tab_vars(int *first);
 static char_u *list_arg_vars(exarg_T *eap, char_u *arg, int *first);
-static char_u *ex_let_one(char_u *arg, typval_T *tv, int copy, int flags, char_u *endchars, char_u *op);
+static char_u *ex_let_one(char_u *arg, typval_T *tv, int copy, int flags, char_u *endchars, char_u *op, int var_idx);
 static int do_unlet_var(lval_T *lp, char_u *name_end, exarg_T *eap, int deep, void *cookie);
 static int do_lock_var(lval_T *lp, char_u *name_end, exarg_T *eap, int deep, void *cookie);
 static void list_one_var(dictitem_T *v, char *prefix, int *first);
@@ -228,6 +230,8 @@ evalvars_init(void)
     set_vim_var_nr(VV_TRUE, VVAL_TRUE);
     set_vim_var_nr(VV_NONE, VVAL_NONE);
     set_vim_var_nr(VV_NULL, VVAL_NULL);
+    set_vim_var_nr(VV_NUMBERMAX, VARNUM_MAX);
+    set_vim_var_nr(VV_NUMBERMIN, VARNUM_MIN);
     set_vim_var_nr(VV_NUMBERSIZE, sizeof(varnumber_T) * 8);
 
     set_vim_var_nr(VV_TYPE_NUMBER,  VAR_TYPE_NUMBER);
@@ -834,6 +838,8 @@ ex_let(exarg_T *eap)
 	i = FAIL;
 	if (has_assign || concat)
 	{
+	    int cur_lnum;
+
 	    op[0] = '=';
 	    op[1] = NUL;
 	    if (*expr != '=')
@@ -878,10 +884,15 @@ ex_let(exarg_T *eap)
 		evalarg.eval_cookie = eap->cookie;
 	    }
 	    expr = skipwhite_and_linebreak(expr, &evalarg);
+	    cur_lnum = SOURCING_LNUM;
 	    i = eval0(expr, &rettv, eap, &evalarg);
 	    if (eap->skip)
 		--emsg_skip;
 	    clear_evalarg(&evalarg, eap);
+
+	    // Restore the line number so that any type error is given for the
+	    // declaration, not the expression.
+	    SOURCING_LNUM = cur_lnum;
 	}
 	if (eap->skip)
 	{
@@ -918,13 +929,14 @@ ex_let_vars(
     char_u	*arg = arg_start;
     list_T	*l;
     int		i;
+    int		var_idx = 0;
     listitem_T	*item;
     typval_T	ltv;
 
     if (*arg != '[')
     {
 	// ":let var = expr" or ":for var in list"
-	if (ex_let_one(arg, tv, copy, flags, op, op) == NULL)
+	if (ex_let_one(arg, tv, copy, flags, op, op, var_idx) == NULL)
 	    return FAIL;
 	return OK;
     }
@@ -953,7 +965,9 @@ ex_let_vars(
     while (*arg != ']')
     {
 	arg = skipwhite(arg + 1);
-	arg = ex_let_one(arg, &item->li_tv, TRUE, flags, (char_u *)",;]", op);
+	++var_idx;
+	arg = ex_let_one(arg, &item->li_tv, TRUE, flags, (char_u *)",;]",
+								  op, var_idx);
 	item = item->li_next;
 	if (arg == NULL)
 	    return FAIL;
@@ -976,9 +990,10 @@ ex_let_vars(
 	    ltv.v_lock = 0;
 	    ltv.vval.v_list = l;
 	    l->lv_refcount = 1;
+	    ++var_idx;
 
 	    arg = ex_let_one(skipwhite(arg + 1), &ltv, FALSE, flags,
-							    (char_u *)"]", op);
+						   (char_u *)"]", op, var_idx);
 	    clear_tv(&ltv);
 	    if (arg == NULL)
 		return FAIL;
@@ -1019,7 +1034,7 @@ skip_var_list(
 	for (;;)
 	{
 	    p = skipwhite(p + 1);	// skip whites after '[', ';' or ','
-	    s = skip_var_one(p, FALSE);
+	    s = skip_var_one(p, include_type);
 	    if (s == p)
 	    {
 		if (!silent)
@@ -1061,17 +1076,21 @@ skip_var_list(
     char_u *
 skip_var_one(char_u *arg, int include_type)
 {
-    char_u *end;
+    char_u	*end;
+    int		vim9 = in_vim9script();
 
     if (*arg == '@' && arg[1] != NUL)
 	return arg + 2;
     end = find_name_end(*arg == '$' || *arg == '&' ? arg + 1 : arg,
 				   NULL, NULL, FNE_INCL_BR | FNE_CHECK_START);
-    if (include_type && in_vim9script())
+
+    // "a: type" is declaring variable "a" with a type, not "a:".
+    // Same for "s: type".
+    if (vim9 && end == arg + 2 && end[-1] == ':')
+	--end;
+
+    if (include_type && vim9)
     {
-	// "a: type" is declaring variable "a" with a type, not "a:".
-	if (end == arg + 2 && end[-1] == ':')
-	    --end;
 	if (*end == ':')
 	    end = skip_type(skipwhite(end + 1), FALSE);
     }
@@ -1269,7 +1288,8 @@ ex_let_one(
     int		copy,		// copy value from "tv"
     int		flags,		// ASSIGN_CONST, ASSIGN_FINAL, etc.
     char_u	*endchars,	// valid chars after variable name  or NULL
-    char_u	*op)		// "+", "-", "."  or NULL
+    char_u	*op,		// "+", "-", "."  or NULL
+    int		var_idx)	// variable index for "let [a, b] = list"
 {
     int		c1;
     char_u	*name;
@@ -1406,8 +1426,10 @@ ex_let_one(
 			    case '+': n = numval + n; break;
 			    case '-': n = numval - n; break;
 			    case '*': n = numval * n; break;
-			    case '/': n = (long)num_divide(numval, n); break;
-			    case '%': n = (long)num_modulus(numval, n); break;
+			    case '/': n = (long)num_divide(numval, n,
+							       &failed); break;
+			    case '%': n = (long)num_modulus(numval, n,
+							       &failed); break;
 			}
 		    }
 		    else if (opt_type == gov_string
@@ -1491,7 +1513,7 @@ ex_let_one(
 		emsg(_(e_letunexp));
 	    else
 	    {
-		set_var_lval(&lv, p, tv, copy, flags, op);
+		set_var_lval(&lv, p, tv, copy, flags, op, var_idx);
 		arg_end = p;
 	    }
 	}
@@ -1634,27 +1656,9 @@ do_unlet_var(
 	return FAIL;
     else if (lp->ll_range)
     {
-	listitem_T    *li;
-	listitem_T    *ll_li = lp->ll_li;
-	int	      ll_n1 = lp->ll_n1;
-
-	while (ll_li != NULL && (lp->ll_empty2 || lp->ll_n2 >= ll_n1))
-	{
-	    li = ll_li->li_next;
-	    if (value_check_lock(ll_li->li_tv.v_lock, lp->ll_name, FALSE))
-		return FAIL;
-	    ll_li = li;
-	    ++ll_n1;
-	}
-
-	// Delete a range of List items.
-	while (lp->ll_li != NULL && (lp->ll_empty2 || lp->ll_n2 >= lp->ll_n1))
-	{
-	    li = lp->ll_li->li_next;
-	    listitem_remove(lp->ll_list, lp->ll_li);
-	    lp->ll_li = li;
-	    ++lp->ll_n1;
-	}
+	if (list_unlet_range(lp->ll_list, lp->ll_li, lp->ll_name, lp->ll_n1,
+					   !lp->ll_empty2, lp->ll_n2) == FAIL)
+	    return FAIL;
     }
     else
     {
@@ -1669,6 +1673,43 @@ do_unlet_var(
     return ret;
 }
 
+/*
+ * Unlet one item or a range of items from a list.
+ * Return OK or FAIL.
+ */
+    int
+list_unlet_range(
+	list_T	    *l,
+	listitem_T  *li_first,
+	char_u	    *name,
+	long	    n1_arg,
+	int	    has_n2,
+	long	    n2)
+{
+    listitem_T  *li = li_first;
+    int		n1 = n1_arg;
+
+    while (li != NULL && (!has_n2 || n2 >= n1))
+    {
+	if (value_check_lock(li->li_tv.v_lock, name, FALSE))
+	    return FAIL;
+	li = li->li_next;
+	++n1;
+    }
+
+    // Delete a range of List items.
+    li = li_first;
+    n1 = n1_arg;
+    while (li != NULL && (!has_n2 || n2 >= n1))
+    {
+	listitem_T *next = li->li_next;
+
+	listitem_remove(l, li);
+	li = next;
+	++n1;
+    }
+    return OK;
+}
 /*
  * "unlet" a variable.  Return OK if it existed, FAIL if not.
  * When "forceit" is TRUE don't complain if the variable doesn't exist.
@@ -1952,7 +1993,7 @@ static int	varnamebuflen = 0;
 /*
  * Function to concatenate a prefix and a variable name.
  */
-    static char_u *
+    char_u *
 cat_prefix_varname(int prefix, char_u *name)
 {
     int		len;
@@ -2754,7 +2795,6 @@ get_script_local_ht(void)
 lookup_scriptvar(
 	char_u	*name,
 	size_t	len,
-	void	*lvar UNUSED,
 	cctx_T	*dummy UNUSED)
 {
     hashtab_T	*ht = get_script_local_ht();
@@ -3058,7 +3098,7 @@ set_var(
     typval_T	*tv,
     int		copy)	    // make copy of value in "tv"
 {
-    set_var_const(name, NULL, tv, copy, ASSIGN_DECL);
+    set_var_const(name, NULL, tv, copy, ASSIGN_DECL, 0);
 }
 
 /*
@@ -3072,7 +3112,8 @@ set_var_const(
     type_T	*type,
     typval_T	*tv_arg,
     int		copy,	    // make copy of value in "tv"
-    int		flags)	    // ASSIGN_CONST, ASSIGN_FINAL, etc.
+    int		flags,	    // ASSIGN_CONST, ASSIGN_FINAL, etc.
+    int		var_idx)    // index for ":let [a, b] = list"
 {
     typval_T	*tv = tv_arg;
     typval_T	bool_tv;
@@ -3131,6 +3172,8 @@ set_var_const(
 
 	    if (is_script_local && vim9script)
 	    {
+		where_T where;
+
 		if ((flags & (ASSIGN_NO_DECL | ASSIGN_DECL)) == 0)
 		{
 		    semsg(_(e_redefining_script_item_str), name);
@@ -3138,7 +3181,9 @@ set_var_const(
 		}
 
 		// check the type and adjust to bool if needed
-		if (check_script_var_type(&di->di_tv, tv, name) == FAIL)
+		where.wt_index = var_idx;
+		where.wt_variable = TRUE;
+		if (check_script_var_type(&di->di_tv, tv, name, where) == FAIL)
 		    goto failed;
 	    }
 
@@ -3702,10 +3747,10 @@ var_redir_start(char_u *name, int append)
     tv.vval.v_string = (char_u *)"";
     if (append)
 	set_var_lval(redir_lval, redir_endp, &tv, TRUE,
-						ASSIGN_NO_DECL, (char_u *)".");
+					     ASSIGN_NO_DECL, (char_u *)".", 0);
     else
 	set_var_lval(redir_lval, redir_endp, &tv, TRUE,
-						ASSIGN_NO_DECL, (char_u *)"=");
+					     ASSIGN_NO_DECL, (char_u *)"=", 0);
     clear_lval(redir_lval);
     if (called_emsg > called_emsg_before)
     {
@@ -3777,7 +3822,7 @@ var_redir_stop(void)
 					FALSE, FALSE, 0, FNE_CHECK_START);
 	    if (redir_endp != NULL && redir_lval->ll_name != NULL)
 		set_var_lval(redir_lval, redir_endp, &tv, FALSE, 0,
-								(char_u *)".");
+							     (char_u *)".", 0);
 	    clear_lval(redir_lval);
 	}
 

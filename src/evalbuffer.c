@@ -128,7 +128,8 @@ find_win_for_curbuf(void)
 }
 
 /*
- * Set line or list of lines in buffer "buf".
+ * Set line or list of lines in buffer "buf" to "lines".
+ * Any type is allowed and converted to a string.
  */
     static void
 set_buffer_lines(
@@ -187,7 +188,7 @@ set_buffer_lines(
 	li = l->lv_first;
     }
     else
-	line = tv_get_string_chk(lines);
+	line = typval_tostring(lines, FALSE);
 
     // default result is zero == OK
     for (;;)
@@ -197,7 +198,8 @@ set_buffer_lines(
 	    // list argument, get next string
 	    if (li == NULL)
 		break;
-	    line = tv_get_string_chk(&li->li_tv);
+	    vim_free(line);
+	    line = typval_tostring(&li->li_tv, FALSE);
 	    li = li->li_next;
 	}
 
@@ -238,6 +240,7 @@ set_buffer_lines(
 	    break;
 	++lnum;
     }
+    vim_free(line);
 
     if (added > 0)
     {
@@ -497,24 +500,25 @@ f_deletebufline(typval_T *argvars, typval_T *rettv)
     if (u_save(first - 1, last + 1) == FAIL)
     {
 	rettv->vval.v_number = 1;	// FAIL
-	return;
     }
+    else
+    {
+	for (lnum = first; lnum <= last; ++lnum)
+	    ml_delete_flags(first, ML_DEL_MESSAGE);
 
-    for (lnum = first; lnum <= last; ++lnum)
-	ml_delete_flags(first, ML_DEL_MESSAGE);
-
-    FOR_ALL_TAB_WINDOWS(tp, wp)
-	if (wp->w_buffer == buf)
-	{
-	    if (wp->w_cursor.lnum > last)
-		wp->w_cursor.lnum -= count;
-	    else if (wp->w_cursor.lnum> first)
-		wp->w_cursor.lnum = first;
-	    if (wp->w_cursor.lnum > wp->w_buffer->b_ml.ml_line_count)
-		wp->w_cursor.lnum = wp->w_buffer->b_ml.ml_line_count;
-	}
-    check_cursor_col();
-    deleted_lines_mark(first, count);
+	FOR_ALL_TAB_WINDOWS(tp, wp)
+	    if (wp->w_buffer == buf)
+	    {
+		if (wp->w_cursor.lnum > last)
+		    wp->w_cursor.lnum -= count;
+		else if (wp->w_cursor.lnum> first)
+		    wp->w_cursor.lnum = first;
+		if (wp->w_cursor.lnum > wp->w_buffer->b_ml.ml_line_count)
+		    wp->w_cursor.lnum = wp->w_buffer->b_ml.ml_line_count;
+	    }
+	check_cursor_col();
+	deleted_lines_mark(first, count);
+    }
 
     if (!is_curbuf)
     {

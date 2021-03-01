@@ -24,10 +24,13 @@
 
 // Structure put on ec_trystack when ISN_TRY is encountered.
 typedef struct {
-    int	    tcd_frame_idx;	// ec_frame_idx when ISN_TRY was encountered
-    int	    tcd_catch_idx;	// instruction of the first catch
-    int	    tcd_finally_idx;	// instruction of the finally block
+    int	    tcd_frame_idx;	// ec_frame_idx at ISN_TRY
+    int	    tcd_stack_len;	// size of ectx.ec_stack at ISN_TRY
+    int	    tcd_catch_idx;	// instruction of the first :catch or :finally
+    int	    tcd_finally_idx;	// instruction of the :finally block or zero
+    int	    tcd_endtry_idx;	// instruction of the :endtry
     int	    tcd_caught;		// catch block entered
+    int	    tcd_cont;		// :continue encountered, jump here
     int	    tcd_return;		// when TRUE return from end of :finally
 } trycmd_T;
 
@@ -69,6 +72,11 @@ struct ectx_S {
 
     garray_T	ec_funcrefs;	// partials that might be a closure
 };
+
+#ifdef FEAT_PROFILE
+// stack of profinfo_T used when profiling.
+static garray_T profile_info_ga = {0, 0, sizeof(profinfo_T), 20, NULL};
+#endif
 
 // Get pointer to item relative to the bottom of the stack, -1 is the last one.
 #define STACK_TV_BOT(idx) (((typval_T *)ectx->ec_stack.ga_data) + ectx->ec_stack.ga_len + (idx))
@@ -181,6 +189,30 @@ call_dfunc(int cdf_idx, partial_T *pt, int argcount_arg, ectx_T *ectx)
 	return FAIL;
     }
 
+#ifdef FEAT_PROFILE
+    if (do_profiling == PROF_YES)
+    {
+	if (ga_grow(&profile_info_ga, 1) == OK)
+	{
+	    profinfo_T *info = ((profinfo_T *)profile_info_ga.ga_data)
+						      + profile_info_ga.ga_len;
+	    ++profile_info_ga.ga_len;
+	    CLEAR_POINTER(info);
+	    profile_may_start_func(info, ufunc,
+			(((dfunc_T *)def_functions.ga_data)
+					      + ectx->ec_dfunc_idx)->df_ufunc);
+	}
+
+	// Profiling might be enabled/disabled along the way.  This should not
+	// fail, since the function was compiled before and toggling profiling
+	// doesn't change any errors.
+	if (func_needs_compiling(ufunc, PROFILING(ufunc))
+		&& compile_def_function(ufunc, FALSE, PROFILING(ufunc), NULL)
+								       == FAIL)
+	    return FAIL;
+    }
+#endif
+
     if (ufunc->uf_va_name != NULL)
     {
 	// Need to make a list out of the vararg arguments.
@@ -263,7 +295,8 @@ call_dfunc(int cdf_idx, partial_T *pt, int argcount_arg, ectx_T *ectx)
     }
     ectx->ec_stack.ga_len += STACK_FRAME_SIZE + varcount;
 
-    if (pt != NULL || ufunc->uf_partial != NULL || ufunc->uf_flags & FC_CLOSURE)
+    if (pt != NULL || ufunc->uf_partial != NULL
+					     || (ufunc->uf_flags & FC_CLOSURE))
     {
 	outer_T *outer = ALLOC_CLEAR_ONE(outer_T);
 
@@ -292,8 +325,8 @@ call_dfunc(int cdf_idx, partial_T *pt, int argcount_arg, ectx_T *ectx)
 
     // Set execution state to the start of the called function.
     ectx->ec_dfunc_idx = cdf_idx;
-    ectx->ec_instr = dfunc->df_instr;
-    entry = estack_push_ufunc(dfunc->df_ufunc, 1);
+    ectx->ec_instr = INSTRUCTIONS(dfunc);
+    entry = estack_push_ufunc(ufunc, 1);
     if (entry != NULL)
     {
 	// Set the script context to the script where the function was defined.
@@ -504,7 +537,25 @@ func_return(ectx_T *ectx)
     int		argcount = ufunc_argcount(dfunc->df_ufunc);
     int		top = ectx->ec_frame_idx - argcount;
     estack_T	*entry;
+    int		prev_dfunc_idx = STACK_TV(ectx->ec_frame_idx
+					+ STACK_FRAME_FUNC_OFF)->vval.v_number;
+    dfunc_T	*prev_dfunc = ((dfunc_T *)def_functions.ga_data)
+							      + prev_dfunc_idx;
 
+#ifdef FEAT_PROFILE
+    if (do_profiling == PROF_YES)
+    {
+	ufunc_T *caller = prev_dfunc->df_ufunc;
+
+	if (dfunc->df_ufunc->uf_profiling
+				   || (caller != NULL && caller->uf_profiling))
+	{
+	    profile_may_end_func(((profinfo_T *)profile_info_ga.ga_data)
+			+ profile_info_ga.ga_len - 1, dfunc->df_ufunc, caller);
+	    --profile_info_ga.ga_len;
+	}
+    }
+#endif
     // execution context goes one level up
     entry = estack_pop();
     if (entry != NULL)
@@ -531,8 +582,7 @@ func_return(ectx_T *ectx)
     vim_free(ectx->ec_outer);
 
     // Restore the previous frame.
-    ectx->ec_dfunc_idx = STACK_TV(ectx->ec_frame_idx
-					+ STACK_FRAME_FUNC_OFF)->vval.v_number;
+    ectx->ec_dfunc_idx = prev_dfunc_idx;
     ectx->ec_iidx = STACK_TV(ectx->ec_frame_idx
 					+ STACK_FRAME_IIDX_OFF)->vval.v_number;
     ectx->ec_outer = (void *)STACK_TV(ectx->ec_frame_idx
@@ -540,8 +590,7 @@ func_return(ectx_T *ectx)
     // restoring ec_frame_idx must be last
     ectx->ec_frame_idx = STACK_TV(ectx->ec_frame_idx
 				       + STACK_FRAME_IDX_OFF)->vval.v_number;
-    dfunc = ((dfunc_T *)def_functions.ga_data) + ectx->ec_dfunc_idx;
-    ectx->ec_instr = dfunc->df_instr;
+    ectx->ec_instr = INSTRUCTIONS(prev_dfunc);
 
     if (ret_idx > 0)
     {
@@ -644,9 +693,14 @@ call_ufunc(
     int		error;
     int		idx;
     int		did_emsg_before = did_emsg;
+#ifdef FEAT_PROFILE
+    int		profiling = do_profiling == PROF_YES && ufunc->uf_profiling;
+#else
+# define profiling FALSE
+#endif
 
-    if (ufunc->uf_def_status == UF_TO_BE_COMPILED
-	    && compile_def_function(ufunc, FALSE, NULL) == FAIL)
+    if (func_needs_compiling(ufunc, profiling)
+		&& compile_def_function(ufunc, FALSE, profiling, NULL) == FAIL)
 	return FAIL;
     if (ufunc->uf_def_status == UF_COMPILED)
     {
@@ -754,7 +808,7 @@ call_partial(typval_T *tv, int argcount_arg, ectx_T *ectx)
     int		argcount = argcount_arg;
     char_u	*name = NULL;
     int		called_emsg_before = called_emsg;
-    int		res;
+    int		res = FAIL;
 
     if (tv->v_type == VAR_PARTIAL)
     {
@@ -800,7 +854,7 @@ call_partial(typval_T *tv, int argcount_arg, ectx_T *ectx)
 	vim_free(tofree);
     }
 
-    if (name == NULL || res == FAIL)
+    if (res == FAIL)
     {
 	if (called_emsg == called_emsg_before)
 	    semsg(_(e_unknownfunc),
@@ -826,6 +880,21 @@ error_if_locked(int lock, char *error)
 }
 
 /*
+ * Give an error if "tv" is not a number and return FAIL.
+ */
+    static int
+check_for_number(typval_T *tv)
+{
+    if (tv->v_type != VAR_NUMBER)
+    {
+	semsg(_(e_expected_str_but_got_str),
+		vartype_name(VAR_NUMBER), vartype_name(tv->v_type));
+	return FAIL;
+    }
+    return OK;
+}
+
+/*
  * Store "tv" in variable "name".
  * This is for s: and g: variables.
  */
@@ -835,7 +904,7 @@ store_var(char_u *name, typval_T *tv)
     funccal_entry_T entry;
 
     save_funccal(&entry);
-    set_var_const(name, NULL, tv, FALSE, ASSIGN_DECL);
+    set_var_const(name, NULL, tv, FALSE, ASSIGN_DECL, 0);
     restore_funccal();
 }
 
@@ -863,7 +932,7 @@ do_2string(typval_T *tv, int is_2string_any)
 				return FAIL;
 	    }
 	}
-	str = typval_tostring(tv);
+	str = typval_tostring(tv, TRUE);
 	clear_tv(tv);
 	tv->v_type = VAR_STRING;
 	tv->vval.v_string = str;
@@ -881,11 +950,11 @@ allocate_if_null(typval_T *tv)
     {
 	case VAR_LIST:
 	    if (tv->vval.v_list == NULL)
-		rettv_list_alloc(tv);
+		(void)rettv_list_alloc(tv);
 	    break;
 	case VAR_DICT:
 	    if (tv->vval.v_dict == NULL)
-		rettv_dict_alloc(tv);
+		(void)rettv_dict_alloc(tv);
 	    break;
 	default:
 	    break;
@@ -965,10 +1034,11 @@ char_idx2byte(char_u *str, size_t str_len, varnumber_T idx)
 
 /*
  * Return the slice "str[first:last]" using character indexes.
+ * "exclusive" is TRUE for slice().
  * Return NULL when the result is empty.
  */
     char_u *
-string_slice(char_u *str, varnumber_T first, varnumber_T last)
+string_slice(char_u *str, varnumber_T first, varnumber_T last, int exclusive)
 {
     long	start_byte, end_byte;
     size_t	slen;
@@ -979,12 +1049,12 @@ string_slice(char_u *str, varnumber_T first, varnumber_T last)
     start_byte = char_idx2byte(str, slen, first);
     if (start_byte < 0)
 	start_byte = 0; // first index very negative: use zero
-    if (last == -1)
+    if ((last == -1 && !exclusive) || last == VARNUM_MAX)
 	end_byte = (long)slen;
     else
     {
 	end_byte = char_idx2byte(str, slen, last);
-	if (end_byte >= 0 && end_byte < (long)slen)
+	if (!exclusive && end_byte >= 0 && end_byte < (long)slen)
 	    // end index is inclusive
 	    end_byte += MB_CPTR2LEN(str + end_byte);
     }
@@ -1061,7 +1131,7 @@ fill_partial_and_closure(partial_T *pt, ufunc_T *ufunc, ectx_T *ectx)
     pt->pt_func = ufunc;
     pt->pt_refcount = 1;
 
-    if (pt->pt_func->uf_flags & FC_CLOSURE)
+    if (ufunc->uf_flags & FC_CLOSURE)
     {
 	dfunc_T	*dfunc = ((dfunc_T *)def_functions.ga_data)
 							  + ectx->ec_dfunc_idx;
@@ -1092,9 +1162,10 @@ fill_partial_and_closure(partial_T *pt, ufunc_T *ufunc, ectx_T *ectx)
 	++pt->pt_refcount;
 	++ectx->ec_funcrefs.ga_len;
     }
-    ++pt->pt_func->uf_refcount;
+    ++ufunc->uf_refcount;
     return OK;
 }
+
 
 /*
  * Call a "def" function from old Vim script.
@@ -1123,10 +1194,12 @@ call_def_function(
     msglist_T	*private_msg_list = NULL;
     cmdmod_T	save_cmdmod;
     int		restore_cmdmod = FALSE;
+    int		restore_cmdmod_stacklen = 0;
     int		save_emsg_silent_def = emsg_silent_def;
     int		save_did_emsg_def = did_emsg_def;
     int		trylevel_at_start = trylevel;
     int		orig_funcdepth;
+    where_T	where;
 
 // Get pointer to item in the stack.
 #define STACK_TV(idx) (((typval_T *)ectx.ec_stack.ga_data) + idx)
@@ -1139,8 +1212,9 @@ call_def_function(
 #define STACK_TV_VAR(idx) (((typval_T *)ectx.ec_stack.ga_data) + ectx.ec_frame_idx + STACK_FRAME_SIZE + idx)
 
     if (ufunc->uf_def_status == UF_NOT_COMPILED
-	    || (ufunc->uf_def_status == UF_TO_BE_COMPILED
-			  && compile_def_function(ufunc, FALSE, NULL) == FAIL))
+	    || (func_needs_compiling(ufunc, PROFILING(ufunc))
+		&& compile_def_function(ufunc, FALSE, PROFILING(ufunc), NULL)
+								      == FAIL))
     {
 	if (did_emsg_cumul + did_emsg == did_emsg_before)
 	    semsg(_(e_function_is_not_compiled_str),
@@ -1152,7 +1226,7 @@ call_def_function(
 	// Check the function was really compiled.
 	dfunc_T	*dfunc = ((dfunc_T *)def_functions.ga_data)
 							 + ufunc->uf_dfunc_idx;
-	if (dfunc->df_instr == NULL)
+	if (INSTRUCTIONS(dfunc) == NULL)
 	{
 	    iemsg("using call_def_function() on not compiled function");
 	    return FAIL;
@@ -1182,7 +1256,7 @@ call_def_function(
 									 ++idx)
     {
 	if (ufunc->uf_arg_types != NULL && idx < ufunc->uf_args.ga_len
-		&& check_typval_type(ufunc->uf_arg_types[idx], &argv[idx],
+		&& check_typval_arg_type(ufunc->uf_arg_types[idx], &argv[idx],
 							      idx + 1) == FAIL)
 	    goto failed_early;
 	copy_tv(&argv[idx], STACK_TV_BOT(0));
@@ -1213,7 +1287,7 @@ call_def_function(
 
 	    for (idx = 0; idx < vararg_count; ++idx)
 	    {
-		if (check_typval_type(expected, &li->li_tv,
+		if (check_typval_arg_type(expected, &li->li_tv,
 						       argc + idx + 1) == FAIL)
 		    goto failed_early;
 		li = li->li_next;
@@ -1241,24 +1315,32 @@ call_def_function(
     ectx.ec_frame_idx = ectx.ec_stack.ga_len;
     initial_frame_idx = ectx.ec_frame_idx;
 
-    if (partial != NULL || ufunc->uf_partial != NULL)
     {
-	ectx.ec_outer = ALLOC_CLEAR_ONE(outer_T);
-	if (ectx.ec_outer == NULL)
-	    goto failed_early;
-	if (partial != NULL)
+	dfunc_T	*dfunc = ((dfunc_T *)def_functions.ga_data)
+							 + ufunc->uf_dfunc_idx;
+	ufunc_T *base_ufunc = dfunc->df_ufunc;
+
+	// "uf_partial" is on the ufunc that "df_ufunc" points to, as is done
+	// by copy_func().
+	if (partial != NULL || base_ufunc->uf_partial != NULL)
 	{
-	    if (partial->pt_outer.out_stack == NULL && current_ectx != NULL)
+	    ectx.ec_outer = ALLOC_CLEAR_ONE(outer_T);
+	    if (ectx.ec_outer == NULL)
+		goto failed_early;
+	    if (partial != NULL)
 	    {
-		if (current_ectx->ec_outer != NULL)
-		    *ectx.ec_outer = *current_ectx->ec_outer;
+		if (partial->pt_outer.out_stack == NULL && current_ectx != NULL)
+		{
+		    if (current_ectx->ec_outer != NULL)
+			*ectx.ec_outer = *current_ectx->ec_outer;
+		}
+		else
+		    *ectx.ec_outer = partial->pt_outer;
 	    }
 	    else
-		*ectx.ec_outer = partial->pt_outer;
+		*ectx.ec_outer = base_ufunc->uf_partial->pt_outer;
+	    ectx.ec_outer->out_up_is_copy = TRUE;
 	}
-	else
-	    *ectx.ec_outer = ufunc->uf_partial->pt_outer;
-	ectx.ec_outer->out_up_is_copy = TRUE;
     }
 
     // dummy frame entries
@@ -1283,7 +1365,7 @@ call_def_function(
 	    ++ectx.ec_stack.ga_len;
 	}
 
-	ectx.ec_instr = dfunc->df_instr;
+	ectx.ec_instr = INSTRUCTIONS(dfunc);
     }
 
     // Following errors are in the function, not the caller.
@@ -1304,6 +1386,9 @@ call_def_function(
     // function.  If ":silent!" is used in the function then we don't.
     emsg_silent_def = emsg_silent;
     did_emsg_def = 0;
+
+    where.wt_index = 0;
+    where.wt_variable = FALSE;
 
     // Decide where to start execution, handles optional arguments.
     init_instr_idx(ufunc, argc, &ectx);
@@ -1686,6 +1771,7 @@ call_def_function(
 		    tv->v_type = VAR_DICT;
 		    tv->v_lock = 0;
 		    tv->vval.v_dict = d;
+		    ++d->dv_refcount;
 		    ++ectx.ec_stack.ga_len;
 		}
 		break;
@@ -1934,8 +2020,8 @@ call_def_function(
 
 		    if (status == OK && dest_type == VAR_LIST)
 		    {
-			varnumber_T	lidx = tv_idx->vval.v_number;
-			list_T		*list = tv_dest->vval.v_list;
+			long	    lidx = (long)tv_idx->vval.v_number;
+			list_T	    *list = tv_dest->vval.v_list;
 
 			if (list == NULL)
 			{
@@ -2109,18 +2195,15 @@ call_def_function(
 		    else if (tv_dest->v_type == VAR_LIST)
 		    {
 			// unlet a List item, index must be a number
-			if (tv_idx->v_type != VAR_NUMBER)
+			SOURCING_LNUM = iptr->isn_lnum;
+			if (check_for_number(tv_idx) == FAIL)
 			{
-			    SOURCING_LNUM = iptr->isn_lnum;
-			    semsg(_(e_expected_str_but_got_str),
-					vartype_name(VAR_NUMBER),
-					vartype_name(tv_idx->v_type));
 			    status = FAIL;
 			}
 			else
 			{
 			    list_T	*l = tv_dest->vval.v_list;
-			    varnumber_T	n = tv_idx->vval.v_number;
+			    long	n = (long)tv_idx->vval.v_number;
 			    listitem_T	*li = NULL;
 
 			    li = list_find(l, n);
@@ -2145,6 +2228,58 @@ call_def_function(
 		    clear_tv(tv_idx);
 		    clear_tv(tv_dest);
 		    ectx.ec_stack.ga_len -= 2;
+		    if (status == FAIL)
+			goto on_error;
+		}
+		break;
+
+	    // unlet range of items in list variable
+	    case ISN_UNLETRANGE:
+		{
+		    // Stack contains:
+		    // -3 index1
+		    // -2 index2
+		    // -1 dict or list
+		    typval_T	*tv_idx1 = STACK_TV_BOT(-3);
+		    typval_T	*tv_idx2 = STACK_TV_BOT(-2);
+		    typval_T	*tv_dest = STACK_TV_BOT(-1);
+		    int		status = OK;
+
+		    if (tv_dest->v_type == VAR_LIST)
+		    {
+			// indexes must be a number
+			SOURCING_LNUM = iptr->isn_lnum;
+			if (check_for_number(tv_idx1) == FAIL
+				|| check_for_number(tv_idx2) == FAIL)
+			{
+			    status = FAIL;
+			}
+			else
+			{
+			    list_T	*l = tv_dest->vval.v_list;
+			    long	n1 = (long)tv_idx1->vval.v_number;
+			    long	n2 = (long)tv_idx2->vval.v_number;
+			    listitem_T	*li;
+
+			    li = list_find_index(l, &n1);
+			    if (li == NULL
+				     || list_unlet_range(l, li, NULL, n1,
+							    TRUE, n2) == FAIL)
+				status = FAIL;
+			}
+		    }
+		    else
+		    {
+			status = FAIL;
+			SOURCING_LNUM = iptr->isn_lnum;
+			semsg(_(e_cannot_index_str),
+						vartype_name(tv_dest->v_type));
+		    }
+
+		    clear_tv(tv_idx1);
+		    clear_tv(tv_idx2);
+		    clear_tv(tv_dest);
+		    ectx.ec_stack.ga_len -= 3;
 		    if (status == FAIL)
 			goto on_error;
 		}
@@ -2383,11 +2518,13 @@ call_def_function(
 			trycmd = ((trycmd_T *)trystack->ga_data)
 							+ trystack->ga_len - 1;
 		    if (trycmd != NULL
-				  && trycmd->tcd_frame_idx == ectx.ec_frame_idx
-			    && trycmd->tcd_finally_idx != 0)
+				 && trycmd->tcd_frame_idx == ectx.ec_frame_idx)
 		    {
-			// jump to ":finally"
-			ectx.ec_iidx = trycmd->tcd_finally_idx;
+			// jump to ":finally" or ":endtry"
+			if (trycmd->tcd_finally_idx != 0)
+			    ectx.ec_iidx = trycmd->tcd_finally_idx;
+			else
+			    ectx.ec_iidx = trycmd->tcd_endtry_idx;
 			trycmd->tcd_return = TRUE;
 		    }
 		    else
@@ -2528,11 +2665,12 @@ call_def_function(
 						     + ectx.ec_trystack.ga_len;
 		    ++ectx.ec_trystack.ga_len;
 		    ++trylevel;
+		    CLEAR_POINTER(trycmd);
 		    trycmd->tcd_frame_idx = ectx.ec_frame_idx;
-		    trycmd->tcd_catch_idx = iptr->isn_arg.try.try_catch;
-		    trycmd->tcd_finally_idx = iptr->isn_arg.try.try_finally;
-		    trycmd->tcd_caught = FALSE;
-		    trycmd->tcd_return = FALSE;
+		    trycmd->tcd_stack_len = ectx.ec_stack.ga_len;
+		    trycmd->tcd_catch_idx = iptr->isn_arg.try.try_ref->try_catch;
+		    trycmd->tcd_finally_idx = iptr->isn_arg.try.try_ref->try_finally;
+		    trycmd->tcd_endtry_idx = iptr->isn_arg.try.try_ref->try_endtry;
 		}
 		break;
 
@@ -2571,9 +2709,51 @@ call_def_function(
 			trycmd->tcd_caught = TRUE;
 		    }
 		    did_emsg = got_int = did_throw = FALSE;
+		    force_abort = need_rethrow = FALSE;
 		    catch_exception(current_exception);
 		}
 		break;
+
+	    case ISN_TRYCONT:
+		{
+		    garray_T	*trystack = &ectx.ec_trystack;
+		    trycont_T	*trycont = &iptr->isn_arg.trycont;
+		    int		i;
+		    trycmd_T    *trycmd;
+		    int		iidx = trycont->tct_where;
+
+		    if (trystack->ga_len < trycont->tct_levels)
+		    {
+			siemsg("TRYCONT: expected %d levels, found %d",
+					trycont->tct_levels, trystack->ga_len);
+			goto failed;
+		    }
+		    // Make :endtry jump to any outer try block and the last
+		    // :endtry inside the loop to the loop start.
+		    for (i = trycont->tct_levels; i > 0; --i)
+		    {
+			trycmd = ((trycmd_T *)trystack->ga_data)
+							+ trystack->ga_len - i;
+			trycmd->tcd_cont = iidx;
+			iidx = trycmd->tcd_finally_idx == 0
+			    ? trycmd->tcd_endtry_idx : trycmd->tcd_finally_idx;
+		    }
+		    // jump to :finally or :endtry of current try statement
+		    ectx.ec_iidx = iidx;
+		}
+		break;
+
+	    case ISN_FINALLY:
+		{
+		    garray_T	*trystack = &ectx.ec_trystack;
+		    trycmd_T    *trycmd = ((trycmd_T *)trystack->ga_data)
+							+ trystack->ga_len - 1;
+
+		    // Reset the index to avoid a return statement jumps here
+		    // again.
+		    trycmd->tcd_finally_idx = 0;
+		    break;
+		}
 
 	    // end of ":try" block
 	    case ISN_ENDTRY:
@@ -2582,7 +2762,7 @@ call_def_function(
 
 		    if (trystack->ga_len > 0)
 		    {
-			trycmd_T    *trycmd = NULL;
+			trycmd_T    *trycmd;
 
 			--trystack->ga_len;
 			--trylevel;
@@ -2599,28 +2779,69 @@ call_def_function(
 
 			if (trycmd->tcd_return)
 			    goto func_return;
+
+			while (ectx.ec_stack.ga_len > trycmd->tcd_stack_len)
+			{
+			    --ectx.ec_stack.ga_len;
+			    clear_tv(STACK_TV_BOT(0));
+			}
+			if (trycmd->tcd_cont != 0)
+			    // handling :continue: jump to outer try block or
+			    // start of the loop
+			    ectx.ec_iidx = trycmd->tcd_cont;
 		    }
 		}
 		break;
 
 	    case ISN_THROW:
-		--ectx.ec_stack.ga_len;
-		tv = STACK_TV_BOT(0);
-		if (tv->vval.v_string == NULL
-				       || *skipwhite(tv->vval.v_string) == NUL)
 		{
-		    vim_free(tv->vval.v_string);
-		    SOURCING_LNUM = iptr->isn_lnum;
-		    emsg(_(e_throw_with_empty_string));
-		    goto failed;
-		}
+		    garray_T	*trystack = &ectx.ec_trystack;
 
-		if (throw_exception(tv->vval.v_string, ET_USER, NULL) == FAIL)
-		{
-		    vim_free(tv->vval.v_string);
-		    goto failed;
+		    if (trystack->ga_len == 0 && trylevel == 0 && emsg_silent)
+		    {
+			// throwing an exception while using "silent!" causes
+			// the function to abort but not display an error.
+			tv = STACK_TV_BOT(-1);
+			clear_tv(tv);
+			tv->v_type = VAR_NUMBER;
+			tv->vval.v_number = 0;
+			goto done;
+		    }
+		    --ectx.ec_stack.ga_len;
+		    tv = STACK_TV_BOT(0);
+		    if (tv->vval.v_string == NULL
+				       || *skipwhite(tv->vval.v_string) == NUL)
+		    {
+			vim_free(tv->vval.v_string);
+			SOURCING_LNUM = iptr->isn_lnum;
+			emsg(_(e_throw_with_empty_string));
+			goto failed;
+		    }
+
+		    // Inside a "catch" we need to first discard the caught
+		    // exception.
+		    if (trystack->ga_len > 0)
+		    {
+			trycmd_T    *trycmd = ((trycmd_T *)trystack->ga_data)
+							+ trystack->ga_len - 1;
+			if (trycmd->tcd_caught && current_exception != NULL)
+			{
+			    // discard the exception
+			    if (caught_stack == current_exception)
+				caught_stack = caught_stack->caught;
+			    discard_current_exception();
+			    trycmd->tcd_caught = FALSE;
+			}
+		    }
+
+		    if (throw_exception(tv->vval.v_string, ET_USER, NULL)
+								       == FAIL)
+		    {
+			vim_free(tv->vval.v_string);
+			goto failed;
+		    }
+		    did_throw = TRUE;
 		}
-		did_throw = TRUE;
 		break;
 
 	    // compare with special values
@@ -2938,13 +3159,21 @@ call_def_function(
 		    else
 #endif
 		    {
+			int failed = FALSE;
+
 			switch (iptr->isn_arg.op.op_type)
 			{
 			    case EXPR_MULT: n1 = n1 * n2; break;
-			    case EXPR_DIV:  n1 = num_divide(n1, n2); break;
+			    case EXPR_DIV:  n1 = num_divide(n1, n2, &failed);
+					    if (failed)
+						goto on_error;
+					    break;
 			    case EXPR_SUB:  n1 = n1 - n2; break;
 			    case EXPR_ADD:  n1 = n1 + n2; break;
-			    default:	    n1 = num_modulus(n1, n2); break;
+			    default:	    n1 = num_modulus(n1, n2, &failed);
+					    if (failed)
+						goto on_error;
+					    break;
 			}
 			clear_tv(tv1);
 			clear_tv(tv2);
@@ -2992,7 +3221,7 @@ call_def_function(
 		    tv = STACK_TV_BOT(-1);
 		    if (is_slice)
 			// Slice: Select the characters from the string
-			res = string_slice(tv->vval.v_string, n1, n2);
+			res = string_slice(tv->vval.v_string, n1, n2, FALSE);
 		    else
 			// Index: The resulting variable is a string of a
 			// single character.  If the index is too big or
@@ -3030,8 +3259,8 @@ call_def_function(
 		    ectx.ec_stack.ga_len -= is_slice ? 2 : 1;
 		    tv = STACK_TV_BOT(-1);
 		    SOURCING_LNUM = iptr->isn_lnum;
-		    if (list_slice_or_index(list, is_slice, n1, n2, tv, TRUE)
-								       == FAIL)
+		    if (list_slice_or_index(list, is_slice, n1, n2, FALSE,
+							     tv, TRUE) == FAIL)
 			goto on_error;
 		}
 		break;
@@ -3052,8 +3281,8 @@ call_def_function(
 			goto on_error;
 		    var1 = is_slice ? STACK_TV_BOT(-2) : STACK_TV_BOT(-1);
 		    var2 = is_slice ? STACK_TV_BOT(-1) : NULL;
-		    res = eval_index_inner(tv, is_slice,
-						   var1, var2, NULL, -1, TRUE);
+		    res = eval_index_inner(tv, is_slice, var1, var2,
+							FALSE, NULL, -1, TRUE);
 		    clear_tv(var1);
 		    if (is_slice)
 			clear_tv(var2);
@@ -3102,6 +3331,11 @@ call_def_function(
 			goto failed;
 		    ++ectx.ec_stack.ga_len;
 		    copy_tv(&li->li_tv, STACK_TV_BOT(-1));
+
+		    // Useful when used in unpack assignment.  Reset at
+		    // ISN_DROP.
+		    where.wt_index = index + 1;
+		    where.wt_variable = TRUE;
 		}
 		break;
 
@@ -3218,10 +3452,14 @@ call_def_function(
 		{
 		    checktype_T *ct = &iptr->isn_arg.type;
 
-		    tv = STACK_TV_BOT(ct->ct_off);
+		    tv = STACK_TV_BOT((int)ct->ct_off);
 		    SOURCING_LNUM = iptr->isn_lnum;
-		    if (check_typval_type(ct->ct_type, tv, 0) == FAIL)
+		    if (!where.wt_variable)
+			where.wt_index = ct->ct_arg_idx;
+		    if (check_typval_type(ct->ct_type, tv, where) == FAIL)
 			goto on_error;
+		    if (!where.wt_variable)
+			where.wt_index = 0;
 
 		    // number 0 is FALSE, number 1 is TRUE
 		    if (tv->v_type == VAR_NUMBER
@@ -3313,10 +3551,6 @@ call_def_function(
 		    exarg_T	ea;
 		    char	*errormsg;
 
-		    if (GA_GROW(&ectx.ec_stack, 1) == FAIL)
-			goto failed;
-		    ++ectx.ec_stack.ga_len;
-		    tv = STACK_TV_BOT(-1);
 		    ea.line2 = 0;
 		    ea.addr_count = 0;
 		    ea.addr_type = ADDR_LINES;
@@ -3324,6 +3558,13 @@ call_def_function(
 		    ea.skip = FALSE;
 		    if (parse_cmd_address(&ea, &errormsg, FALSE) == FAIL)
 			goto on_error;
+
+		    if (GA_GROW(&ectx.ec_stack, 1) == FAIL)
+			goto failed;
+		    ++ectx.ec_stack.ga_len;
+		    tv = STACK_TV_BOT(-1);
+		    tv->v_type = VAR_NUMBER;
+		    tv->v_lock = 0;
 		    if (ea.addr_count == 0)
 			tv->vval.v_number = curwin->w_cursor.lnum;
 		    else
@@ -3338,18 +3579,6 @@ call_def_function(
 		    char_u	*expr = NULL;
 		    int		dir = FORWARD;
 
-		    if (regname == '=')
-		    {
-			tv = STACK_TV_BOT(-1);
-			if (tv->v_type == VAR_STRING)
-			    expr = tv->vval.v_string;
-			else
-			{
-			    expr = typval_tostring(tv);  // allocates value
-			    clear_tv(tv);
-			}
-			--ectx.ec_stack.ga_len;
-		    }
 		    if (lnum < -2)
 		    {
 			// line number was put on the stack by ISN_RANGE
@@ -3364,6 +3593,19 @@ call_def_function(
 			dir = BACKWARD;
 		    else if (lnum >= 0)
 			curwin->w_cursor.lnum = iptr->isn_arg.put.put_lnum;
+
+		    if (regname == '=')
+		    {
+			tv = STACK_TV_BOT(-1);
+			if (tv->v_type == VAR_STRING)
+			    expr = tv->vval.v_string;
+			else
+			{
+			    expr = typval2string(tv, TRUE); // allocates value
+			    clear_tv(tv);
+			}
+			--ectx.ec_stack.ga_len;
+		    }
 		    check_cursor();
 		    do_put(regname, expr, dir, 1L, PUT_LINE|PUT_CURSLINE);
 		    vim_free(expr);
@@ -3373,6 +3615,7 @@ call_def_function(
 	    case ISN_CMDMOD:
 		save_cmdmod = cmdmod;
 		restore_cmdmod = TRUE;
+		restore_cmdmod_stacklen = ectx.ec_stack.ga_len;
 		cmdmod = *iptr->isn_arg.cmdmod.cf_cmdmod;
 		apply_cmdmod(&cmdmod);
 		break;
@@ -3458,6 +3701,28 @@ call_def_function(
 		}
 		break;
 
+	    case ISN_PROF_START:
+	    case ISN_PROF_END:
+		{
+#ifdef FEAT_PROFILE
+		    funccall_T cookie;
+		    ufunc_T	    *cur_ufunc =
+				    (((dfunc_T *)def_functions.ga_data)
+						 + ectx.ec_dfunc_idx)->df_ufunc;
+
+		    cookie.func = cur_ufunc;
+		    if (iptr->isn_type == ISN_PROF_START)
+		    {
+			func_line_start(&cookie, iptr->isn_lnum);
+			// if we get here the instruction is executed
+			func_line_exec(&cookie);
+		    }
+		    else
+			func_line_end(&cookie);
+#endif
+		}
+		break;
+
 	    case ISN_SHUFFLE:
 		{
 		    typval_T	tmp_tv;
@@ -3477,6 +3742,8 @@ call_def_function(
 	    case ISN_DROP:
 		--ectx.ec_stack.ga_len;
 		clear_tv(STACK_TV_BOT(0));
+		where.wt_index = 0;
+		where.wt_variable = FALSE;
 		break;
 	}
 	continue;
@@ -3498,7 +3765,22 @@ on_error:
 	// when calling the function.
 	if (did_emsg_cumul + did_emsg == did_emsg_before
 					   && emsg_silent && did_emsg_def == 0)
+	{
+	    // If a sequence of instructions causes an error while ":silent!"
+	    // was used, restore the stack length and jump ahead to restoring
+	    // the cmdmod.
+	    if (restore_cmdmod)
+	    {
+		while (ectx.ec_stack.ga_len > restore_cmdmod_stacklen)
+		{
+		    --ectx.ec_stack.ga_len;
+		    clear_tv(STACK_TV_BOT(0));
+		}
+		while (ectx.ec_instr[ectx.ec_iidx].isn_type != ISN_CMDMOD_REV)
+		    ++ectx.ec_iidx;
+	    }
 	    continue;
+	}
 on_fatal_error:
 	// Jump here for an error that messes up the stack.
 	// If we are not inside a try-catch started here, abort execution.
@@ -3590,6 +3872,7 @@ ex_disassemble(exarg_T *eap)
     ufunc_T	*ufunc;
     dfunc_T	*dfunc;
     isn_T	*instr;
+    int		instr_count;
     int		current;
     int		line_idx = 0;
     int		prev_current = 0;
@@ -3625,8 +3908,8 @@ ex_disassemble(exarg_T *eap)
 	semsg(_(e_cannot_find_function_str), eap->arg);
 	return;
     }
-    if (ufunc->uf_def_status == UF_TO_BE_COMPILED
-	    && compile_def_function(ufunc, FALSE, NULL) == FAIL)
+    if (func_needs_compiling(ufunc, eap->forceit)
+	    && compile_def_function(ufunc, FALSE, eap->forceit, NULL) == FAIL)
 	return;
     if (ufunc->uf_def_status != UF_COMPILED)
     {
@@ -3639,8 +3922,15 @@ ex_disassemble(exarg_T *eap)
 	msg((char *)ufunc->uf_name);
 
     dfunc = ((dfunc_T *)def_functions.ga_data) + ufunc->uf_dfunc_idx;
+#ifdef FEAT_PROFILE
+    instr = eap->forceit ? dfunc->df_instr_prof : dfunc->df_instr;
+    instr_count = eap->forceit ? dfunc->df_instr_prof_count
+						       : dfunc->df_instr_count;
+#else
     instr = dfunc->df_instr;
-    for (current = 0; current < dfunc->df_instr_count; ++current)
+    instr_count = dfunc->df_instr_count;
+#endif
+    for (current = 0; current < instr_count; ++current)
     {
 	isn_T	    *iptr = &instr[current];
 	char	    *line;
@@ -3942,6 +4232,9 @@ ex_disassemble(exarg_T *eap)
 	    case ISN_UNLETINDEX:
 		smsg("%4d UNLETINDEX", current);
 		break;
+	    case ISN_UNLETRANGE:
+		smsg("%4d UNLETRANGE", current);
+		break;
 	    case ISN_LOCKCONST:
 		smsg("%4d LOCKCONST", current);
 		break;
@@ -4072,13 +4365,35 @@ ex_disassemble(exarg_T *eap)
 		{
 		    try_T *try = &iptr->isn_arg.try;
 
-		    smsg("%4d TRY catch -> %d, finally -> %d", current,
-					     try->try_catch, try->try_finally);
+		    if (try->try_ref->try_finally == 0)
+			smsg("%4d TRY catch -> %d, endtry -> %d",
+				current,
+				try->try_ref->try_catch,
+				try->try_ref->try_endtry);
+		    else
+			smsg("%4d TRY catch -> %d, finally -> %d, endtry -> %d",
+				current,
+				try->try_ref->try_catch,
+				try->try_ref->try_finally,
+				try->try_ref->try_endtry);
 		}
 		break;
 	    case ISN_CATCH:
 		// TODO
 		smsg("%4d CATCH", current);
+		break;
+	    case ISN_TRYCONT:
+		{
+		    trycont_T *trycont = &iptr->isn_arg.trycont;
+
+		    smsg("%4d TRY-CONTINUE %d level%s -> %d", current,
+				      trycont->tct_levels,
+				      trycont->tct_levels == 1 ? "" : "s",
+				      trycont->tct_where);
+		}
+		break;
+	    case ISN_FINALLY:
+		smsg("%4d FINALLY", current);
 		break;
 	    case ISN_ENDTRY:
 		smsg("%4d ENDTRY", current);
@@ -4193,11 +4508,18 @@ ex_disassemble(exarg_T *eap)
 	    case ISN_CHECKNR: smsg("%4d CHECKNR", current); break;
 	    case ISN_CHECKTYPE:
 		  {
+		      checktype_T *ct = &iptr->isn_arg.type;
 		      char *tofree;
 
-		      smsg("%4d CHECKTYPE %s stack[%d]", current,
-			      type_name(iptr->isn_arg.type.ct_type, &tofree),
-			      iptr->isn_arg.type.ct_off);
+		      if (ct->ct_arg_idx == 0)
+			  smsg("%4d CHECKTYPE %s stack[%d]", current,
+					  type_name(ct->ct_type, &tofree),
+					  (int)ct->ct_off);
+		      else
+			  smsg("%4d CHECKTYPE %s stack[%d] arg %d", current,
+					  type_name(ct->ct_type, &tofree),
+					  (int)ct->ct_off,
+					  (int)ct->ct_arg_idx);
 		      vim_free(tofree);
 		      break;
 		  }
@@ -4259,6 +4581,14 @@ ex_disassemble(exarg_T *eap)
 		    break;
 		}
 	    case ISN_CMDMOD_REV: smsg("%4d CMDMOD_REV", current); break;
+
+	    case ISN_PROF_START:
+		 smsg("%4d PROFILE START line %d", current, iptr->isn_lnum);
+		 break;
+
+	    case ISN_PROF_END:
+		smsg("%4d PROFILE END", current);
+		break;
 
 	    case ISN_UNPACK: smsg("%4d UNPACK %d%s", current,
 			iptr->isn_arg.unpack.unp_count,

@@ -771,6 +771,36 @@ func Test_prop_byte2line()
   call prop_type_delete('prop')
 endfunc
 
+func Test_prop_goto_byte()
+  new
+  call setline(1, '')
+  call setline(2, 'two three')
+  call setline(3, '')
+  call setline(4, 'four five')
+
+  call prop_type_add('testprop', {'highlight': 'Directory'})
+  call search('^two')
+  call prop_add(line('.'), col('.'), {
+        \ 'length': len('two'),
+        \ 'type':   'testprop'
+        \ })
+
+  call search('two \zsthree')
+  let expected_pos = line2byte(line('.')) + col('.') - 1
+  exe expected_pos .. 'goto'
+  let actual_pos = line2byte(line('.')) + col('.') - 1
+  eval actual_pos->assert_equal(expected_pos)
+
+  call search('four \zsfive')
+  let expected_pos = line2byte(line('.')) + col('.') - 1
+  exe expected_pos .. 'goto'
+  let actual_pos = line2byte(line('.')) + col('.') - 1
+  eval actual_pos->assert_equal(expected_pos)
+
+  call prop_type_delete('testprop')
+  bwipe!
+endfunc
+
 func Test_prop_undo()
   new
   call prop_type_add('comment', {'highlight': 'Directory'})
@@ -1017,6 +1047,30 @@ func Test_textprop_after_tab()
   " clean up
   call StopVimInTerminal(buf)
   call delete('XtestPropTab')
+endfunc
+
+func Test_textprop_nowrap_scrolled()
+  CheckScreendump
+
+  let lines =<< trim END
+       vim9script
+       set nowrap
+       setline(1, 'The number 123 is smaller than 4567.' .. repeat('X', &columns))
+       prop_type_add('number', {'highlight': 'ErrorMsg'})
+       prop_add(1, 12, {'length': 3, 'type': 'number'})
+       prop_add(1, 32, {'length': 4, 'type': 'number'})
+       feedkeys('gg20zl', 'nxt')
+  END
+  call writefile(lines, 'XtestNowrap')
+  let buf = RunVimInTerminal('-S XtestNowrap', {'rows': 6})
+  call VerifyScreenDump(buf, 'Test_textprop_nowrap_01', {})
+
+  call term_sendkeys(buf, "$")
+  call VerifyScreenDump(buf, 'Test_textprop_nowrap_02', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+  call delete('XtestNowrap')
 endfunc
 
 func Test_textprop_with_syntax()

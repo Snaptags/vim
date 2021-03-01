@@ -57,14 +57,21 @@ static char_u *make_expanded_name(char_u *in_start, char_u *expr_start, char_u *
 
 /*
  * Return "n1" divided by "n2", taking care of dividing by zero.
+ * If "failed" is not NULL set it to TRUE when dividing by zero fails.
  */
 	varnumber_T
-num_divide(varnumber_T n1, varnumber_T n2)
+num_divide(varnumber_T n1, varnumber_T n2, int *failed)
 {
     varnumber_T	result;
 
-    if (n2 == 0)	// give an error message?
+    if (n2 == 0)
     {
+	if (in_vim9script())
+	{
+	    emsg(_(e_divide_by_zero));
+	    if (failed != NULL)
+		*failed = TRUE;
+	}
 	if (n1 == 0)
 	    result = VARNUM_MIN; // similar to NaN
 	else if (n1 < 0)
@@ -80,11 +87,17 @@ num_divide(varnumber_T n1, varnumber_T n2)
 
 /*
  * Return "n1" modulus "n2", taking care of dividing by zero.
+ * If "failed" is not NULL set it to TRUE when dividing by zero fails.
  */
 	varnumber_T
-num_modulus(varnumber_T n1, varnumber_T n2)
+num_modulus(varnumber_T n1, varnumber_T n2, int *failed)
 {
-    // Give an error when n2 is 0?
+    if (n2 == 0 && in_vim9script())
+    {
+	emsg(_(e_divide_by_zero));
+	if (failed != NULL)
+	    *failed = TRUE;
+    }
     return (n2 == 0) ? 0 : (n1 % n2);
 }
 
@@ -467,6 +480,45 @@ skip_expr_concatenate(
 }
 
 /*
+ * Convert "tv" to a string.
+ * When "convert" is TRUE convert a List into a sequence of lines and convert
+ * a Float to a String.
+ * Returns an allocated string (NULL when out of memory).
+ */
+    char_u *
+typval2string(typval_T *tv, int convert)
+{
+    garray_T	ga;
+    char_u	*retval;
+#ifdef FEAT_FLOAT
+    char_u	numbuf[NUMBUFLEN];
+#endif
+
+    if (convert && tv->v_type == VAR_LIST)
+    {
+	ga_init2(&ga, (int)sizeof(char), 80);
+	if (tv->vval.v_list != NULL)
+	{
+	    list_join(&ga, tv->vval.v_list, (char_u *)"\n", TRUE, FALSE, 0);
+	    if (tv->vval.v_list->lv_len > 0)
+		ga_append(&ga, NL);
+	}
+	ga_append(&ga, NUL);
+	retval = (char_u *)ga.ga_data;
+    }
+#ifdef FEAT_FLOAT
+    else if (convert && tv->v_type == VAR_FLOAT)
+    {
+	vim_snprintf((char *)numbuf, NUMBUFLEN, "%g", tv->vval.v_float);
+	retval = vim_strsave(numbuf);
+    }
+#endif
+    else
+	retval = vim_strsave(tv_get_string(tv));
+    return retval;
+}
+
+/*
  * Top level evaluation function, returning a string.  Does not handle line
  * breaks.
  * When "convert" is TRUE convert a List into a sequence of lines and convert
@@ -481,10 +533,6 @@ eval_to_string_eap(
 {
     typval_T	tv;
     char_u	*retval;
-    garray_T	ga;
-#ifdef FEAT_FLOAT
-    char_u	numbuf[NUMBUFLEN];
-#endif
     evalarg_T	evalarg;
 
     fill_evalarg_from_eap(&evalarg, eap, eap != NULL && eap->skip);
@@ -492,27 +540,7 @@ eval_to_string_eap(
 	retval = NULL;
     else
     {
-	if (convert && tv.v_type == VAR_LIST)
-	{
-	    ga_init2(&ga, (int)sizeof(char), 80);
-	    if (tv.vval.v_list != NULL)
-	    {
-		list_join(&ga, tv.vval.v_list, (char_u *)"\n", TRUE, FALSE, 0);
-		if (tv.vval.v_list->lv_len > 0)
-		    ga_append(&ga, NL);
-	    }
-	    ga_append(&ga, NUL);
-	    retval = (char_u *)ga.ga_data;
-	}
-#ifdef FEAT_FLOAT
-	else if (convert && tv.v_type == VAR_FLOAT)
-	{
-	    vim_snprintf((char *)numbuf, NUMBUFLEN, "%g", tv.vval.v_float);
-	    retval = vim_strsave(numbuf);
-	}
-#endif
-	else
-	    retval = vim_strsave(tv_get_string(&tv));
+	retval = typval2string(&tv, convert);
 	clear_tv(&tv);
     }
     clear_evalarg(&evalarg, NULL);
@@ -1185,15 +1213,7 @@ get_lval(
 
 	    lp->ll_dict = NULL;
 	    lp->ll_list = lp->ll_tv->vval.v_list;
-	    lp->ll_li = list_find(lp->ll_list, lp->ll_n1);
-	    if (lp->ll_li == NULL)
-	    {
-		if (lp->ll_n1 < 0)
-		{
-		    lp->ll_n1 = 0;
-		    lp->ll_li = list_find(lp->ll_list, lp->ll_n1);
-		}
-	    }
+	    lp->ll_li = list_find_index(lp->ll_list, &lp->ll_n1);
 	    if (lp->ll_li == NULL)
 	    {
 		clear_tv(&var2);
@@ -1271,8 +1291,9 @@ set_var_lval(
     char_u	*endp,
     typval_T	*rettv,
     int		copy,
-    int		flags,    // ASSIGN_CONST, ASSIGN_NO_DECL
-    char_u	*op)
+    int		flags,	    // ASSIGN_CONST, ASSIGN_NO_DECL
+    char_u	*op,
+    int		var_idx)    // index for "let [a, b] = list"
 {
     int		cc;
     listitem_T	*ri;
@@ -1362,9 +1383,10 @@ set_var_lval(
 	else
 	{
 	    if (lp->ll_type != NULL
-			   && check_typval_type(lp->ll_type, rettv, 0) == FAIL)
+		       && check_typval_arg_type(lp->ll_type, rettv, 0) == FAIL)
 		return;
-	    set_var_const(lp->ll_name, lp->ll_type, rettv, copy, flags);
+	    set_var_const(lp->ll_name, lp->ll_type, rettv, copy,
+							       flags, var_idx);
 	}
 	*endp = cc;
     }
@@ -1443,7 +1465,7 @@ set_var_lval(
 	}
 
 	if (lp->ll_valtype != NULL
-			&& check_typval_type(lp->ll_valtype, rettv, 0) == FAIL)
+		    && check_typval_arg_type(lp->ll_valtype, rettv, 0) == FAIL)
 	    return;
 
 	if (lp->ll_newkey != NULL)
@@ -1498,6 +1520,7 @@ tv_op(typval_T *tv1, typval_T *tv2, char_u *op)
     varnumber_T	n;
     char_u	numbuf[NUMBUFLEN];
     char_u	*s;
+    int		failed = FALSE;
 
     // Can't do anything with a Funcref, Dict, v:true on the right.
     if (tv2->v_type != VAR_FUNC && tv2->v_type != VAR_DICT
@@ -1581,8 +1604,10 @@ tv_op(typval_T *tv1, typval_T *tv2, char_u *op)
 			    case '+': n += tv_get_number(tv2); break;
 			    case '-': n -= tv_get_number(tv2); break;
 			    case '*': n *= tv_get_number(tv2); break;
-			    case '/': n = num_divide(n, tv_get_number(tv2)); break;
-			    case '%': n = num_modulus(n, tv_get_number(tv2)); break;
+			    case '/': n = num_divide(n, tv_get_number(tv2),
+							       &failed); break;
+			    case '%': n = num_modulus(n, tv_get_number(tv2),
+							       &failed); break;
 			}
 			clear_tv(tv1);
 			tv1->v_type = VAR_NUMBER;
@@ -1601,7 +1626,7 @@ tv_op(typval_T *tv1, typval_T *tv2, char_u *op)
 		    tv1->v_type = VAR_STRING;
 		    tv1->vval.v_string = s;
 		}
-		return OK;
+		return failed ? FAIL : OK;
 
 	    case VAR_FLOAT:
 #ifdef FEAT_FLOAT
@@ -3178,12 +3203,16 @@ eval6(
 	    else
 #endif
 	    {
+		int	    failed = FALSE;
+
 		if (op == '*')
 		    n1 = n1 * n2;
 		else if (op == '/')
-		    n1 = num_divide(n1, n2);
+		    n1 = num_divide(n1, n2, &failed);
 		else
-		    n1 = num_modulus(n1, n2);
+		    n1 = num_modulus(n1, n2, &failed);
+		if (failed)
+		    return FAIL;
 
 		rettv->v_type = VAR_NUMBER;
 		rettv->vval.v_number = n1;
@@ -3384,7 +3413,21 @@ eval7(
      */
     case '(':	ret = NOTDONE;
 		if (in_vim9script())
+		{
 		    ret = get_lambda_tv(arg, rettv, TRUE, evalarg);
+		    if (ret == OK && evaluate)
+		    {
+			ufunc_T *ufunc = rettv->vval.v_partial->pt_func;
+
+			// compile it here to get the return type
+			if (compile_def_function(ufunc,
+					 TRUE, PROFILING(ufunc), NULL) == FAIL)
+			{
+			    clear_tv(rettv);
+			    ret = FAIL;
+			}
+		    }
+		}
 		if (ret == NOTDONE)
 		{
 		    *arg = skipwhite_and_linebreak(*arg + 1, evalarg);
@@ -3636,7 +3679,7 @@ call_func_rettv(
 
 /*
  * Evaluate "->method()".
- * "*arg" points to the '-'.
+ * "*arg" points to "method".
  * Returns FAIL or OK. "*arg" is advanced to after the ')'.
  */
     static int
@@ -3651,8 +3694,6 @@ eval_lambda(
     typval_T	base = *rettv;
     int		ret;
 
-    // Skip over the ->.
-    *arg += 2;
     rettv->v_type = VAR_UNKNOWN;
 
     if (**arg == '{')
@@ -3700,7 +3741,7 @@ eval_lambda(
 
 /*
  * Evaluate "->method()".
- * "*arg" points to the '-'.
+ * "*arg" points to "method".
  * Returns FAIL or OK. "*arg" is advanced to after the ')'.
  */
     static int
@@ -3718,8 +3759,6 @@ eval_method(
     int		evaluate = evalarg != NULL
 				      && (evalarg->eval_flags & EVAL_EVALUATE);
 
-    // Skip over the ->.
-    *arg += 2;
     rettv->v_type = VAR_UNKNOWN;
 
     name = *arg;
@@ -3818,11 +3857,23 @@ eval_index(
 	    clear_tv(&var1);
 	    return FAIL;
 	}
-	else if (evaluate && tv_get_string_chk(&var1) == NULL)
+	else if (evaluate)
 	{
-	    // not a number or string
-	    clear_tv(&var1);
-	    return FAIL;
+#ifdef FEAT_FLOAT
+	    // allow for indexing with float
+	    if (vim9 && rettv->v_type == VAR_DICT
+						   && var1.v_type == VAR_FLOAT)
+	    {
+		var1.vval.v_string = typval_tostring(&var1, TRUE);
+		var1.v_type = VAR_STRING;
+	    }
+#endif
+	    if (tv_get_string_chk(&var1) == NULL)
+	    {
+		// not a number or string
+		clear_tv(&var1);
+		return FAIL;
+	    }
 	}
 
 	/*
@@ -3877,8 +3928,9 @@ eval_index(
     if (evaluate)
     {
 	int res = eval_index_inner(rettv, range,
-		empty1 ? NULL : &var1, empty2 ? NULL : &var2,
+		empty1 ? NULL : &var1, empty2 ? NULL : &var2, FALSE,
 		key, keylen, verbose);
+
 	if (!empty1)
 	    clear_tv(&var1);
 	if (range)
@@ -3938,9 +3990,26 @@ check_can_index(typval_T *rettv, int evaluate, int verbose)
 }
 
 /*
+ * slice() function
+ */
+    void
+f_slice(typval_T *argvars, typval_T *rettv)
+{
+    if (check_can_index(argvars, TRUE, FALSE) == OK)
+    {
+	copy_tv(argvars, rettv);
+	eval_index_inner(rettv, TRUE, argvars + 1,
+		argvars[2].v_type == VAR_UNKNOWN ? NULL : argvars + 2,
+		TRUE, NULL, 0, FALSE);
+    }
+}
+
+/*
  * Apply index or range to "rettv".
  * "var1" is the first index, NULL for [:expr].
  * "var2" is the second index, NULL for [expr] and [expr: ]
+ * "exclusive" is TRUE for slice(): second index is exclusive, use character
+ * index for string.
  * Alternatively, "key" is not NULL, then key[keylen] is the dict index.
  */
     int
@@ -3949,12 +4018,13 @@ eval_index_inner(
 	int	    is_range,
 	typval_T    *var1,
 	typval_T    *var2,
+	int	    exclusive,
 	char_u	    *key,
 	int	    keylen,
 	int	    verbose)
 {
-    long	n1, n2 = 0;
-    long	len;
+    varnumber_T	    n1, n2 = 0;
+    long	    len;
 
     n1 = 0;
     if (var1 != NULL && rettv->v_type != VAR_DICT)
@@ -3968,10 +4038,10 @@ eval_index_inner(
 		emsg(_(e_cannot_slice_dictionary));
 	    return FAIL;
 	}
-	if (var2 == NULL)
-	    n2 = -1;
-	else
+	if (var2 != NULL)
 	    n2 = tv_get_number(var2);
+	else
+	    n2 = VARNUM_MAX;
     }
 
     switch (rettv->v_type)
@@ -3994,10 +4064,10 @@ eval_index_inner(
 		char_u	*s = tv_get_string(rettv);
 
 		len = (long)STRLEN(s);
-		if (in_vim9script())
+		if (in_vim9script() || exclusive)
 		{
 		    if (is_range)
-			s = string_slice(s, n1, n2);
+			s = string_slice(s, n1, n2, exclusive);
 		    else
 			s = char_from_string(s, n1);
 		}
@@ -4051,7 +4121,9 @@ eval_index_inner(
 		if (n2 < 0)
 		    n2 = len + n2;
 		else if (n2 >= len)
-		    n2 = len - 1;
+		    n2 = len - (exclusive ? 0 : 1);
+		if (exclusive)
+		    --n2;
 		if (n1 >= len || n2 < 0 || n1 > n2)
 		{
 		    clear_tv(rettv);
@@ -4103,9 +4175,9 @@ eval_index_inner(
 	    if (var1 == NULL)
 		n1 = 0;
 	    if (var2 == NULL)
-		n2 = -1;
+		n2 = VARNUM_MAX;
 	    if (list_slice_or_index(rettv->vval.v_list,
-				    is_range, n1, n2, rettv, verbose) == FAIL)
+			  is_range, n1, n2, exclusive, rettv, verbose) == FAIL)
 		return FAIL;
 	    break;
 
@@ -5056,12 +5128,14 @@ string2float(
 /*
  * Convert the specified byte index of line 'lnum' in buffer 'buf' to a
  * character index.  Works only for loaded buffers. Returns -1 on failure.
- * The index of the first character is one.
+ * The index of the first byte and the first character is zero.
  */
     int
 buf_byteidx_to_charidx(buf_T *buf, int lnum, int byteidx)
 {
     char_u	*str;
+    char_u	*t;
+    int		count;
 
     if (buf == NULL || buf->b_ml.ml_mfp == NULL)
 	return -1;
@@ -5074,15 +5148,26 @@ buf_byteidx_to_charidx(buf_T *buf, int lnum, int byteidx)
 	return -1;
 
     if (*str == NUL)
-	return 1;
+	return 0;
 
-    return mb_charlen_len(str, byteidx + 1);
+    // count the number of characters
+    t = str;
+    for (count = 0; *t != NUL && t <= str + byteidx; count++)
+	t += mb_ptr2len(t);
+
+    // In insert mode, when the cursor is at the end of a non-empty line,
+    // byteidx points to the NUL character immediately past the end of the
+    // string. In this case, add one to the character count.
+    if (*t == NUL && byteidx != 0 && t == str + byteidx)
+	count++;
+
+    return count - 1;
 }
 
 /*
  * Convert the specified character index of line 'lnum' in buffer 'buf' to a
- * byte index.  Works only for loaded buffers. Returns -1 on failure. The index
- * of the first byte and the first character is one.
+ * byte index.  Works only for loaded buffers. Returns -1 on failure.
+ * The index of the first byte and the first character is zero.
  */
     int
 buf_charidx_to_byteidx(buf_T *buf, int lnum, int charidx)
@@ -5105,7 +5190,7 @@ buf_charidx_to_byteidx(buf_T *buf, int lnum, int charidx)
     while (*t != NUL && --charidx > 0)
 	t += mb_ptr2len(t);
 
-    return t - str + 1;
+    return t - str;
 }
 
 /*
@@ -5180,7 +5265,7 @@ var2fpos(
     {
 	pos = curwin->w_cursor;
 	if (charcol)
-	    pos.col = buf_byteidx_to_charidx(curbuf, pos.lnum, pos.col) - 1;
+	    pos.col = buf_byteidx_to_charidx(curbuf, pos.lnum, pos.col);
 	return &pos;
     }
     if (name[0] == 'v' && name[1] == NUL)	// Visual start
@@ -5190,7 +5275,7 @@ var2fpos(
 	else
 	    pos = curwin->w_cursor;
 	if (charcol)
-	    pos.col = buf_byteidx_to_charidx(curbuf, pos.lnum, pos.col) - 1;
+	    pos.col = buf_byteidx_to_charidx(curbuf, pos.lnum, pos.col);
 	return &pos;
     }
     if (name[0] == '\'')			// mark
@@ -5199,7 +5284,7 @@ var2fpos(
 	if (pp == NULL || pp == (pos_T *)-1 || pp->lnum <= 0)
 	    return NULL;
 	if (charcol)
-	    pp->col = buf_byteidx_to_charidx(curbuf, pp->lnum, pp->col) - 1;
+	    pp->col = buf_byteidx_to_charidx(curbuf, pp->lnum, pp->col);
 	return pp;
     }
 
@@ -5300,7 +5385,7 @@ list2fpos(
 	if (buf == NULL || buf->b_ml.ml_mfp == NULL)
 	    return FAIL;
 
-	n = buf_charidx_to_byteidx(buf, posp->lnum, n);
+	n = buf_charidx_to_byteidx(buf, posp->lnum, n) + 1;
     }
     posp->col = n;
 
@@ -5694,10 +5779,10 @@ handle_subscript(
 	}
 	else if (p[0] == '-' && p[1] == '>')
 	{
-	    *arg = p;
+	    *arg = skipwhite(p + 2);
 	    if (ret == OK)
 	    {
-		if (((*arg)[2] == '{' && !in_vim9script()) || (*arg)[2] == '(')
+		if ((**arg == '{' && !in_vim9script()) || **arg == '(')
 		    // expr->{lambda}() or expr->(lambda)()
 		    ret = eval_lambda(arg, rettv, evalarg, verbose);
 		else

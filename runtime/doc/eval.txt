@@ -1,4 +1,4 @@
-*eval.txt*	For Vim version 8.2.  Last change: 2021 Jan 10
+*eval.txt*	For Vim version 8.2.  Last change: 2021 Feb 10
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -293,13 +293,13 @@ is not available it returns zero or the default value you specify: >
 
 
 List concatenation ~
-
+							*list-concatenation*
 Two lists can be concatenated with the "+" operator: >
 	:let longlist = mylist + [5, 6]
 	:let mylist += [7, 8]
 
-To prepend or append an item turn the item into a list by putting [] around
-it.  To change a list in-place see |list-modification| below.
+To prepend or append an item, turn the item into a list by putting [] around
+it.  To change a list in-place, refer to |list-modification| below.
 
 
 Sublist ~
@@ -313,6 +313,9 @@ similar to -1. >
 	:let endlist = mylist[2:]	" from item 2 to the end: [3, "four"]
 	:let shortlist = mylist[2:2]	" List with one item: [3]
 	:let otherlist = mylist[:]	" make a copy of the List
+
+Notice that the last index is inclusive.  If you prefer using an exclusive
+index use the |slice()| method.
 
 If the first index is beyond the last item of the List or the second item is
 before the first item, the result is an empty list.  There is no error
@@ -1217,6 +1220,9 @@ a Number it is first converted to a String.
 In Vim9 script the indexes are character indexes.  To use byte indexes use
 |strpart()|.
 
+The item at index expr1b is included, it is inclusive.  For an exclusive index
+use the |slice()| function.
+
 If expr1a is omitted zero is used.  If expr1b is omitted the length of the
 string minus one is used.
 
@@ -2076,6 +2082,12 @@ v:null		An empty String. Used to put "null" in JSON.  See
 		That is so that eval() can parse the string back to the same
 		value.  Read-only.
 
+					*v:numbermax* *numbermax-variable*
+v:numbermax	Maximum value of a number.
+
+					*v:numbermin* *numbermin-variable*
+v:numbermin	Minimum value of a number (negative)
+
 					*v:numbersize* *numbersize-variable*
 v:numbersize	Number of bits in a Number.  This is normally 64, but on some
 		systems it may be 32.
@@ -2524,6 +2536,9 @@ expand({expr} [, {nosuf} [, {list}]])
 expandcmd({expr})		String	expand {expr} like with `:edit`
 extend({expr1}, {expr2} [, {expr3}])
 				List/Dict insert items of {expr2} into {expr1}
+extendnew({expr1}, {expr2} [, {expr3}])
+				List/Dict like |extend()| but creates a new
+					List or Dictionary
 feedkeys({string} [, {mode}])	Number	add key sequence to typeahead buffer
 filereadable({file})		Number	|TRUE| if {file} is a readable file
 filewritable({file})		Number	|TRUE| if {file} is a writable file
@@ -2534,6 +2549,8 @@ finddir({name} [, {path} [, {count}]])
 findfile({name} [, {path} [, {count}]])
 				String	find file {name} in {path}
 flatten({list} [, {maxdepth}])	List	flatten {list} up to {maxdepth} levels
+flattennew({list} [, {maxdepth}])
+				List	flatten a copy of {list}
 float2nr({expr})		Number	convert Float {expr} to a Number
 floor({expr})			Float	round {expr} down
 fmod({expr1}, {expr2})		Float	remainder of {expr1} / {expr2}
@@ -2545,6 +2562,7 @@ foldlevel({lnum})		Number	fold level at {lnum}
 foldtext()			String	line displayed for closed fold
 foldtextresult({lnum})		String	text for closed fold at {lnum}
 foreground()			Number	bring the Vim window to the foreground
+fullcommand({name})		String	get full command from {name}
 funcref({name} [, {arglist}] [, {dict}])
 				Funcref	reference to function {name}
 function({name} [, {arglist}] [, {dict}])
@@ -2772,6 +2790,7 @@ pyxeval({expr})			any	evaluate |python_x| expression
 rand([{expr}])			Number	get pseudo-random number
 range({expr} [, {max} [, {stride}]])
 				List	items from {expr} to {max}
+readblob({fname})		Blob	read a |Blob| from {fname}
 readdir({dir} [, {expr} [, {dict}]])
 				List	file names in {dir} selected by {expr}
 readdirex({dir} [, {expr} [, {dict}]])
@@ -2880,6 +2899,8 @@ sign_unplacelist({list})	List	unplace a list of signs
 simplify({filename})		String	simplify filename as much as possible
 sin({expr})			Float	sine of {expr}
 sinh({expr})			Float	hyperbolic sine of {expr}
+slice({expr}, {start} [, {end}])  String, List or Blob
+					slice of a String, List or Blob
 sort({list} [, {func} [, {dict}]])
 				List	sort {list}, using {func} to compare
 sound_clear()			none	stop playing all sounds
@@ -3013,7 +3034,8 @@ tr({src}, {fromstr}, {tostr})	String	translate chars of {src} in {fromstr}
 trim({text} [, {mask} [, {dir}]])
 				String	trim characters in {mask} from {text}
 trunc({expr})			Float	truncate Float {expr}
-type({name})			Number	type of variable {name}
+type({expr})			Number	type of value {expr}
+typename({expr})		String	representation of the type of {expr}
 undofile({name})		String	undo file name for {name}
 undotree()			List	undo file tree
 uniq({list} [, {func} [, {dict}]])
@@ -3114,6 +3136,7 @@ append({lnum}, {text})					*append()*
 		text line below line {lnum} in the current buffer.
 		Otherwise append {text} as one text line below line {lnum} in
 		the current buffer.
+		Any type of item is accepted and converted to a String.
 		{lnum} can be zero to insert a line before the first one.
 		Returns 1 for failure ({lnum} out of range or out of memory),
 		0 for success.  Example: >
@@ -4071,8 +4094,9 @@ delete({fname} [, {flags}])					*delete()*
 
 		A symbolic link itself is deleted, not what it points to.
 
-		The result is a Number, which is 0 if the delete operation was
-		successful and -1 when the deletion failed or partly failed.
+		The result is a Number, which is 0/false if the delete
+		operation was successful and -1/true when the deletion failed
+		or partly failed.
 
 		Use |remove()| to delete an item from a |List|.
 		To delete a line from the buffer use |:delete| or
@@ -4520,6 +4544,13 @@ extend({expr1}, {expr2} [, {expr3}])			*extend()*
 			mylist->extend(otherlist)
 
 
+extendnew({expr1}, {expr2} [, {expr3}])			*extendnew()*
+		Like |extend()| but instead of adding items to {expr1} a new
+		List or Dictionary is created and returned.  {expr1} remains
+		unchanged.  Items can still be changed by {expr2}, if you
+		don't want that use |deepcopy()| first.
+
+
 feedkeys({string} [, {mode}])				*feedkeys()*
 		Characters in {string} are queued for processing as if they
 		come from a mapping or were typed by the user.
@@ -4684,8 +4715,10 @@ flatten({list} [, {maxdepth}])					*flatten()*
 		Flatten {list} up to {maxdepth} levels.  Without {maxdepth}
 		the result is a |List| without nesting, as if {maxdepth} is
 		a very large number.
-		The {list} is changed in place, make a copy first if you do
+		The {list} is changed in place, use |flattennew()| if you do
 		not want that.
+		In Vim9 script flatten() cannot be used, you must always use
+		|flattennew()|.
 								*E900*
 		{maxdepth} means how deep in nested lists changes are made.
 		{list} is not modified when {maxdepth} is 0.
@@ -4698,6 +4731,10 @@ flatten({list} [, {maxdepth}])					*flatten()*
 <			[1, 2, 3, 4, 5] >
 			:echo flatten([1, [2, [3, 4]], 5], 1)
 <			[1, 2, [3, 4], 5]
+
+flattennew({list} [, {maxdepth}])			*flattennew()*
+		Like |flatten()| but first make a copy of {list}.
+
 
 float2nr({expr})					*float2nr()*
 		Convert {expr} to a Number by omitting the part after the
@@ -4866,6 +4903,21 @@ foreground()	Move the Vim window to the foreground.  Useful when sent from
 		{only in the Win32, Athena, Motif and GTK GUI versions and the
 		Win32 console version}
 
+fullcommand({name})						*fullcommand()*
+		Get the full command name from a short abbreviated command
+		name; see |20.2| for details on command abbreviations.
+
+		{name} may start with a `:` and can include a [range], these
+		are skipped and not returned.
+		Returns an empty string if a command doesn't exist or if it's
+		ambiguous (for user-defined functions).
+
+		For example `fullcommand('s')`, `fullcommand('sub')`,
+		`fullcommand(':%substitute')` all return "substitute".
+
+		Can also be used as a |method|: >
+			GetName()->fullcommand()
+<
 						*funcref()*
 funcref({name} [, {arglist}] [, {dict}])
 		Just like |function()|, but the returned Funcref will lookup
@@ -5851,6 +5903,7 @@ getreg([{regname} [, 1 [, {list}]]])			*getreg()*
 		When the register was not set an empty list is returned.
 
 		If {regname} is not specified, |v:register| is used.
+		In |Vim9-script| {regname} must be one character.
 
 		Can also be used as a |method|: >
 			GetRegname()->getreg()
@@ -5878,6 +5931,7 @@ getreginfo([{regname}])					*getreginfo()*
 		will be returned.
 		If {regname} is not specified, |v:register| is used.
 		The returned Dictionary can be passed to |setreg()|.
+		In |Vim9-script| {regname} must be one character.
 
 		Can also be used as a |method|: >
 			GetRegname()->getreginfo()
@@ -5891,6 +5945,7 @@ getregtype([{regname}])					*getregtype()*
 		    ""			for an empty or unknown register
 		<CTRL-V> is one character with value 0x16.
 		If {regname} is not specified, |v:register| is used.
+		In |Vim9-script| {regname} must be one character.
 
 		Can also be used as a |method|: >
 			GetRegname()->getregtype()
@@ -6202,8 +6257,8 @@ has({feature} [, {check}])
 
 
 has_key({dict}, {key})					*has_key()*
-		The result is a Number, which is 1 if |Dictionary| {dict} has
-		an entry with key {key}.  Zero otherwise.
+		The result is a Number, which is TRUE if |Dictionary| {dict}
+		has an entry with key {key}.  FALSE otherwise.
 
 		Can also be used as a |method|: >
 			mydict->has_key(key)
@@ -6246,16 +6301,16 @@ haslocaldir([{winnr} [, {tabnr}]])			*haslocaldir()*
 			GetWinnr()->haslocaldir()
 
 hasmapto({what} [, {mode} [, {abbr}]])			*hasmapto()*
-		The result is a Number, which is 1 if there is a mapping that
-		contains {what} in somewhere in the rhs (what it is mapped to)
-		and this mapping exists in one of the modes indicated by
-		{mode}.
+		The result is a Number, which is TRUE if there is a mapping
+		that contains {what} in somewhere in the rhs (what it is
+		mapped to) and this mapping exists in one of the modes
+		indicated by {mode}.
 		When {abbr} is there and it is |TRUE| use abbreviations
 		instead of mappings.  Don't forget to specify Insert and/or
 		Command-line mode.
 		Both the global mappings and the mappings local to the current
 		buffer are checked for a match.
-		If no matching mapping is found 0 is returned.
+		If no matching mapping is found FALSE is returned.
 		The following characters are recognized in {mode}:
 			n	Normal mode
 			v	Visual and Select mode
@@ -6291,8 +6346,8 @@ histadd({history}, {item})				*histadd()*
 		character is sufficient.
 		If {item} does already exist in the history, it will be
 		shifted to become the newest entry.
-		The result is a Number: 1 if the operation was successful,
-		otherwise 0 is returned.
+		The result is a Number: TRUE if the operation was successful,
+		otherwise FALSE is returned.
 
 		Example: >
 			:call histadd("input", strftime("%Y %b %d"))
@@ -6315,8 +6370,8 @@ histdel({history} [, {item}])				*histdel()*
 		an index, see |:history-indexing|.  The respective entry will
 		be removed if it exists.
 
-		The result is a Number: 1 for a successful operation,
-		otherwise 0 is returned.
+		The result is TRUE for a successful operation, otherwise FALSE
+		is returned.
 
 		Examples:
 		Clear expression register history: >
@@ -6368,7 +6423,7 @@ histnr({history})					*histnr()*
 			GetHistory()->histnr()
 <
 hlexists({name})					*hlexists()*
-		The result is a Number, which is non-zero if a highlight group
+		The result is a Number, which is TRUE if a highlight group
 		called {name} exists.  This is when the group has been
 		defined in some way.  Not necessarily when highlighting has
 		been defined for it, it may also have been used for a syntax
@@ -6541,7 +6596,7 @@ inputrestore()						*inputrestore()*
 		Restore typeahead that was saved with a previous |inputsave()|.
 		Should be called the same number of times inputsave() is
 		called.  Calling it more often is harmless though.
-		Returns 1 when there is nothing to restore, 0 otherwise.
+		Returns TRUE when there is nothing to restore, FALSE otherwise.
 
 inputsave()						*inputsave()*
 		Preserve typeahead (also from mappings) and clear it, so that
@@ -6549,7 +6604,7 @@ inputsave()						*inputsave()*
 		followed by a matching inputrestore() after the prompt.  Can
 		be used several times, in which case there must be just as
 		many inputrestore() calls.
-		Returns 1 when out of memory, 0 otherwise.
+		Returns TRUE when out of memory, FALSE otherwise.
 
 inputsecret({prompt} [, {text}])			*inputsecret()*
 		This function acts much like the |input()| function with but
@@ -7025,7 +7080,7 @@ listener_flush([{buf}])					*listener_flush()*
 
 listener_remove({id})					*listener_remove()*
 		Remove a listener previously added with listener_add().
-		Returns zero when {id} could not be found, one when {id} was
+		Returns FALSE when {id} could not be found, TRUE when {id} was
 		removed.
 
 		Can also be used as a |method|: >
@@ -7708,8 +7763,8 @@ mkdir({name} [, {path} [, {prot}]])
 		flag is passed (since patch 8.0.1708).  However, without the
 		"p" option the call will fail.
 
-		The function result is a Number, which is 1 if the call was
-		successful or 0 if the directory creation failed or partly
+		The function result is a Number, which is TRUE if the call was
+		successful or FALSE if the directory creation failed or partly
 		failed.
 
 		Not available on all systems.  To check use: >
@@ -8254,6 +8309,14 @@ rand([{expr}])						*rand()* *random*
 			:echo rand(seed)
 			:echo rand(seed) % 16  " random number 0 - 15
 <
+
+readblob({fname})					*readblob()*
+		Read file {fname} in binary mode and return a |Blob|.
+		When the file can't be opened an error message is given and
+		the result is an empty |Blob|.
+		Also see |readfile()| and |writefile()|.
+
+
 readdir({directory} [, {expr} [, {dict}]])			*readdir()*
 		Return a list with file and directory names in {directory}.
 		You can also use |glob()| if you don't need to do complicated
@@ -8368,6 +8431,7 @@ readdirex({directory} [, {expr} [, {dict}]])			*readdirex()*
 		Can also be used as a |method|: >
 			GetDirName()->readdirex()
 <
+
 							*readfile()*
 readfile({fname} [, {type} [, {max}]])
 		Read file {fname} and return a |List|, each line of the file
@@ -8379,8 +8443,6 @@ readfile({fname} [, {type} [, {max}]])
 		- When the last line ends in a NL an extra empty list item is
 		  added.
 		- No CR characters are removed.
-		When {type} contains "B" a |Blob| is returned with the binary
-		data of the file unmodified.
 		Otherwise:
 		- CR characters that appear before a NL are removed.
 		- Whether the last line ends in a NL or not does not matter.
@@ -8398,6 +8460,9 @@ readfile({fname} [, {type} [, {max}]])
 		Note that without {max} the whole file is read into memory.
 		Also note that there is no recognition of encoding.  Read a
 		file into a buffer if you need to.
+		Deprecated (use |readblob()| instead): When {type} contains
+		"B" a |Blob| is returned with the binary data of the file
+		unmodified.
 		When the file can't be opened an error message is given and
 		the result is an empty list.
 		Also see |writefile()|.
@@ -9175,6 +9240,7 @@ server2client({clientid}, {string})			*server2client()*
 		Send a reply string to {clientid}.  The most recent {clientid}
 		that sent a string can be retrieved with expand("<client>").
 		{only available when compiled with the |+clientserver| feature}
+		Returns zero for success, -1 for failure.
 		Note:
 		This id has to be stored before the next command can be
 		received.  I.e. before returning from the received command and
@@ -9312,8 +9378,8 @@ setcmdpos({pos})					*setcmdpos()*
 		before inserting the resulting text.
 		When the number is too big the cursor is put at the end of the
 		line.  A number smaller than one has undefined results.
-		Returns 0 when successful, 1 when not editing the command
-		line.
+		Returns FALSE when successful, TRUE when not editing the
+		command line.
 
 		Can also be used as a |method|: >
 			GetPos()->setcmdpos()
@@ -9371,9 +9437,11 @@ setline({lnum}, {text})					*setline()*
 		{lnum} is used like with |getline()|.
 		When {lnum} is just below the last line the {text} will be
 		added below the last line.
+		{text} can be any type or a List of any type, each item is
+		converted to a String.
 
-		If this succeeds, 0 is returned.  If this fails (most likely
-		because {lnum} is invalid) 1 is returned.
+		If this succeeds, FALSE is returned.  If this fails (most likely
+		because {lnum} is invalid) TRUE is returned.
 
 		Example: >
 			:call setline(5, strftime("%c"))
@@ -9593,6 +9661,7 @@ setqflist({list} [, {action} [, {what}]])		*setqflist()*
 setreg({regname}, {value} [, {options}])
 		Set the register {regname} to {value}.
 		If {regname} is "" or "@", the unnamed register '"' is used.
+		In |Vim9-script| {regname} must be one character.
 
 		{value} may be any value returned by |getreg()| or
 		|getreginfo()|, including a |List| or |Dict|.
@@ -9838,6 +9907,18 @@ sinh({expr})						*sinh()*
 			Compute()->sinh()
 <
 		{only available when compiled with the |+float| feature}
+
+
+slice({expr}, {start} [, {end}])			*slice()* 
+		Similar to using a |slice| "expr[start : end]", but "end" is
+		used exclusive.  And for a string the indexes are used as
+		character indexes instead of byte indexes, like in
+		|vim9script|.
+		When {end} is omitted the slice continues to the last item.
+		When {end} is -1 the last item is omitted.
+
+		Can also be used as a |method|: >
+			GetList()->slice(offset)
 
 
 sort({list} [, {func} [, {dict}]])			*sort()* *E702*
@@ -11119,6 +11200,14 @@ type({expr})	The result is a Number representing the type of {expr}.
 <		Can also be used as a |method|: >
 			mylist->type()
 
+
+typename({expr})					*typename()*
+		Return a string representation of the type of {expr}.
+		Example: >
+			echo typename([1, 2, 3])
+			list<number>
+
+
 undofile({name})					*undofile()*
 		Return the name of the undo file that would be used for a file
 		with name {name} when writing.  This uses the 'undodir'
@@ -11276,9 +11365,11 @@ win_execute({id}, {command} [, {silent}])		*win_execute()*
 			call win_execute(winid, 'set syntax=python')
 <		Doing the same with `setwinvar()` would not trigger
 		autocommands and not actually show syntax highlighting.
+
 							*E994*
 		Not all commands are allowed in popup windows.
-		When window {id} does not exist then no error is given.
+		When window {id} does not exist then no error is given and
+		an empty string is returned.
 
 		Can also be used as a |method|, the base is passed as the
 		second argument: >
@@ -11326,7 +11417,7 @@ win_gettype([{nr}])					*win_gettype()*
 win_gotoid({expr})					*win_gotoid()*
 		Go to window with ID {expr}.  This may also change the current
 		tabpage.
-		Return 1 if successful, 0 if the window cannot be found.
+		Return TRUE if successful, FALSE if the window cannot be found.
 
 		Can also be used as a |method|: >
 			GetWinid()->win_gotoid()

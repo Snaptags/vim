@@ -31,18 +31,8 @@ def TestCompilingError()
   call writefile(lines, 'XTest_compile_error')
   var buf = RunVimInTerminal('-S XTest_compile_error',
               {rows: 10, wait_for_ruler: 0})
-  var text = ''
-  for loop in range(100)
-    text = ''
-    for i in range(1, 9)
-      text ..= term_getline(buf, i)
-    endfor
-    if text =~ 'Variable not found: nothing'
-      break
-    endif
-    sleep 20m
-  endfor
-  assert_match('Error detected while compiling command line.*Fails.*Variable not found: nothing', text)
+  call WaitForAssert(() => assert_match('Error detected while compiling command line.*Fails.*Variable not found: nothing',
+                     Term_getlines(buf, range(1, 9))))
 
   # clean up
   call StopVimInTerminal(buf)
@@ -116,6 +106,38 @@ def Test_missing_endfunc_enddef()
   CheckScriptFailure(lines, 'E126:', 2)
 enddef
 
+def Test_white_space_before_paren()
+  var lines =<< trim END
+    vim9script
+    def Test ()
+      echo 'test'
+    enddef
+  END
+  CheckScriptFailure(lines, 'E1068:', 2)
+
+  lines =<< trim END
+    vim9script
+    func Test ()
+      echo 'test'
+    endfunc
+  END
+  CheckScriptFailure(lines, 'E1068:', 2)
+
+  lines =<< trim END
+    def Test ()
+      echo 'test'
+    enddef
+  END
+  CheckScriptFailure(lines, 'E1068:', 1)
+
+  lines =<< trim END
+    func Test ()
+      echo 'test'
+    endfunc
+  END
+  CheckScriptSuccess(lines)
+enddef
+
 def Test_enddef_dict_key()
   var d = {
     enddef: 'x',
@@ -142,6 +164,22 @@ def Test_return_something()
   ReturnString()->assert_equal('string')
   ReturnNumber()->assert_equal(123)
   assert_fails('ReturnGlobal()', 'E1012: Type mismatch; expected number but got string', '', 1, 'ReturnGlobal')
+enddef
+
+def Test_check_argument_type()
+  var lines =<< trim END
+      vim9script
+      def Val(a: number, b: number): number
+        return 0
+      enddef
+      def Func()
+        var x: any = true
+        Val(0, x)
+      enddef
+      disass Func
+      Func()
+  END
+  CheckScriptFailure(lines, 'E1013: Argument 2: type mismatch, expected number but got bool', 2)
 enddef
 
 def Test_missing_return()
@@ -195,6 +233,32 @@ enddef
 def Test_return_nothing()
   ReturnNothing()
   s:nothing->assert_equal(1)
+enddef
+
+def Test_return_invalid()
+  var lines =<< trim END
+    vim9script
+    def Func(): invalid
+      return xxx
+    enddef
+    defcompile
+  END
+  CheckScriptFailure(lines, 'E1010:', 2)
+
+  lines =<< trim END
+      vim9script
+      def Test(Fun: func(number): number): list<number>
+          return map([1, 2, 3], (_, i) => Fun(i))
+      enddef
+      defcompile
+      def Inc(nr: number): nr
+        return nr + 2
+      enddef
+      echo Test(Inc)
+  END
+  # doing this twice was leaking memory
+  CheckScriptFailure(lines, 'E1010:')
+  CheckScriptFailure(lines, 'E1010:')
 enddef
 
 func Increment()
@@ -527,6 +591,15 @@ def Test_call_wrong_args()
 
   lines =<< trim END
     vim9script
+    var name = 'piet'
+    def FuncOne(name: string)
+      echo nr
+    enddef
+  END
+  CheckScriptFailure(lines, 'E1168:')
+
+  lines =<< trim END
+    vim9script
     def FuncOne(nr: number)
       echo nr
     enddef
@@ -626,6 +699,38 @@ def Test_call_lambda_args()
     Ref = (x, y, z) => 0
   END
   CheckDefAndScriptFailure(lines, 'E1012:')
+
+  lines =<< trim END
+      var one = 1
+      var l = [1, 2, 3]
+      echo map(l, (one) => one)
+  END
+  CheckDefFailure(lines, 'E1167:')
+  CheckScriptFailure(['vim9script'] + lines, 'E1168:')
+
+  lines =<< trim END
+      def ShadowLocal()
+        var one = 1
+        var l = [1, 2, 3]
+        echo map(l, (one) => one)
+      enddef
+  END
+  CheckDefFailure(lines, 'E1167:')
+
+  lines =<< trim END
+      def Shadowarg(one: number)
+        var l = [1, 2, 3]
+        echo map(l, (one) => one)
+      enddef
+  END
+  CheckDefFailure(lines, 'E1167:')
+enddef
+
+def Test_lambda_return_type()
+  var lines =<< trim END
+    var Ref = (): => 123
+  END
+  CheckDefAndScriptFailure(lines, 'E1157:', 1)
 enddef
 
 def Test_lambda_uses_assigned_var()
@@ -715,6 +820,16 @@ def Test_call_def_varargs()
       Func(1, 'a')
   END
   CheckScriptFailure(lines, 'E1013: Argument 1: type mismatch')
+
+  lines =<< trim END
+      vim9script
+      def Func(  # some comment
+                ...l = []
+                )
+        echo l
+      enddef
+  END
+  CheckScriptFailure(lines, 'E1160:')
 enddef
 
 let s:value = ''
@@ -1593,6 +1708,18 @@ def Test_closure_using_argument()
 
   unlet g:UseArg
   unlet g:UseVararg
+
+  var lines =<< trim END
+      vim9script
+      def Test(Fun: func(number): number): list<number>
+        return map([1, 2, 3], (_, i) => Fun(i))
+      enddef
+      def Inc(nr: number): number
+        return nr + 2
+      enddef
+      assert_equal([3, 4, 5], Test(Inc))
+  END
+  CheckScriptSuccess(lines)
 enddef
 
 def MakeGetAndAppendRefs()
@@ -1800,6 +1927,18 @@ enddef
 
 def Test_line_continuation_in_lambda()
   Line_continuation_in_lambda()->assert_equal(['D', 'C', 'B', 'A'])
+
+  var lines =<< trim END
+      vim9script
+      var res = [{n: 1, m: 2, s: 'xxx'}]
+                ->mapnew((_, v: dict<any>): string => printf('%d:%d:%s',
+                    v.n,
+                    v.m,
+                    substitute(v.s, '.*', 'yyy', '')
+                    ))
+      assert_equal(['1:2:yyy'], res)
+  END
+  CheckScriptSuccess(lines)
 enddef
 
 def Test_list_lambda()
@@ -2157,6 +2296,24 @@ def Test_dict_member_with_silent()
       silent! Func()
       assert_equal('0', g:result)
       unlet g:result
+  END
+  CheckScriptSuccess(lines)
+enddef
+
+def Test_skip_cmds_with_silent()
+  var lines =<< trim END
+      vim9script
+
+      def Func(b: bool)
+        Crash()
+      enddef
+
+      def Crash()
+        sil! :/not found/d _
+        sil! :/not found/put _
+      enddef
+
+      Func(true)
   END
   CheckScriptSuccess(lines)
 enddef

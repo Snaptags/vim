@@ -4205,18 +4205,21 @@ open_cmdwin(void)
     // Don't let quitting the More prompt make this fail.
     got_int = FALSE;
 
+    // Set "cmdwin_type" before any autocommands may mess things up.
+    cmdwin_type = get_cmdline_type();
+
     // Create the command-line buffer empty.
     if (do_ecmd(0, NULL, NULL, NULL, ECMD_ONE, ECMD_HIDE, NULL) == FAIL)
     {
 	// Some autocommand messed it up?
 	win_close(curwin, TRUE);
 	ga_clear(&winsizes);
+	cmdwin_type = 0;
 	return Ctrl_C;
     }
-    cmdwin_type = get_cmdline_type();
 
     apply_autocmds(EVENT_BUFFILEPRE, NULL, NULL, FALSE, curbuf);
-    (void)setfname(curbuf, (char_u *)"[Command Line]", NULL, TRUE);
+    (void)setfname(curbuf, (char_u *)_("[Command Line]"), NULL, TRUE);
     apply_autocmds(EVENT_BUFFILEPOST, NULL, NULL, FALSE, curbuf);
     set_option_value((char_u *)"bt", 0L, (char_u *)"nofile", OPT_LOCAL);
     curbuf->b_p_ma = TRUE;
@@ -4393,14 +4396,19 @@ open_cmdwin(void)
 	// Avoid command-line window first character being concealed.
 	curwin->w_p_cole = 0;
 # endif
+	// First go back to the original window.
 	wp = curwin;
 	set_bufref(&bufref, curbuf);
 	win_goto(old_curwin);
-	win_close(wp, TRUE);
+
+	// win_goto() may trigger an autocommand that already closes the
+	// cmdline window.
+	if (win_valid(wp) && wp != curwin)
+	    win_close(wp, TRUE);
 
 	// win_close() may have already wiped the buffer when 'bh' is
-	// set to 'wipe'
-	if (bufref_valid(&bufref))
+	// set to 'wipe', autocommands may have closed other windows
+	if (bufref_valid(&bufref) && bufref.br_buf != curbuf)
 	    close_buffer(NULL, bufref.br_buf, DOBUF_WIPE, FALSE, FALSE);
 
 	// Restore window sizes.
